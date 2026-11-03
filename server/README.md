@@ -36,3 +36,15 @@ undo an auto fact: `update ai_facts set active=false where id=…;`
   Other signed-in users (gym app) match no policy → see/change nothing. Anon grants/policies unchanged.
 - "Run checker now": `ai-autofix` also accepts `Authorization: Bearer <owner JWT>` (verified via `/auth/v1/user`),
   CORS for https://elricai.sbs only. The secret never reaches the browser.
+
+## Online answers (`functions/ai-chat`, Android 0.3.6+)
+- Public (verify_jwt off; checks `apikey` = project publishable/anon key). POST JSON
+  `{device, question, history[≤12], image?{mime,data b64}, mode, short, lang, talk, name?, study?, memory?}` →
+  SSE `data: {"t":…}` … `{"done":true,"m":"a|b"}` or `{"error":"failed|blocked|limit"}`.
+  Pre-stream errors: 429 `{status:'limit', scope:'device|ip|provider', retry_after}`, 400, 401, 413, 503.
+- Prompt built server-side (mirrors the app's systemPrompt + relevant `ai_facts`, cached 10 min, + IDENTITY rule).
+- Models: `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite` on 429/5xx/404 (`AI_CHAT_MODELS` overrides), thinking minimal.
+- Abuse guard: `ai_usage` (migration `20261103_ai_chat.sql`) — salted SHA-256 of device id / IP (Edge secret
+  `AI_CHAT_SALT`), 30/h + 100/day per device, 60/h + 200/day per IP; rows pruned after 2 days. Body ≤1.6 MB.
+  No chat text stored or logged.
+- Test hooks (only with header `x-autofix-secret`): `x-elric-test: fail-primary | limit | small-cap`, `x-elric-think`.
