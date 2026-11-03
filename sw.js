@@ -1,7 +1,7 @@
 // Elric AI service worker: keeps the app shell available offline.
 // The model file itself is stored separately by the app (OPFS / Cache API),
 // never by this worker.
-const VERSION = 'elric-shell-v1';
+const VERSION = 'elric-shell-v2';
 const BASE = new URL('./', self.location).pathname;
 const SHELL = ['', 'index.html', 'manifest.webmanifest', 'favicon.ico',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/mark.png'].map((p) => BASE + p);
@@ -26,7 +26,7 @@ self.addEventListener('fetch', (e) => {
   if (req.mode === 'navigate') {
     // Network first for pages, fall back to the cached shell when offline.
     e.respondWith(
-      fetch(req).then((res) => {
+      fetch(req, { cache: 'no-cache' }).then((res) => {
         const copy = res.clone();
         caches.open(VERSION).then((c) => c.put(BASE + 'index.html', copy));
         return res;
