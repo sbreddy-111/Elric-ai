@@ -1,6 +1,7 @@
 import './admin.css';
+import qrcode from 'qrcode-generator';
 import {
-  ApiError, consumeRedirect, countOf, recentSends, ensureFresh, getSession, isOwner, rest, runChecker, sendMagicLink, signOut,
+  ApiError, consumeRedirect, countOf, ensureFresh, getSession, isOwner, rest, runChecker, sendMagicLink, signInWithCode, signOut, totpSetup,
   type Fact, type Feedback,
 } from './api';
 
@@ -134,43 +135,121 @@ const loading = (n = 3) => `<div class="skel-list">${'<div class="skel"></div>'.
 const empty = (title: string, body: string) => `<div class="state"><div class="state-ic">✓</div><b>${esc(title)}</b><p class="muted">${esc(body)}</p></div>`;
 
 // ---------- sign-in screens ----------
-function renderLogin(msg = '', sentTo = '') {
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const LATER = 'Please try again a bit later.';
+const friendly = (err: unknown) => {
+  const e = err as ApiError, m = e?.message || '';
+  return e?.status === 429 || /rate|limit|too many|seconds/i.test(m) ? LATER : (m || LATER);
+};
+
+function renderLogin(msg = '', sentTo = '', mode: 'code' | 'link' = 'code') {
   app.className = 'auth';
+  const last = localStorage.getItem('elric-admin-email') || '';
   app.innerHTML = `<div class="auth-card">
     <img src="../icons/mark.png" alt="" class="auth-mark" width="48" height="48">
     <h1>Elric AI Admin</h1>
-    ${sentTo ? `<div class="sent">${icon('mail')}<div><b>Check your email</b><p class="muted">We sent a sign-in link to <b>${esc(sentTo)}</b>. Tap it once and open it in this browser. Each link works one time, in the first browser that opens it. It can take a minute.</p></div></div>
-      <button class="btn block" id="again">Use a different email</button>`
-    : `<p class="muted">Sign in with your email to manage feedback, reports and facts.</p>
+    ${sentTo ? `<div class="sent">${icon('mail')}<div><b>Check your email</b><p class="muted">We sent a sign-in link to <b>${esc(sentTo)}</b>. Open it in this browser. It can take a minute.</p></div></div>
+      <button class="btn block" id="again">Back to sign in</button>`
+    : mode === 'link' ? `<p class="muted">We'll email you a one-time sign-in link.</p>
       <form id="lf" novalidate>
         <label for="em">Email</label>
-        <input id="em" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="you@example.com" required>
+        <input id="em" type="email" inputmode="email" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="you@example.com" value="${esc(last)}" required>
         ${msg ? `<p class="form-err">${esc(msg)}</p>` : ''}
-        <button class="btn primary block" type="submit" id="sb">Send sign-in link</button>
-      </form>`}
-    <p class="fine">${icon('lock')} Private admin area</p>
+        <button class="btn primary block" type="submit" id="sb">Email me a link</button>
+      </form>
+      <button class="linkish" id="tocode">Back to sign in with a code</button>`
+    : `<p class="muted">Sign in with your email and the code from your authenticator app.</p>
+      <form id="cf" novalidate>
+        <label for="em">Email</label>
+        <input id="em" type="email" inputmode="email" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="you@example.com" value="${esc(last)}" required>
+        <label for="cd" class="mt">6-digit code from your authenticator app</label>
+        <input id="cd" class="code-in" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="7" placeholder="123 456" required>
+        ${msg ? `<p class="form-err">${esc(msg)}</p>` : ''}
+        <button class="btn primary block" type="submit" id="sb">Sign in</button>
+      </form>
+      <button class="linkish" id="tolink">Forgot / not set up yet? Email me a link</button>`}
+    <p class="fine">${icon('lock')} Private admin area · stays signed in on this device</p>
   </div>`;
   $('#again')?.addEventListener('click', () => renderLogin());
+  $('#tolink')?.addEventListener('click', () => renderLogin('', '', 'link'));
+  $('#tocode')?.addEventListener('click', () => renderLogin());
+  const em = $<HTMLInputElement>('#em'), cd = $<HTMLInputElement>('#cd');
+  const checkEmail = () => {
+    const email = em.value.trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) { renderLogin('Please enter a valid email address.', '', mode); return null; }
+    if (!isOwner(email)) { renderDenied(email); return null; }
+    localStorage.setItem('elric-admin-email', email);
+    return email;
+  };
+  cd?.addEventListener('input', () => {
+    const d = cd.value.replace(/\D/g, '').slice(0, 6);
+    cd.value = d;
+    if (d.length === 6 && EMAIL_RE.test(em.value.trim())) $<HTMLFormElement>('#cf').requestSubmit();
+  });
+  $('#cf')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = checkEmail(); if (!email) return;
+    const code = cd.value.replace(/\D/g, '');
+    if (code.length !== 6) { renderLogin('Please enter the 6-digit code.'); return; }
+    const b = $<HTMLButtonElement>('#sb'); b.disabled = true; b.textContent = 'Signing in…'; cd.disabled = true;
+    try { const s = await signInWithCode(email, code); if (!isOwner(s.email)) { renderDenied(s.email); return; } startApp(); }
+    catch (err) { renderLogin(friendly(err)); }
+  });
   $('#lf')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = $<HTMLInputElement>('#em').value.trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { renderLogin('Please enter a valid email address.'); return; }
-    if (!isOwner(email)) { renderDenied(email); return; }
+    const email = checkEmail(); if (!email) return;
     const b = $<HTMLButtonElement>('#sb'); b.disabled = true; b.textContent = 'Sending…';
     try { await sendMagicLink(email); renderLogin('', email); }
-    catch (err) {
-      const msg = (err as Error).message, secs = /after (\d+) seconds?/i.exec(msg);
-      let m = msg;
-      if (secs) m = `Please wait ${secs[1]} seconds, then send the link again.`;
-      else if ((err as ApiError).status === 429 || /rate|limit/i.test(msg)) {
-        const first = recentSends()[0];
-        const when = first ? new Date(first + 3600e3).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
-        m = `Only 2 sign-in emails can be sent per hour, and that limit is used up. ${when ? `Try again after about ${when}.` : 'Try again in about an hour.'} If you already got a link, use the newest one.`;
-      }
-      renderLogin(m);
-    }
+    catch (err) { renderLogin(friendly(err), '', 'link'); }
   });
-  $<HTMLInputElement>('#em')?.focus();
+  (last && cd ? cd : em)?.focus();
+}
+
+// ---------- authenticator setup (signed-in owner) ----------
+async function openAuthenticator() {
+  openDrawer(`${drawerHead('Authenticator app')}<div class="d-body" id="totp">${loading(2)}</div>`);
+  const body = () => $('#totp');
+  let st: { active: boolean };
+  try { st = await totpSetup('status'); } catch (e) { body().innerHTML = `<p class="form-err">${esc(friendly(e))}</p>`; return; }
+  body().innerHTML = `
+    <p>${st.active ? '<b>✓ Authenticator is set up.</b> You sign in with your email and the 6-digit code from the app.' : 'Set up an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password…) so you can sign in with a 6-digit code instead of an email link.'}</p>
+    <button class="btn primary" id="tstart">${st.active ? 'Reset authenticator' : 'Set up authenticator'}</button>
+    ${st.active ? '<p class="muted small">Reset makes a new key. Your current code keeps working until you finish the new setup.</p>' : ''}`;
+  $('#tstart').onclick = async () => {
+    const b = $<HTMLButtonElement>('#tstart'); b.disabled = true; b.textContent = 'Preparing…';
+    let k: { secret: string; uri: string };
+    try { k = await totpSetup('start'); } catch (e) { b.disabled = false; b.textContent = 'Try again'; toast(friendly(e), 'err'); return; }
+    const grouped = k.secret.match(/.{1,4}/g)!.join(' ');
+    body().innerHTML = `
+      <div><label>1 · Add this key to your authenticator app</label>
+        <div class="totp-key" id="tkey">${esc(grouped)}</div>
+        <div class="row"><button class="btn" id="tcopy">Copy key</button><a class="btn primary" href="${esc(k.uri)}">Add to authenticator app</a></div>
+        <p class="muted small">In the app choose “Enter a setup key”, account <b>Elric AI Admin</b>, time-based. Or tap “Add to authenticator app” on this phone.</p>
+        <details class="qr-alt" id="qrd"><summary>Show QR code instead</summary><div id="qr"></div></details>
+      </div>
+      <form id="tconf" novalidate>
+        <label for="tcd">2 · Enter the 6-digit code the app shows</label>
+        <input id="tcd" class="code-in" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="6" placeholder="123456">
+        <p class="form-err" id="terr" hidden></p>
+        <button class="btn primary block" id="tok" type="submit">Turn on</button>
+      </form>`;
+    $('#tcopy').onclick = async () => { try { await navigator.clipboard.writeText(k.secret); toast('Key copied', 'ok'); } catch { getSelection()?.selectAllChildren($('#tkey')); } };
+    $('#qrd').addEventListener('toggle', () => {
+      if (!$('#qr').innerHTML) { const q = qrcode(0, 'M'); q.addData(k.uri); q.make(); $('#qr').innerHTML = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); }
+    });
+    const tcd = $<HTMLInputElement>('#tcd');
+    tcd.oninput = () => { tcd.value = tcd.value.replace(/\D/g, '').slice(0, 6); };
+    $('#tconf').onsubmit = async (e) => {
+      e.preventDefault();
+      const err = $('#terr');
+      if (tcd.value.length !== 6) { err.hidden = false; err.textContent = 'Please enter the 6-digit code.'; return; }
+      const ok = $<HTMLButtonElement>('#tok'); ok.disabled = true; ok.textContent = 'Checking…';
+      try {
+        await totpSetup('confirm', tcd.value);
+        body().innerHTML = `<p><b>✓ Authenticator is on.</b></p><p class="muted">Next time, sign in with your email and the 6-digit code from the app. You stay signed in on this device.</p><button class="btn primary" data-act="close-drawer">Done</button>`;
+      } catch (x) { ok.disabled = false; ok.textContent = 'Turn on'; err.hidden = false; err.textContent = friendly(x); tcd.select(); }
+    };
+  };
 }
 
 function renderDenied(email: string) {
@@ -204,15 +283,19 @@ function renderShell() {
     <nav class="tabbar" id="tabbar"></nav>
     <div class="drawer-wrap" id="drawer" hidden><div class="drawer" role="dialog" aria-modal="true"></div></div>
     <div id="toasts" class="toasts" aria-live="polite"></div>`;
+  if (!shellWired) { shellWired = true; wireShell(); }
+  renderChrome();
+  renderView();
+  refreshBadge();
+}
+let shellWired = false;
+function wireShell() {
   app.addEventListener('click', onClick);
   window.addEventListener('hashchange', () => {
     const v = location.hash.replace('#/', '') as View;
     if (VIEWS.some((x) => x.id === v) && v !== view) { view = v; renderChrome(); renderView(); }
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
-  renderChrome();
-  renderView();
-  refreshBadge();
 }
 
 function renderChrome() {
@@ -225,10 +308,12 @@ function renderChrome() {
   $('#topactions').innerHTML = `
     <button class="btn primary" data-act="run" ${checking ? 'disabled' : ''}>${checking ? '<span class="spin"></span> <span>Checking…</span>' : icon('play') + ' <span>Run checker now</span>'}</button>
     <button class="icon-btn m-only" data-act="theme" aria-label="Switch theme">${icon(light ? 'moon' : 'sun')}</button>
+    <button class="icon-btn m-only" data-act="totp" aria-label="Authenticator app">${icon('lock')}</button>
     <button class="icon-btn m-only" data-act="signout" aria-label="Sign out">${icon('out')}</button>`;
   $('#sidefoot').innerHTML = `
     <div class="who" title="${esc(getSession()?.email)}">${esc(getSession()?.email)}</div>
     <button class="side-btn" data-act="theme">${icon(light ? 'moon' : 'sun')} ${light ? 'Dark mode' : 'Light mode'}</button>
+    <button class="side-btn" data-act="totp">${icon('lock')} Authenticator app</button>
     <button class="side-btn" data-act="signout">${icon('out')} Sign out</button>`;
 }
 
@@ -252,6 +337,7 @@ async function onClick(e: MouseEvent) {
   if (act === 'theme') toggleTheme();
   else if (act === 'signout') { await signOut(); renderLogin(); }
   else if (act === 'run') runNow();
+  else if (act === 'totp') openAuthenticator();
   else if (act === 'close-drawer') closeDrawer();
 }
 
@@ -628,7 +714,16 @@ async function boot() {
   if (s) { try { s = await ensureFresh(); } catch { s = getSession(); } }
   if (!s) { renderLogin(); return; }
   if (!isOwner(s.email)) { renderDenied(s.email); return; }
+  startApp();
+}
+
+let started = false;
+function startApp() {
   renderShell();
+  // first time in: offer authenticator setup straight away
+  totpSetup('status').then((t) => { if (!t?.active) openAuthenticator(); }).catch(() => {});
+  if (started) return;
+  started = true;
   // keep the session fresh while the tab is open
   setInterval(() => { ensureFresh().catch(() => {}); }, 5 * 60 * 1000);
   document.addEventListener('visibilitychange', () => {

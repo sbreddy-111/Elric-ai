@@ -1,4 +1,4 @@
-// Elric AI Admin – tiny Supabase client (Auth magic link + PostgREST), no dependencies.
+// Elric AI Admin – tiny Supabase client (authenticator-code sign-in + email link backup, PostgREST), no dependencies.
 export const SB_URL = 'https://hqsqpiwmozgsxiizhaml.supabase.co';
 export const SB_KEY = 'sb_publishable_Yv1D_ZUk38W3-ZvYdoAD8A_-fx5gPCT'; // public key (same as the apps)
 export const OWNER = 'theinfo222@gmail.com';
@@ -44,16 +44,36 @@ async function authFetch(path: string, init: RequestInit = {}, token?: string) {
 
 export class ApiError extends Error { constructor(m: string, public status = 0) { super(m); } }
 
-const SENT = 'elric-admin-sent';
-/** Times (ms) of sign-in emails sent from this browser in the last hour. */
-export function recentSends(): number[] {
-  try { return (JSON.parse(localStorage.getItem(SENT) || '[]') as number[]).filter((t) => Date.now() - t < 3600e3); } catch { return []; }
+/** Main sign-in: owner email + 6-digit authenticator code → one-time token → session (kept on this device). */
+export async function signInWithCode(email: string, code: string) {
+  const r = await fetch(SB_URL + '/functions/v1/admin-login', {
+    method: 'POST', headers: { apikey: SB_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email.trim().toLowerCase(), code: code.replace(/\s/g, '') }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j?.token_hash) throw new ApiError(j?.error || 'Please try again a bit later.', r.status);
+  const v = await authFetch('verify', { method: 'POST', body: JSON.stringify({ type: 'magiclink', token_hash: j.token_hash }) });
+  return fromTokens(v.access_token, v.refresh_token, v.expires_in);
 }
+
+/** Authenticator setup (owner session): status | start | confirm. */
+export async function totpSetup(action: 'status' | 'start' | 'confirm', code?: string): Promise<any> {
+  const s = await ensureFresh();
+  if (!s) throw new ApiError('Signed out', 401);
+  const r = await fetch(SB_URL + '/functions/v1/admin-totp-setup', {
+    method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + s.access_token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, code }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new ApiError(j?.error || 'Something went wrong. Please try again a bit later.', r.status);
+  return j;
+}
+
+/** Backup: one-time sign-in link by email ("Forgot password?"). */
 export async function sendMagicLink(email: string) {
   await authFetch('otp?redirect_to=' + encodeURIComponent(REDIRECT), {
     method: 'POST', body: JSON.stringify({ email: email.trim().toLowerCase(), create_user: false }),
   });
-  try { localStorage.setItem(SENT, JSON.stringify([...recentSends(), Date.now()])); } catch { /* ignore */ }
 }
 
 async function fromTokens(access_token: string, refresh_token: string, expires_in: number): Promise<Session> {
@@ -83,6 +103,8 @@ export async function consumeRedirect(): Promise<string | null> {
 }
 
 export async function ensureFresh(): Promise<Session | null> {
+  const stored = load();
+  if (stored && (!session || stored.expires_at > session.expires_at)) session = stored; // another tab refreshed
   if (!session) return null;
   if (session.expires_at - 90 > Date.now() / 1000) return session;
   if (!refreshing) {
@@ -91,7 +113,9 @@ export async function ensureFresh(): Promise<Session | null> {
         const j = await authFetch('token?grant_type=refresh_token', { method: 'POST', body: JSON.stringify({ refresh_token: session!.refresh_token }) });
         await fromTokens(j.access_token, j.refresh_token, j.expires_in);
       } catch (e) {
-        if ((e as ApiError).status && (e as ApiError).status < 500) save(null);
+        const st = (e as ApiError).status, other = load();
+        if (other && other.refresh_token !== session?.refresh_token) { session = other; return; } // refreshed in another tab
+        if (st && st < 500 && st !== 429) save(null);
         throw e;
       } finally { refreshing = null; }
     })();

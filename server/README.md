@@ -21,8 +21,16 @@ undo an auto fact: `update ai_facts set active=false where id=…;`
 
 ## Elric AI Admin (https://elricai.sbs/admin/)
 - Web page `web/admin/index.html` + `web/src/admin/*` (separate Vite entry; the service worker ignores `/admin/`).
-- Sign-in: Supabase Auth magic link, owner email only (`theinfo222@gmail.com`, existing user; `create_user:false`).
-  `https://elricai.sbs/admin/` is in the Auth redirect allow list.
+- Sign-in: owner email + 6-digit authenticator code (TOTP). Backup: "Forgot / not set up yet? Email me a link"
+  (Supabase magic link, `create_user:false`; `https://elricai.sbs/admin/` is in the Auth redirect allow list).
+  Session kept in localStorage with auto refresh (multi-tab safe). No shared Auth settings changed.
+- `functions/admin-login` (verify_jwt off): owner email + code → RFC 6238 (SHA-1, 30 s, ±1 step), reused codes
+  rejected (atomic `last_step`), 5 wrong → 15 min lock; then Admin API `generate_link` (magiclink, no email) and
+  returns only `token_hash`; the page calls `/auth/v1/verify {type:'magiclink', token_hash}`. Generic errors.
+- `functions/admin-totp-setup` (owner JWT checked via /auth/v1/user): status | start (pending key, 30 min) | confirm.
+  The current key keeps working until a new one is confirmed. Shared TOTP code: `functions/_totp-common.ts.txt`
+  (inlined into each index.ts). Reset everything: `update ai_admin_totp set secret=null, pending_secret=null where id=1;`
+- `migrations/20261103_ai_admin_totp.sql`: `ai_admin_totp` (single row; RLS on, no policies, anon/authenticated revoked).
 - `supabase/migrations/20261103_ai_admin.sql`: `authenticated` table grants + RLS policies `ai_*_owner_all`
   (`lower(auth.jwt()->>'email') = 'theinfo222@gmail.com'`), and `ai_admin_checker_status()` (last cron run, owner only).
   Other signed-in users (gym app) match no policy → see/change nothing. Anon grants/policies unchanged.

@@ -254,3 +254,12 @@ select{appearance:none;-webkit-appearance:none;padding-right:30px;background-ima
   .toolbar select{flex:1}
   .search{min-width:100%}
 }
+/* authenticator sign-in */
+.mt{margin-top:14px}
+.code-in{font-size:24px!important;letter-spacing:.3em;text-align:center;font-variant-numeric:tabular-nums}
+.linkish{display:block;margin:16px auto 0;background:none;border:0;color:var(--mu);font-size:13.5px;text-decoration:underline;cursor:pointer}
+.linkish:hover{color:var(--tx)}
+.totp-key{font:600 22px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;word-spacing:.35em;padding:14px;margin:6px 0 10px;border-radius:12px;background:var(--s2);border:1px solid var(--line);user-select:all;-webkit-user-select:all;word-break:break-word}
+.qr-alt{margin-top:10px;font-size:13px;color:var(--mu)}
+.qr-alt summary{cursor:pointer}
+.qr-alt #qr{width:160px;margin-top:8px;background:#fff;padding:6px;border-radius:8px}

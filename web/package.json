@@ -10,7 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@mediapipe/tasks-genai": "0.10.30"
+    "@mediapipe/tasks-genai": "0.10.30",
+    "qrcode-generator": "^1.4.4"
   },
   "devDependencies": {
     "@webgpu/types": "^0.1.60",
