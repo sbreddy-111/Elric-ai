@@ -4,6 +4,7 @@ import * as E from './engine';
 
 type Mode = 'study' | 'shopping' | 'general';
 let mode: Mode = 'study';
+let short = localStorage.getItem('elric.length') !== 'long';
 let turns: E.Turn[] = [];
 interface Chat { id: string; title: string; mode: Mode; turns: E.Turn[]; at: number }
 const CHATS_KEY = 'elric.chats';
@@ -256,9 +257,12 @@ async function startLoad() {
 
 function system(): string {
   let s = E.SYSTEM_PROMPT;
-  if (mode === 'study') s += ' Mode: Study. Explain step by step, like a patient tutor for Indian students.';
+  if (mode === 'study') s += ' Mode: Study. Be a patient tutor for Indian students.';
   if (mode === 'shopping') s += ' Mode: Shopping. You have NO access to live prices, stock or offers. Never state or guess specific prices. Help compare features and explain what to look for, and say live prices are coming soon.';
   if (getLang() === 'hi') s += ' The user prefers Hindi.';
+  s += short
+    ? ' ANSWER LENGTH: SHORT. Reply in at most 4 short sentences or 5 bullet points (under 80 words). Give the key answer first. No greetings, no repeating the question. If the user sends several questions, answer each in one or two lines.'
+    : ' ANSWER LENGTH: DETAILED. Explain step by step with an example.';
   return s;
 }
 
@@ -316,11 +320,15 @@ function sheet(html: string) {
 function modeSheet() {
   const ms: Mode[] = ['study', 'shopping', 'general'];
   const desc: Record<Mode, keyof Strings> = { study: 'modeStudyDesc', shopping: 'modeShoppingDesc', general: 'modeGeneralDesc' };
-  sheet(ms.map((m) => `<button class="row ${m === mode ? 'sel' : ''}" data-m="${m}"><b>${t(modeKey[m])}</b><span>${t(desc[m])}</span></button>`).join(''));
+  sheet(ms.map((m) => `<button class="row ${m === mode ? 'sel' : ''}" data-m="${m}"><b>${t(modeKey[m])}</b><span>${t(desc[m])}</span></button>`).join('')
+    + `<div class="sec">${t('lenTitle')}</div>`
+    + `<button class="row ${short ? 'sel' : ''}" data-l="short"><b>${t('lenShort')}</b><span>${t('lenShortDesc')}</span></button>`
+    + `<button class="row ${!short ? 'sel' : ''}" data-l="long"><b>${t('lenLong')}</b><span>${t('lenLongDesc')}</span></button>`);
+  document.querySelectorAll<HTMLButtonElement>('[data-l]').forEach((b) => (b.onclick = () => { short = b.dataset.l === 'short'; localStorage.setItem('elric.length', short ? 'short' : 'long'); shell(); }));
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.3.1';
+const APP_VERSION = '0.3.2';
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
   ['Elric Basic model weights (Gemma 3 1B, iPhone)', 'Gemma Terms of Use', 'https://ai.google.dev/gemma/terms'],
