@@ -127,10 +127,18 @@ class ElricStore(context: Context) {
     get() = prefs.getString("active_model", "") ?: ""
     set(v) = prefs.edit().putString("active_model", v).apply()
 
-  /** Online answers when available: on by default. */
+  /** The user confirmed they are 18 or older (needed for online answers). False until they do. */
+  var age18: Boolean
+    get() = prefs.getBoolean("age18", false)
+    set(v) = prefs.edit().putBoolean("age18", v).apply()
+
+  /**
+   * Online answers: off by default, and only ever on after the user confirmed they are 18 or older
+   * (older installs that never confirmed are treated as off).
+   */
   var onlineOn: Boolean
-    get() = prefs.getBoolean("online_on", true)
-    set(v) = prefs.edit().putBoolean("online_on", v).apply()
+    get() = age18 && prefs.getBoolean("online_on", false)
+    set(v) = prefs.edit().putBoolean("online_on", v && age18).apply()
 
   /** Memory is on by default. */
   var memoryOn: Boolean

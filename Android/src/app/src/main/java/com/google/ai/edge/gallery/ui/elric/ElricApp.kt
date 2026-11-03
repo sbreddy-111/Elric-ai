@@ -70,11 +70,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -792,6 +794,26 @@ private fun ElricDrawer(
   var query by rememberSaveable { mutableStateOf("") }
   var menuFor by remember { mutableStateOf<String?>(null) }
   var renaming by remember { mutableStateOf<String?>(null) }
+  var askAge by remember { mutableStateOf(false) }
+  if (askAge) {
+    AlertDialog(
+      onDismissRequest = { askAge = false },
+      containerColor = p.surface,
+      title = { EText(tr(T.onlineAnswers), size = 17.sp, weight = FontWeight.SemiBold) },
+      text = { EText(tr(T.age18Text), size = 14.sp, color = p.muted) },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            askAge = false
+            vm.confirmAge18AndGoOnline()
+          }
+        ) {
+          EText(tr(T.age18Yes), color = p.goldInk, weight = FontWeight.SemiBold)
+        }
+      },
+      dismissButton = { TextButton(onClick = { askAge = false }) { EText(tr(T.notNow), color = p.muted) } },
+    )
+  }
   val shape = RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)
   var dragX by remember { mutableStateOf(0f) }
   Column(
@@ -897,7 +919,9 @@ private fun ElricDrawer(
             EText(tr(T.off), size = 12.sp, weight = FontWeight.Medium, color = if (!vm.onlineOn) p.goldInk else p.muted)
           }
         },
-        onClick = { vm.updateOnlineOn(!vm.onlineOn) },
+        onClick = {
+          if (!vm.onlineOn && !vm.age18) askAge = true else vm.updateOnlineOn(!vm.onlineOn)
+        },
       )
       TinyText(tr(T.onlineHow), modifier = Modifier.padding(start = 44.dp, end = 12.dp, bottom = 4.dp))
       DrawerRow(

@@ -217,16 +217,28 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
   var memoryOn by mutableStateOf(store.memoryOn)
     private set
 
-  /** Online answers when available (on by default). Offline answers are used when it can't. */
+  /** The user confirmed they are 18 or older; online answers need it. */
+  var age18 by mutableStateOf(store.age18)
+    private set
+
+  /** Online answers (off by default, 18+ only). Offline answers are used when it can't. */
   var onlineOn by mutableStateOf(store.onlineOn)
     private set
 
+  /** The user confirmed they are 18 or older: remember it and turn online answers on. */
+  fun confirmAge18AndGoOnline() {
+    age18 = true
+    store.age18 = true
+    updateOnlineOn(true)
+  }
+
   fun updateOnlineOn(on: Boolean) {
-    onlineOn = on
-    store.onlineOn = on
+    val v = on && age18
+    onlineOn = v
+    store.onlineOn = v
     onlineFails = 0
     onlineBlockedUntil = 0L
-    if (!on) onlineCall?.cancel()
+    if (!v) onlineCall?.cancel()
   }
 
   /** The online answer being streamed, if any. */

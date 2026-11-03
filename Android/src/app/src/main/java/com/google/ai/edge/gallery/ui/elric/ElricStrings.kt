@@ -239,6 +239,13 @@ object T {
       "When online, answers come from our server; offline, from your phone.",
       "इंटरनेट होने पर जवाब हमारे सर्वर से, बिना इंटरनेट आपके फ़ोन से।",
     )
+  val age18Text =
+    Str(
+      "Online answers are for users 18 or older. Questions are sent to our server and an AI provider.",
+      "ऑनलाइन जवाब 18 साल या उससे ज़्यादा उम्र वालों के लिए हैं। सवाल हमारे सर्वर और एक AI प्रदाता को भेजे जाते हैं।",
+    )
+  val age18Yes = Str("I'm 18 or older", "मेरी उम्र 18 या ज़्यादा है")
+  val notNow = Str("Not now", "अभी नहीं")
   val on = Str("On", "चालू")
   val off = Str("Off", "बंद")
   val chatOnlineNow = Str("Chat online while it downloads", "डाउनलोड होने तक ऑनलाइन चैट करें")
