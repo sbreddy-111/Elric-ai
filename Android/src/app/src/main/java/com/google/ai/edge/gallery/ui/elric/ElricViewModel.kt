@@ -120,6 +120,15 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
   var activeModelName by mutableStateOf(store.activeModel)
     private set
 
+  var memoryOn by mutableStateOf(store.memoryOn)
+    private set
+
+  /** What Elric remembers about the user, newest first. Only on this phone. */
+  val memories = mutableStateListOf<ElricMemory>().apply { addAll(store.loadMemories()) }
+
+  /** True when the question being answered added a memory. */
+  private var replySavedMemory = false
+
   val chats = mutableStateListOf<ElricChat>().apply { addAll(store.loadChats()) }
   val turns = mutableStateListOf<ElricTurn>()
 
@@ -193,6 +202,36 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
   fun updateActiveModel(modelName: String) {
     activeModelName = modelName
     store.activeModel = modelName
+  }
+
+  // ---------------------------------------------------------------- memory
+
+  fun updateMemoryOn(on: Boolean) {
+    memoryOn = on
+    store.memoryOn = on
+  }
+
+  fun deleteMemory(m: ElricMemory) {
+    memories.remove(m)
+    store.saveMemories(memories.toList())
+  }
+
+  fun clearMemories() {
+    memories.clear()
+    store.saveMemories(emptyList())
+  }
+
+  /** Saves what [question] asks Elric to remember, with simple rules. Returns true if saved. */
+  private fun rememberFrom(question: String): Boolean {
+    if (!memoryOn) return false
+    val f = ElricMemoryRules.find(question) ?: return false
+    val next = ElricMemoryRules.add(memories.toList(), f, System.currentTimeMillis()) ?: return false
+    memories.clear()
+    memories.addAll(next)
+    store.saveMemories(next)
+    // "give short answers" / "give detailed answers" also sets the answer-length switch.
+    f.short?.let { updateShort(it) }
+    return true
   }
 
   // ---------------------------------------------------------------- chats
@@ -302,9 +341,11 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         )
       ElricMode.GENERAL -> {}
     }
-    if (lang == ElricLang.HI) sb.append(" The user prefers Hindi.")
-    if (name.isNotBlank()) sb.append(" The user's name is ${name.trim()}.")
-    if (study.isNotBlank()) {
+    val mem = if (memoryOn) memories.toList() else emptyList()
+    fun has(kind: String) = mem.any { it.kind == kind }
+    if (lang == ElricLang.HI && !has("lang")) sb.append(" The user prefers Hindi.")
+    if (name.isNotBlank() && !has("name")) sb.append(" The user's name is ${name.trim()}.")
+    if (study.isNotBlank() && !has("study")) {
       sb.append(" The user studies: $study. Match explanations to this level.")
     }
     sb.append(
@@ -316,6 +357,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         " ANSWER LENGTH: DETAILED. Explain step by step with an example."
       }
     )
+    sb.append(ElricMemoryRules.promptBlock(mem.filter { it.kind != "length" }))
     return sb.toString()
   }
 
@@ -547,6 +589,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     if (q.isEmpty() || busy) return
     val history = turns.filter { it.failed != true && it.text.isNotBlank() }.toList()
     turns.add(ElricTurn(role = "user", text = q))
+    replySavedMemory = rememberFrom(q)
     if (model == null || (model.instance == null && !modelFileComplete(model))) {
       // Never fake an answer: the chat shows that a (complete) model is needed.
       if (model != null) Log.w(TAG, "Model file for ${model.name} is incomplete")
@@ -557,7 +600,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     needsModel = false
     busy = true
     stopRequested = false
-    turns.add(ElricTurn(role = "model", text = ""))
+    turns.add(ElricTurn(role = "model", text = "", memSaved = if (replySavedMemory) true else null))
     val replyIndex = turns.size - 1
     val system = systemPrompt()
 
@@ -693,7 +736,10 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
   }
 
   private fun finishReply(index: Int, turn: ElricTurn) {
-    if (index in turns.indices) turns[index] = turn
+    if (index in turns.indices) {
+      turns[index] = if (replySavedMemory) turn.copy(memSaved = true) else turn
+    }
+    replySavedMemory = false
     busy = false
     streamTick++
     persist()

@@ -521,6 +521,9 @@ private fun AnswerBlock(
         linkColor = p.indigoInk,
       )
     }
+    if (turn.memSaved == true && !streaming) {
+      TinyText(tr(T.savedToMemory), color = p.green)
+    }
     if (!streaming && turn.failed != true) {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         Act(Icons.Outlined.ContentCopy, tr(T.copy), false, onCopy)

@@ -130,6 +130,7 @@ private enum class Screen {
   CHAT,
   MODELS,
   PRIVACY,
+  MEMORY,
 }
 
 private enum class Overlay {
@@ -295,7 +296,7 @@ fun ElricApp(
     listening = false
   }
   BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
-  BackHandler(enabled = overlay == Overlay.NONE && !listening && screen in setOf(Screen.CHAT, Screen.MODELS, Screen.PRIVACY, Screen.DOWNLOAD) ||
+  BackHandler(enabled = overlay == Overlay.NONE && !listening && screen in setOf(Screen.CHAT, Screen.MODELS, Screen.PRIVACY, Screen.MEMORY, Screen.DOWNLOAD) ||
     (overlay == Overlay.NONE && !listening && screen == Screen.ABOUT && vm.onboarded)) {
     when (screen) {
       Screen.CHAT -> newChat()
@@ -453,6 +454,15 @@ fun ElricApp(
               onUse = { m -> vm.updateActiveModel(m.name) },
             )
           Screen.PRIVACY -> PrivacyScreen(onBack = { go(returnTo) })
+          Screen.MEMORY ->
+            MemoryScreen(
+              memories = vm.memories,
+              on = vm.memoryOn,
+              onToggle = { vm.updateMemoryOn(it) },
+              onDelete = { vm.deleteMemory(it) },
+              onClearAll = { vm.clearMemories() },
+              onBack = { go(returnTo) },
+            )
         }
       }
 
@@ -524,6 +534,7 @@ fun ElricApp(
           },
           onAboutYou = { openFromMenu(Screen.ABOUT) },
           onModels = { openFromMenu(Screen.MODELS) },
+          onMemory = { openFromMenu(Screen.MEMORY) },
           onPrivacy = { openFromMenu(Screen.PRIVACY) },
           onAboutApp = { overlay = Overlay.ABOUT_APP },
           onToggleTheme = {
@@ -616,6 +627,7 @@ private fun ElricDrawer(
   onOpenChat: (String) -> Unit,
   onAboutYou: () -> Unit,
   onModels: () -> Unit,
+  onMemory: () -> Unit,
   onPrivacy: () -> Unit,
   onAboutApp: () -> Unit,
   onToggleTheme: () -> Unit,
@@ -718,6 +730,7 @@ private fun ElricDrawer(
     Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
       Box(Modifier.fillMaxWidth().padding(bottom = 6.dp).background(p.line).heightIn(min = 1.dp, max = 1.dp))
       DrawerRow("☺", tr(T.aboutYou), onClick = onAboutYou)
+      DrawerRow("✦", tr(T.memory), onClick = onMemory)
       DrawerRow("▦", tr(T.models), onClick = onModels)
       DrawerRow(
         "अ",

@@ -52,6 +52,8 @@ data class ElricTurn(
   val rating: Int? = null,
   /** True for answers that failed or were stopped before any text; never sent back to the model. */
   val failed: Boolean? = null,
+  /** True when the question this answers added a memory (shows "Saved to memory"). */
+  val memSaved: Boolean? = null,
 ) {
   val isUser: Boolean
     get() = role == "user"
@@ -108,6 +110,36 @@ class ElricStore(context: Context) {
   var activeModel: String
     get() = prefs.getString("active_model", "") ?: ""
     set(v) = prefs.edit().putString("active_model", v).apply()
+
+  /** Memory is on by default. */
+  var memoryOn: Boolean
+    get() = prefs.getBoolean("memory_on", true)
+    set(v) = prefs.edit().putBoolean("memory_on", v).apply()
+
+  /** Memory lines, newest first. Kept only on this phone. */
+  fun loadMemories(): List<ElricMemory> {
+    return try {
+      val json = prefs.getString("memories", null) ?: return emptyList()
+      val type = object : TypeToken<List<ElricMemory>>() {}.type
+      val list: List<ElricMemory>? = gson.fromJson(json, type)
+      list
+        .orEmpty()
+        .filter { m ->
+          val t: Any? = m?.text
+          t != null && m.text.isNotBlank()
+        }
+        .map { m -> m.copy(kind = (m.kind as String?) ?: "") }
+        .sortedByDescending { it.at }
+        .take(ELRIC_MAX_MEMORIES)
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to read memories", e)
+      emptyList()
+    }
+  }
+
+  fun saveMemories(list: List<ElricMemory>) {
+    prefs.edit().putString("memories", gson.toJson(list.take(ELRIC_MAX_MEMORIES))).apply()
+  }
 
   fun loadChats(): List<ElricChat> {
     return try {

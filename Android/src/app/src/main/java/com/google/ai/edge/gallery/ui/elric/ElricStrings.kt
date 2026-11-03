@@ -205,6 +205,22 @@ object T {
   val dark = Str("Dark", "डार्क")
   val light = Str("Light", "लाइट")
   val privacy = Str("Privacy", "प्राइवेसी")
+  val memory = Str("Memory", "मेमोरी")
+
+  // Memory screen
+  val memoryOnly = Str("Saved only on this phone.", "सिर्फ़ इसी फ़ोन पर सेव होता है।")
+  val memorySwitch = Str("Remember things I tell Elric", "जो मैं बताऊँ, Elric याद रखे")
+  val memoryHow =
+    Str(
+      "Say \"remember …\" or a lasting preference like \"give short answers\" or \"call me Ravi\".",
+      "\"याद रखो …\" कहें या कोई पक्की पसंद बताएँ, जैसे \"छोटे जवाब दो\" या \"मुझे रवि बुलाओ\"।",
+    )
+  val memoryEmpty = Str("Nothing saved yet.", "अभी कुछ सेव नहीं है।")
+  val memoryOff = Str("Memory is off. Nothing new is saved or used.", "मेमोरी बंद है। न कुछ नया सेव होगा, न इस्तेमाल होगा।")
+  val clearAll = Str("Clear all", "सब मिटाएँ")
+  val clearAllConfirm =
+    Str("Delete everything Elric remembers about you?", "Elric को आपके बारे में जो याद है, वह सब मिटाएँ?")
+  val savedToMemory = Str("✓ Saved to memory", "✓ मेमोरी में सेव हो गया")
   val aboutElric = Str("About Elric AI", "Elric AI के बारे में")
   val licenses = Str("Open-source licenses", "ओपन-सोर्स लाइसेंस")
   val aboutLine = Str("v{v} · Runs on your phone, private by default", "v{v} · आपके फ़ोन पर चलता है, शुरू से प्राइवेट")

@@ -51,8 +51,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.outlined.VerifiedUser
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -626,5 +629,100 @@ fun PrivacyScreen(onBack: () -> Unit) {
         }
       }
     }
+  }
+}
+
+// ------------------------------------------------------------------ 11 memory
+
+@Composable
+fun MemoryScreen(
+  memories: List<ElricMemory>,
+  on: Boolean,
+  onToggle: (Boolean) -> Unit,
+  onDelete: (ElricMemory) -> Unit,
+  onClearAll: () -> Unit,
+  onBack: () -> Unit,
+) {
+  val p = pal()
+  var confirmClear by remember { mutableStateOf(false) }
+  Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    BackBar(onBack, tr(T.memory))
+    Column(
+      modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Banner(tr(T.memoryOnly), warn = false)
+      Row(
+        modifier =
+          Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(p.surface)
+            .border(1.dp, p.line, RoundedCornerShape(16.dp))
+            .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        EText(tr(T.memorySwitch), size = 14.sp, modifier = Modifier.weight(1f))
+        Switch(
+          checked = on,
+          onCheckedChange = onToggle,
+          colors =
+            SwitchDefaults.colors(
+              checkedThumbColor = p.onGold,
+              checkedTrackColor = p.gold,
+              uncheckedThumbColor = p.muted,
+              uncheckedTrackColor = p.surface2,
+              uncheckedBorderColor = p.line,
+            ),
+        )
+      }
+      TinyText(tr(if (on) T.memoryHow else T.memoryOff), modifier = Modifier.padding(horizontal = 4.dp))
+      if (memories.isEmpty()) {
+        TinyText(tr(T.memoryEmpty), modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
+      } else {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          for (m in memories) {
+            Row(
+              modifier =
+                Modifier.fillMaxWidth()
+                  .clip(RoundedCornerShape(16.dp))
+                  .background(p.surface)
+                  .border(1.dp, p.line, RoundedCornerShape(16.dp))
+                  .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              EText(
+                m.text,
+                size = 14.sp,
+                color = if (on) p.text else p.muted,
+                modifier = Modifier.weight(1f).padding(vertical = 10.dp),
+              )
+              RoundIcon(Icons.Rounded.Close, tr(T.delete), onClick = { onDelete(m) }, size = 44)
+            }
+          }
+        }
+        TextBtn(tr(T.clearAll), onClick = { confirmClear = true }, color = p.danger)
+      }
+    }
+  }
+  if (confirmClear) {
+    AlertDialog(
+      onDismissRequest = { confirmClear = false },
+      containerColor = p.surface,
+      text = { EText(tr(T.clearAllConfirm)) },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            confirmClear = false
+            onClearAll()
+          }
+        ) {
+          EText(tr(T.clearAll), color = p.danger, weight = FontWeight.SemiBold)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { confirmClear = false }) { EText(tr(T.cancel), color = p.muted) }
+      },
+    )
   }
 }
