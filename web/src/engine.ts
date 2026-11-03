@@ -194,6 +194,13 @@ export async function partialBytes(): Promise<number> {
   if (isStored()) return 0;
   const hyb = Number(localStorage.getItem(HYBRID_AT) || 0);
   if (hyb > 0) return piecesBytes(hyb / CHUNK);
+  if (isIOS) {
+    const root = await opfsRoot();
+    try {
+      const old = root ? (await (await root.getFileHandle(PART_NAME())).getFile()).size : 0;
+      if (old >= CHUNK) return old - (old % CHUNK);
+    } catch { /* none */ }
+  }
   const root = await opfsRoot();
   let opfs = 0;
   try {
@@ -278,7 +285,18 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
   const canResume = !isIOS && !!root && typeof (FileSystemFileHandle.prototype as any).createWritable === 'function';
   const hyb = Number(localStorage.getItem(HYBRID_AT) || 0);
   if (hyb > 0) return downloadPieces(onProgress, signal, hyb / CHUNK);
-  if (!canResume) return downloadPieces(onProgress, signal);
+  if (!canResume) {
+    // Keep bytes an earlier version saved in the .part file instead of downloading them again.
+    try {
+      const old = root ? (await (await root.getFileHandle(PART_NAME())).getFile()).size : 0;
+      const keep = old - (old % CHUNK);
+      if (keep > 0) {
+        localStorage.setItem(HYBRID_AT, String(keep));
+        return downloadPieces(onProgress, signal, keep / CHUNK);
+      }
+    } catch { /* no .part */ }
+    return downloadPieces(onProgress, signal);
+  }
 
   let part: FileSystemFileHandle;
   let done: number;
