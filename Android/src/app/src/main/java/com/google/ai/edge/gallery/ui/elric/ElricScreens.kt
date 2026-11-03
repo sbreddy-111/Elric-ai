@@ -271,8 +271,6 @@ fun OnboardingScreen(
 
 // ------------------------------------------------------------------ 3 about you
 
-val STUDY_OPTIONS = listOf(T.study68, T.study910, T.study1112, T.studyCollege, T.studyExams)
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AboutYouScreen(
@@ -285,8 +283,6 @@ fun AboutYouScreen(
 ) {
   val lang = LocalElricLang.current
   var name by rememberSaveable { mutableStateOf(initialName) }
-  // Stored in English so the system prompt reads the same in both languages.
-  var study by rememberSaveable { mutableStateOf(initialStudy) }
   Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
     if (showBack) BackBar(onBack) else AppBar {}
     Column(
@@ -300,29 +296,10 @@ fun AboutYouScreen(
         placeholder = tr(T.aboutNameHint),
         capitalization = KeyboardCapitalization.Words,
       )
-      EText(
-        tr(T.aboutStudy),
-        modifier = Modifier.padding(top = 8.dp),
-        size = 22.sp,
-        weight = FontWeight.SemiBold,
-        letterSpacing = (-0.22).sp,
-      )
-      FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        for (opt in STUDY_OPTIONS) {
-          EChip(
-            opt.get(lang),
-            selected = study == opt.en,
-            onClick = { study = if (study == opt.en) "" else opt.en },
-          )
-        }
-      }
       TinyText(tr(T.stays))
     }
     Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp)) {
-      GoldButton(buttonText, onClick = { onContinue(name.trim(), study) }, modifier = Modifier.fillMaxWidth())
+      GoldButton(buttonText, onClick = { onContinue(name.trim(), "") }, modifier = Modifier.fillMaxWidth())
     }
   }
 }
