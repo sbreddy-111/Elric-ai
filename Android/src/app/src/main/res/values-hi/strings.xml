@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hindi strings for the Elric AI home screen. Other strings fall back to English. -->
+<resources>
+  <string name="elric_mode_study">पढ़ाई</string>
+  <string name="elric_mode_shopping">शॉपिंग</string>
+  <string name="elric_mode_general">सामान्य</string>
+  <string name="elric_mode_title">Elric AI · %1$s</string>
+  <string name="elric_privacy_on_device">डिवाइस पर · 0 बाइट भेजे गए</string>
+  <string name="elric_privacy_online">ऑनलाइन · कीमतें लाइव जाँची जाती हैं</string>
+  <string name="elric_greeting">नमस्ते</string>
+  <string name="elric_subtitle">भरोसेमंद जवाब। आपकी प्राइवेसी सुरक्षित।</string>
+  <string name="elric_suggestion_photo">फ़ोटो से सवाल हल करें</string>
+  <string name="elric_suggestion_lecture">मेरे लेक्चर को नोट्स में बदलें</string>
+  <string name="elric_suggestion_quiz">मुझसे फ़िज़िक्स पर क्विज़ लें</string>
+  <string name="elric_suggestion_watch">₹5,000 से कम में सबसे अच्छी घड़ी ढूँढें</string>
+  <string name="elric_composer_hint">Elric AI से कुछ भी पूछें</string>
+  <string name="elric_cd_menu">मेन्यू खोलें</string>
+  <string name="elric_cd_new_chat">नई चैट</string>
+  <string name="elric_cd_snap">फ़ोटो लें</string>
+  <string name="elric_cd_mic">बोलकर पूछें</string>
+  <string name="elric_cd_send">भेजें</string>
+  <string name="elric_cd_change_mode">मोड बदलें</string>
+  <string name="elric_drawer_all_tools">सभी टूल</string>
+  <string name="elric_drawer_models">मॉडल</string>
+  <string name="elric_drawer_settings">सेटिंग्स</string>
+  <string name="elric_drawer_licenses">ओपन-सोर्स लाइसेंस</string>
+  <string name="elric_loading">Elric AI तैयार हो रहा है…</string>
+</resources>

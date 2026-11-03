@@ -16,6 +16,8 @@
 
 package com.google.ai.edge.gallery.data
 
+import com.google.ai.edge.gallery.ui.elric.elricModelDisplayName
+import com.google.ai.edge.gallery.ui.elric.elricModelInfo
 import android.os.Build
 import android.util.Log
 import com.google.ai.edge.gallery.common.isPixel10
@@ -320,8 +322,9 @@ data class AllowedModel(
       }
     return Model(
       name = name,
+      displayName = elricModelDisplayName(name) ?: "",
       modelId = modelId,
-      info = finalDescription,
+      info = elricModelInfo(name) ?: finalDescription,
       minDeviceMemoryInGb = minDeviceMemoryInGb,
       configs = configs,
       showRunAgainButton = showRunAgainButton,

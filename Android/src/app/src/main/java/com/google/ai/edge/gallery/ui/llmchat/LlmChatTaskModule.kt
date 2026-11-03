@@ -32,7 +32,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -52,6 +56,10 @@ import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Category
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
+import com.google.ai.edge.gallery.ui.common.chat.ChatMessageText
+import com.google.ai.edge.gallery.ui.common.chat.ChatSide
+import com.google.ai.edge.gallery.ui.common.chat.SendMessageTrigger
+import com.google.ai.edge.gallery.ui.elric.ElricPendingPrompt
 import com.google.ai.edge.gallery.ui.theme.emptyStateContent
 import com.google.ai.edge.gallery.ui.theme.emptyStateTitle
 import com.google.ai.edge.litertlm.Contents
@@ -84,6 +92,7 @@ abstract class BaseLlmChatTask(
   shortDescriptionRes: Int = descriptionRes,
   private val emptyStateTitleRes: Int = labelRes,
   private val emptyStateContentRes: Int = descriptionRes,
+  private val defaultSystemPromptRes: Int? = null,
 ) : CustomTask {
   override val task: Task by lazy {
     Task(
@@ -101,6 +110,7 @@ abstract class BaseLlmChatTask(
       supportImage = true,
       supportAudio = true,
       supportContextCompact = true,
+      defaultSystemPrompt = defaultSystemPromptRes?.let { context.getString(it) } ?: "",
     )
   }
 
@@ -140,11 +150,36 @@ abstract class BaseLlmChatTask(
     LaunchedEffect(task) { viewModel.loadSystemPrompt(task) }
     val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsStateWithLifecycle()
     val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
+
+    // A prompt typed on the Elric home screen is sent once the model is ready.
+    var pendingHomePrompt by remember { mutableStateOf(ElricPendingPrompt.consume(task.id)) }
+    var sendMessageTrigger by remember { mutableStateOf<SendMessageTrigger?>(null) }
+    val modelManagerUiState by myData.modelManagerViewModel.uiState.collectAsState()
+    val llmChatUiState by viewModel.uiState.collectAsState()
+    val selectedModel = modelManagerUiState.selectedModel
+    val modelInitStatus by selectedModel.initStatusFlow.collectAsState()
+    LaunchedEffect(pendingHomePrompt, modelInitStatus, llmChatUiState.isResettingSession) {
+      val prompt = pendingHomePrompt
+      if (
+        prompt != null &&
+          modelInitStatus is Model.InitializationStatus.Initialized &&
+          !llmChatUiState.isResettingSession
+      ) {
+        pendingHomePrompt = null
+        sendMessageTrigger =
+          SendMessageTrigger(
+            model = selectedModel,
+            messages = listOf(ChatMessageText(content = prompt, side = ChatSide.USER)),
+          )
+      }
+    }
+
     LlmChatScreen(
       modelManagerViewModel = myData.modelManagerViewModel,
       navigateUp = myData.onNavUp,
       viewModel = viewModel,
       taskId = task.id,
+      sendMessageTrigger = sendMessageTrigger,
       allowEditingSystemPrompt = true,
       curSystemPrompt = uiSystemPrompt,
       showImagePicker = true,
@@ -229,6 +264,7 @@ constructor(@ApplicationContext context: Context, @AiChatExecutor executor: Agen
     shortDescriptionRes = R.string.task_short_desc_ai_chat,
     emptyStateTitleRes = R.string.aichat_emptystate_title,
     emptyStateContentRes = R.string.aichat_emptystate_content,
+    defaultSystemPromptRes = R.string.elric_system_prompt,
   )
 
 @Module

@@ -19,6 +19,7 @@ package com.google.ai.edge.gallery.ui.navigation
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
@@ -66,6 +67,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.google.ai.edge.gallery.GalleryEvent
+import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskData
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskDataForBuiltinTask
 import com.google.ai.edge.gallery.data.Model
@@ -81,6 +83,9 @@ import com.google.ai.edge.gallery.ui.common.ModelPageAppBar
 import com.google.ai.edge.gallery.ui.common.OnAppBackgroundedEffect
 import com.google.ai.edge.gallery.ui.common.chat.ModelDownloadStatusInfoPanel
 import com.google.ai.edge.gallery.ui.common.tos.TosViewModel
+import com.google.ai.edge.gallery.ui.elric.ElricHomeScreen
+import com.google.ai.edge.gallery.ui.elric.ElricPendingPrompt
+import com.google.ai.edge.gallery.ui.elric.elricModelPreference
 import com.google.ai.edge.gallery.ui.home.HomeScreen
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.MODEL_ALLOWLIST_TEST_FILE_PATH
@@ -96,6 +101,7 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "AGGalleryNavGraph"
 private const val ROUTE_HOMESCREEN = "homepage"
+private const val ROUTE_ELRIC_HOME = "elric_home"
 private const val ROUTE_MODEL_LIST = "model_list"
 private const val ROUTE_MODEL = "route_model"
 private const val ROUTE_BENCHMARK = "benchmark"
@@ -164,6 +170,7 @@ fun GalleryNavHost(
   // The section the model selection screen expands when a task sends the user back to it.
   var modelSelectionTargetToExpand by remember { mutableStateOf<ModelSelectionTarget?>(null) }
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
+  val context = LocalContext.current
 
   // Track whether app is in foreground.
   DisposableEffect(lifecycleOwner) {
@@ -191,13 +198,51 @@ fun GalleryNavHost(
   // Don't keep playing a voice preview after the app leaves the foreground.
   OnAppBackgroundedEffect { modelManagerViewModel.stopActiveVoicePreview() }
 
+  // Opens an existing task screen from the Elric home. Uses a downloaded model when there is one
+  // (preferring Elric Standard, then Elric Lite); otherwise opens the task's model list so the user
+  // can download one. An optional prompt is handed to the chat screen in memory.
+  fun openElricTask(taskId: String, prompt: String?) {
+    val task = modelManagerViewModel.getTaskById(id = taskId)
+    if (task == null) {
+      Toast.makeText(context, context.getString(R.string.elric_loading), Toast.LENGTH_SHORT).show()
+      return
+    }
+    if (prompt != null) ElricPendingPrompt.set(taskId, prompt) else ElricPendingPrompt.clear()
+    val downloaded =
+      task.models.filter { model ->
+        modelManagerViewModel.uiState.value.modelDownloadStatus[model.name]?.status ==
+          ModelDownloadStatusType.SUCCEEDED
+      }
+    val model = downloaded.minByOrNull { elricModelPreference(it.name) }
+    if (model != null) {
+      modelManagerViewModel.selectModel(model)
+      navController.navigate("$ROUTE_MODEL/${task.id}/${model.name}")
+    } else {
+      pickedTask = task
+      enableModelListAnimation = true
+      navController.navigate(ROUTE_MODEL_LIST)
+    }
+  }
+
   NavHost(
     navController = navController,
-    startDestination = ROUTE_HOMESCREEN,
+    startDestination = ROUTE_ELRIC_HOME,
     enterTransition = { EnterTransition.None },
     exitTransition = { ExitTransition.None },
   ) {
-    // Home screen.
+    // Elric home screen (start destination).
+    composable(route = ROUTE_ELRIC_HOME) {
+      ElricHomeScreen(
+        modelManagerViewModel = modelManagerViewModel,
+        tosViewModel = tosViewModel,
+        onOpenTask = { taskId, prompt -> openElricTask(taskId, prompt) },
+        onAllToolsClicked = { navController.navigate(ROUTE_HOMESCREEN) },
+        onModelsClicked = { navController.navigate(ROUTE_MODEL_MANAGER) },
+        modifier = modifier,
+      )
+    }
+
+    // All tools (the original task-grid home screen).
     composable(route = ROUTE_HOMESCREEN) {
       HomeScreen(
         modelManagerViewModel = modelManagerViewModel,
