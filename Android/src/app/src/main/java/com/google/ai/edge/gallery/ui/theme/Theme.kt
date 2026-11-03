@@ -18,7 +18,6 @@ package com.google.ai.edge.gallery.ui.theme
 
 import android.app.Activity
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -157,8 +156,8 @@ val LocalCustomColors = staticCompositionLocalOf { CustomColors() }
 
 val lightCustomColors =
   CustomColors(
-    appTitleGradientColors = listOf(Color(0xFF85B1F8), Color(0xFF3174F1)),
-    tabHeaderBgColor = Color(0xFF3174F1),
+    appTitleGradientColors = listOf(ElricGold, ElricIndigo),
+    tabHeaderBgColor = ElricIndigo,
     taskCardBgColor = surfaceContainerLowestLight,
     taskBgColors =
       listOf(
@@ -195,8 +194,8 @@ val lightCustomColors =
       ),
     taskIconShapeBgColor = Color.White,
     homeBottomGradient = listOf(Color(0x00F8F9FF), Color(0xffFFEFC9)),
-    agentBubbleBgColor = Color(0xFFe9eef6),
-    userBubbleBgColor = Color(0xFF32628D),
+    agentBubbleBgColor = Color(0xFFF2F2F5),
+    userBubbleBgColor = Color(0xFF5050D8),
     linkColor = Color(0xFF32628D),
     successColor = Color(0xff3d860b),
     positiveStrokeColor = Color(0xff3d860b),
@@ -240,8 +239,8 @@ val lightCustomColors =
 
 val darkCustomColors =
   CustomColors(
-    appTitleGradientColors = listOf(Color(0xFF85B1F8), Color(0xFF3174F1)),
-    tabHeaderBgColor = Color(0xFF3174F1),
+    appTitleGradientColors = listOf(ElricGold, ElricIndigo),
+    tabHeaderBgColor = ElricIndigo,
     taskCardBgColor = surfaceContainerHighDark,
     taskBgColors =
       listOf(
@@ -278,10 +277,10 @@ val darkCustomColors =
       ),
     taskIconShapeBgColor = Color(0xFF202124),
     homeBottomGradient = listOf(Color(0x00F8F9FF), Color(0x1AF6AD01)),
-    agentBubbleBgColor = Color(0xFF1b1c1d),
-    userBubbleBgColor = Color(0xFF1f3760),
-    linkColor = Color(0xFF9DCAFC),
-    successColor = Color(0xFFA1CE83),
+    agentBubbleBgColor = ElricSurfaceDark,
+    userBubbleBgColor = Color(0xFF2A2A66),
+    linkColor = Color(0xFF9C9CF6),
+    successColor = ElricSuccess,
     positiveStrokeColor = Color(0xff3d860b),
     negativeStrokeColor = Color(0xffd93025),
     lassoStrokeColor = Color(0xFF00639B),
@@ -340,9 +339,8 @@ fun StatusBarColorController(useDarkTheme: Boolean) {
 @Composable
 fun GalleryTheme(content: @Composable () -> Unit) {
   val themeOverride = ThemeSettings.themeOverride
-  val darkTheme: Boolean =
-    (isSystemInDarkTheme() || themeOverride.value == Theme.THEME_DARK) &&
-      themeOverride.value != Theme.THEME_LIGHT
+  // Elric: dark is the default. Light only when the user explicitly picks it in Settings.
+  val darkTheme: Boolean = themeOverride.value != Theme.THEME_LIGHT
   val view = LocalView.current
 
   StatusBarColorController(useDarkTheme = darkTheme)
