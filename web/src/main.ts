@@ -149,10 +149,15 @@ function renderMain() {
     renderStatus();
     return;
   }
-  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || '<span class="dots">•••</span>'}</div>${stats(x)}`).join('')}
+  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || '<span class="dots">•••</span>'}</div>${stats(x)}${x.role === 'user' && !busy ? `<button class="edit" data-e="${i}">✎ ${t('editQ')}</button>` : ''}`).join('')}
     ${mode === 'shopping' ? `<div class="note">${t('shoppingNote')}</div>` : ''}<div id="status"></div></div>`;
   renderStatus();
   m.scrollTop = m.scrollHeight;
+  m.querySelectorAll<HTMLButtonElement>('[data-e]').forEach((b) => (b.onclick = () => {
+    const i = +b.dataset.e!; const q = turns[i].text;
+    turns = turns.slice(0, i); shell();
+    const inp = $<HTMLTextAreaElement>('#input'); inp.value = q; inp.focus(); inp.dispatchEvent(new Event('input'));
+  }));
 }
 
 function reasonText(r: E.Reason): string {
@@ -275,14 +280,21 @@ async function send(text: string) {
   turns.push(reply);
   shell();
   const t0 = performance.now();
+  let frame = 0;
   try {
     reply.text = await E.generate(system(), turns.slice(0, -1), (txt) => {
       if (!reply.firstMs && txt.trim()) reply.firstMs = Math.round(performance.now() - t0);
       reply.text = txt;
-      const last = document.getElementById('last');
-      if (last) last.innerHTML = md(txt); else renderMain();
-      const m = $('#main'); m.scrollTop = m.scrollHeight;
+      if (!frame) frame = requestAnimationFrame(() => {
+        frame = 0;
+        const m = $('#main');
+        const stick = m.scrollHeight - m.scrollTop - m.clientHeight < 120; // follow only if user is at the bottom
+        const last = document.getElementById('last');
+        if (last) last.innerHTML = md(reply.text); else renderMain();
+        if (stick) m.scrollTop = m.scrollHeight;
+      });
     });
+    if (frame) { cancelAnimationFrame(frame); frame = 0; }
     reply.ms = Math.round(performance.now() - t0);
     if (!reply.text) { reply.text = t('stopped'); reply.ms = undefined; }
   } catch (e: any) {
