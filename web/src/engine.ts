@@ -15,11 +15,11 @@ const FULL = {
 
 // iPhone web pages get too little memory for the 2 GB model, so iPhone/iPad use a smaller open model (Apache-2.0).
 const BASIC = {
-  id: 'elric-basic',
+  id: 'elric-basic-2',
   chat: 'chatml' as 'gemma' | 'chatml',
-  url: 'https://huggingface.co/litert-community/Qwen3.5-0.8B/resolve/main/Qwen3.5-0.8B_int8.litertlm',
-  fileName: 'elric-basic-v1.litertlm',
-  sizeBytes: 964566992,
+  url: 'https://huggingface.co/litert-community/MiniCPM5-1B/resolve/main/minicpm_wi4b32_wi8_afp32_gpu_opt.litertlm',
+  fileName: 'elric-basic-v2.litertlm',
+  sizeBytes: 793029040,
 };
 
 
@@ -64,7 +64,7 @@ const LOADING_FLAG = 'elric.loadingSince';
     await caches.delete('elric-model-pieces');
     await caches.delete('elric-models');
     const root = await navigator.storage.getDirectory();
-    for (const n of ['elric-lite-v1.task', 'elric-lite-v1.task.part', 'elric-basic-v1.litertlm', 'elric-basic-v1.litertlm.part']) {
+    for (const n of ['elric-lite-v1.task', 'elric-lite-v1.task.part', 'elric-basic-v1.litertlm', 'elric-basic-v1.litertlm.part', 'elric-basic-v2.litertlm', 'elric-basic-v2.litertlm.part']) {
       try { await root.removeEntry(n); } catch { /* none */ }
     }
   } catch { /* best effort */ }
