@@ -8,7 +8,7 @@ const CHAT_URL = 'https://hqsqpiwmozgsxiizhaml.supabase.co/functions/v1/ai-chat'
 const CHAT_KEY = 'sb_publishable_Yv1D_ZUk38W3-ZvYdoAD8A_-fx5gPCT';
 
 /** Time to the first word before answering on the device instead, and longest pause after it. */
-export const FIRST_TOKEN_MS = 8000;
+export const FIRST_TOKEN_MS = 15000;
 const STALL_MS = 6000;
 /** After this many failures in a row, online is skipped for BACKOFF_MS. */
 const MAX_FAILS = 2;

@@ -156,7 +156,7 @@ function renderMain() {
     renderStatus();
     return;
   }
-  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || '<span class="dots">•••</span>'}</div>${stats(x)}${x.role === 'user' && !busy ? `<button class="edit" data-e="${i}">✎ ${t('editQ')}</button>` : ''}`).join('')}
+  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || waitDots()}</div>${stats(x)}${x.role === 'user' && !busy ? `<button class="edit" data-e="${i}">✎ ${t('editQ')}</button>` : ''}`).join('')}
     ${mode === 'shopping' ? `<div class="note">${t('shoppingNote')}</div>` : ''}${showStatusInChat() ? '<div id="status"></div>' : ''}</div>`;
   renderStatus();
   m.scrollTop = m.scrollHeight;
@@ -305,17 +305,23 @@ function paint(reply: E.Turn) {
     const m = $('#main');
     const stick = m.scrollHeight - m.scrollTop - m.clientHeight < 120;
     const last = document.getElementById('last');
-    if (last) last.innerHTML = md(reply.text) || '<span class="dots">•••</span>'; else renderMain();
+    if (last) last.innerHTML = md(reply.text) || waitDots(); else renderMain();
     if (stick) m.scrollTop = m.scrollHeight;
   });
 }
 function flush() { if (frame) { cancelAnimationFrame(frame); frame = 0; } }
+
+let onlineWaiting = false;
+function waitDots(): string {
+  return onlineWaiting ? `<span class="dots">•••</span> <span class="wait">${t('gettingOnline')}</span>` : '<span class="dots">•••</span>';
+}
 
 /** Online answer. Returns true when the reply is final (answered or stopped), false to answer on the device. */
 async function answerOnline(reply: E.Turn, question: string, history: E.Turn[]): Promise<boolean> {
   const pr = getProfile();
   const t0 = performance.now();
   let raw = '';
+  onlineWaiting = true; paint(reply);
   const end = await O.ask({
     question: question.slice(0, 4000),
     history: history.slice(-O.HISTORY_TURNS).map((x) => ({ role: x.role, text: x.text.slice(0, 4000) })),
@@ -326,10 +332,12 @@ async function answerOnline(reply: E.Turn, question: string, history: E.Turn[]):
     ...(pr.study ? { study: pr.study } : {}),
   }, (piece) => {
     raw += piece;
+    onlineWaiting = false;
     if (!reply.firstMs && raw.trim()) reply.firstMs = Math.round(performance.now() - t0);
     reply.text = raw;
     paint(reply);
   });
+  onlineWaiting = false;
   flush();
   O.record(end);
   reply.text = raw.trim();
@@ -414,7 +422,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.3.8';
+const APP_VERSION = '0.3.9';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],

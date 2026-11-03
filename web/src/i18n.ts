@@ -120,6 +120,7 @@ const en = {
   pillOnline: 'Online · on-device backup',
   tagOnline: 'Online',
   tagOffline: 'Offline',
+  gettingOnline: 'Getting online answer…',
   onlineBusy: 'Online is busy. Load the offline model to keep chatting.',
 };
 
@@ -242,6 +243,7 @@ const hi: Strings = {
   pillOnline: 'ऑनलाइन · डिवाइस बैकअप',
   tagOnline: 'ऑनलाइन',
   tagOffline: 'ऑफ़लाइन',
+  gettingOnline: 'ऑनलाइन जवाब आ रहा है…',
   onlineBusy: 'ऑनलाइन अभी व्यस्त है। चैट जारी रखने के लिए ऑफ़लाइन मॉडल लोड करें।',
 };
 
