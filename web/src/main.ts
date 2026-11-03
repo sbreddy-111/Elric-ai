@@ -414,7 +414,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.3.7';
+const APP_VERSION = '0.3.8';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
@@ -431,7 +431,7 @@ function menuSheet() {
     <div class="sec"></div>
     <button class="row" id="m-me"><b>${t('menuMe')}</b><span>${esc(getProfile().name) || t('menuMeHint')}</span></button>
     <button class="row" id="m-models"><b>${t('menuModels')}</b><span>${t(E.MODEL_NAME_KEY as keyof Strings)} · ${SIZE}</span></button>
-    <button class="row" id="m-online"><b>${t('onlineAnswers')}</b><span><em class="${O.isOn() ? 'on' : ''}">${t('on')}</em> · <em class="${O.isOn() ? '' : 'on'}">${t('off')}</em> — ${t('onlineHow')}</span></button>
+    <button class="row trow" id="m-online" role="switch" aria-checked="${O.isOn()}"><span class="tl"><b>${t('onlineAnswers')}</b><span>${t('onlineHow')}</span></span><i class="sw ${O.isOn() ? 'on' : ''}"></i></button>
     <button class="row" id="m-lang"><b>${t('menuLanguage')}</b><span>English · हिन्दी</span></button>
     <button class="row" id="m-priv"><b>${t('menuPrivacy')}</b></button>
     <button class="row" id="m-about"><b>${t('menuAbout')}</b></button>
