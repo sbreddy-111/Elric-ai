@@ -102,7 +102,7 @@ private const val TRANSCRIBE_PROMPT =
     "words, with no notes, labels or translation."
 
 /** Online: time to the first word before answering on the phone instead, and longest pause after. */
-private const val ONLINE_FIRST_TOKEN_MS = 3_000L
+private const val ONLINE_FIRST_TOKEN_MS = 8_000L
 private const val ONLINE_STALL_MS = 6_000L
 
 /** After this many online failures in a row, online is skipped for [ONLINE_BACKOFF_MS]. */
