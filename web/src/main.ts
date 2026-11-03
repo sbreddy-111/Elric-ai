@@ -5,6 +5,42 @@ import * as E from './engine';
 type Mode = 'study' | 'shopping' | 'general';
 let mode: Mode = 'study';
 let turns: E.Turn[] = [];
+interface Chat { id: string; title: string; mode: Mode; turns: E.Turn[]; at: number }
+const CHATS_KEY = 'elric.chats';
+const CUR_KEY = 'elric.currentChat';
+let chatId = '';
+function loadChats(): Chat[] { try { return JSON.parse(localStorage.getItem(CHATS_KEY) || '[]'); } catch { return []; } }
+function saveChats(cs: Chat[]) {
+  cs.sort((a, b) => b.at - a.at);
+  let list = cs.slice(0, 50);
+  for (;;) { try { localStorage.setItem(CHATS_KEY, JSON.stringify(list)); return; } catch { if (list.length <= 1) return; list = list.slice(0, -1); } }
+}
+function persist() {
+  const done = turns.filter((x) => x.text);
+  if (!done.length) return;
+  if (!chatId) { chatId = Date.now().toString(36); localStorage.setItem(CUR_KEY, chatId); }
+  const cs = loadChats().filter((c) => c.id !== chatId);
+  const first = done.find((x) => x.role === 'user')?.text || '';
+  cs.push({ id: chatId, title: first.slice(0, 60), mode, turns: done, at: Date.now() });
+  saveChats(cs);
+}
+function openChat(c: Chat | undefined) {
+  if (busy) E.stop();
+  chatId = c?.id || ''; turns = c ? c.turns.map((x) => ({ ...x })) : []; if (c) mode = c.mode;
+  if (chatId) localStorage.setItem(CUR_KEY, chatId); else localStorage.removeItem(CUR_KEY);
+  shell();
+}
+{ const cur = localStorage.getItem(CUR_KEY); const c = loadChats().find((x) => x.id === cur); if (c) { chatId = c.id; turns = c.turns; mode = c.mode; } }
+const secs = (ms: number) => (ms / 1000).toFixed(1);
+function stats(x: E.Turn): string {
+  if (x.role !== 'model' || !x.ms) return '';
+  const words = x.text.trim().split(/\s+/).filter(Boolean).length;
+  const gen = Math.max(1, x.ms - (x.firstMs || 0));
+  const parts = [`⏱ ${t('statTime', { s: secs(x.ms) })}`];
+  if (x.firstMs) parts.push(t('statFirst', { s: secs(x.firstMs) }));
+  if (words > 3) parts.push(t('statSpeed', { n: (words / (gen / 1000)).toFixed(1) }));
+  return `<div class="stat">${parts.join(' · ')}</div>`;
+}
 let busy = false;
 let device: E.DeviceReport | null = null;
 let partial = 0;
@@ -52,7 +88,7 @@ function shell() {
   $('#menu').onclick = menuSheet;
   $('#modebtn').onclick = modeSheet;
   $('#lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
-  $('#newc').onclick = () => { if (busy) E.stop(); turns = []; shell(); };
+  $('#newc').onclick = () => openChat(undefined);
   $('#snap').onclick = () => sheet(`<h3>${t('photoSoonTitle')}</h3><p>${t('photoSoonBody')}</p>`);
   $('#mic').onclick = () => sheet(`<h3>${t('micSoonTitle')}</h3><p>${t('micSoonBody')}</p>`);
   const input = $<HTMLTextAreaElement>('#input');
@@ -78,7 +114,7 @@ function renderMain() {
     renderStatus();
     return;
   }
-  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${esc(x.text) || '<span class="dots">•••</span>'}</div>`).join('')}
+  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${esc(x.text) || '<span class="dots">•••</span>'}</div>${stats(x)}`).join('')}
     ${mode === 'shopping' ? `<div class="note">${t('shoppingNote')}</div>` : ''}<div id="status"></div></div>`;
   renderStatus();
   m.scrollTop = m.scrollHeight;
@@ -203,18 +239,22 @@ async function send(text: string) {
   const reply: E.Turn = { role: 'model', text: '' };
   turns.push(reply);
   shell();
+  const t0 = performance.now();
   try {
     reply.text = await E.generate(system(), turns.slice(0, -1), (txt) => {
+      if (!reply.firstMs && txt.trim()) reply.firstMs = Math.round(performance.now() - t0);
       reply.text = txt;
       const last = document.getElementById('last');
       if (last) last.textContent = txt; else renderMain();
       const m = $('#main'); m.scrollTop = m.scrollHeight;
     });
-    if (!reply.text) reply.text = t('stopped');
+    reply.ms = Math.round(performance.now() - t0);
+    if (!reply.text) { reply.text = t('stopped'); reply.ms = undefined; }
   } catch (e: any) {
     reply.text = t('errorAnswer', { err: String(e?.message || e) });
   }
   busy = false;
+  persist();
   shell();
 }
 
@@ -243,6 +283,9 @@ const LICENSES = [
 
 function menuSheet() {
   sheet(`<div class="brand"><img src="icons/mark.png" alt=""><div><b>Elric AI</b><span>AI you can rely on</span></div></div>
+    <div class="sec">${t('menuChats')}</div>
+    ${(() => { const cs = loadChats(); return cs.length ? cs.slice(0, 20).map((c) => `<div class="chatrow ${c.id === chatId ? 'sel' : ''}"><button class="ct" data-c="${c.id}">${esc(c.title || '…')}</button><button class="cx" data-d="${c.id}" aria-label="${t('deleteChat')}">×</button></div>`).join('') : `<p class="tip pad">${t('noChats')}</p>`; })()}
+    <div class="sec"></div>
     <button class="row" id="m-models"><b>${t('menuModels')}</b><span>${t(E.MODEL_NAME_KEY as keyof Strings)} · ${SIZE}</span></button>
     <button class="row" id="m-lang"><b>${t('menuLanguage')}</b><span>English · हिन्दी</span></button>
     <button class="row" id="m-priv"><b>${t('menuPrivacy')}</b></button>
@@ -251,6 +294,11 @@ function menuSheet() {
     <p class="tip">${t('installTip')}</p>`);
   $('#m-models').onclick = () => sheet(`<h3>${t('menuModels')}</h3><div class="status-slot"></div><div class="box"><div class="mh"><b>${t('modelStandard')}</b><span>${t('comingSoon')}</span></div><p class="d">${t('modelStandardDesc')}</p></div>`) ; 
   $('#m-models').addEventListener('click', () => renderStatus());
+  document.querySelectorAll<HTMLButtonElement>('[data-c]').forEach((b) => (b.onclick = () => openChat(loadChats().find((c) => c.id === b.dataset.c))));
+  document.querySelectorAll<HTMLButtonElement>('[data-d]').forEach((b) => (b.onclick = () => {
+    const id = b.dataset.d!; saveChats(loadChats().filter((c) => c.id !== id));
+    if (id === chatId) openChat(undefined); else menuSheet();
+  }));
   $('#m-lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
   $('#m-priv').onclick = () => sheet(`<h3>${t('menuPrivacy')}</h3><p>${t('privacyBody')}</p>`);
   $('#m-about').onclick = () => sheet(`<h3>${t('menuAbout')}</h3><p>${t('aboutBody')}</p>`);

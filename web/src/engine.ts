@@ -497,6 +497,16 @@ export async function loadModel(onProgress?: (p: Progress) => void): Promise<voi
 export interface Turn {
   role: 'user' | 'model';
   text: string;
+  /** Total answer time in ms (model turns only). */
+  ms?: number;
+  /** Time to first word in ms. */
+  firstMs?: number;
+  /** Answer length in tokens, for speed. */
+  tokens?: number;
+}
+
+export function countTokens(text: string): number {
+  try { return llm?.sizeInTokens(text) ?? 0; } catch { return 0; }
 }
 
 function render(system: string, turns: Turn[]): string {
