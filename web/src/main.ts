@@ -26,12 +26,12 @@ function persist() {
   saveChats(cs);
 }
 function openChat(c: Chat | undefined) {
-  if (busy) E.stop();
+  if (busy) { E.stop(); return; } // let the current answer finish stopping and save first
   chatId = c?.id || ''; turns = c ? c.turns.map((x) => ({ ...x })) : []; if (c) mode = c.mode;
   if (chatId) localStorage.setItem(CUR_KEY, chatId); else localStorage.removeItem(CUR_KEY);
   shell();
 }
-{ const cur = localStorage.getItem(CUR_KEY); const c = loadChats().find((x) => x.id === cur); if (c) { chatId = c.id; turns = c.turns; mode = c.mode; } }
+localStorage.removeItem(CUR_KEY); // every launch starts a new chat; old ones are in Recent chats
 function tex(m: string): string {
   let x = m;
   for (let i = 0; i < 4; i++) x = x.replace(/\\(?:text|mathrm|mathbf)\{([^{}]*)\}/g, '$1').replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)');
@@ -67,6 +67,8 @@ function md(src: string): string {
   return out.join('');
 }
 const body = (x: E.Turn) => (x.role === 'model' ? md(x.text) : esc(x.text));
+interface Profile { name: string; study: string }
+function getProfile(): Profile { try { return { name: '', study: '', ...JSON.parse(localStorage.getItem('elric.profile') || '{}') }; } catch { return { name: '', study: '' }; } }
 const secs = (ms: number) => (ms / 1000).toFixed(1);
 function stats(x: E.Turn): string {
   if (x.role !== 'model' || !x.ms) return '';
@@ -143,7 +145,7 @@ function renderMain() {
       ['sugLecture', () => { const i = $<HTMLTextAreaElement>('#input'); i.value = t('promptLecture'); i.focus(); }],
       ['sugWatch', () => { mode = 'shopping'; shell(); send(t('promptWatch')); }],
     ];
-    m.innerHTML = `<section class="hero"><img src="icons/mark.png" alt="" class="mark"><h1>${t('greeting')}</h1><p>${t('subtitle')}</p>
+    m.innerHTML = `<section class="hero"><img src="icons/mark.png" alt="" class="mark"><h1>${t('greeting')}${getProfile().name ? ', ' + esc(getProfile().name.split(' ')[0]) : ''}</h1><p>${t('subtitle')}</p>
       <div class="cards">${cards.map(([k], i) => `<button class="card" data-i="${i}">${t(k)}</button>`).join('')}</div>
       <div id="status"></div></section>`;
     m.querySelectorAll<HTMLButtonElement>('.card').forEach((b) => (b.onclick = cards[+b.dataset.i!][1]));
@@ -260,6 +262,9 @@ function system(): string {
   if (mode === 'study') s += ' Mode: Study. Be a patient tutor for Indian students.';
   if (mode === 'shopping') s += ' Mode: Shopping. You have NO access to live prices, stock or offers. Never state or guess specific prices. Help compare features and explain what to look for, and say live prices are coming soon.';
   if (getLang() === 'hi') s += ' The user prefers Hindi.';
+  const pr = getProfile();
+  if (pr.name) s += ` The user's name is ${pr.name}.`;
+  if (pr.study) s += ` The user studies: ${pr.study}. Match explanations to this level.`;
   s += short
     ? ' ANSWER LENGTH: SHORT. Reply in at most 4 short sentences or 5 bullet points (under 80 words). Give the key answer first. No greetings, no repeating the question. If the user sends several questions, answer each in one or two lines.'
     : ' ANSWER LENGTH: DETAILED. Explain step by step with an example.';
@@ -328,7 +333,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.3.2';
+const APP_VERSION = '0.3.3';
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
   ['Elric Basic model weights (Gemma 3 1B, iPhone)', 'Gemma Terms of Use', 'https://ai.google.dev/gemma/terms'],
@@ -342,12 +347,13 @@ function menuSheet() {
     <div class="sec">${t('menuChats')}</div>
     ${(() => { const cs = loadChats(); return cs.length ? cs.slice(0, 20).map((c) => `<div class="chatrow ${c.id === chatId ? 'sel' : ''}"><button class="ct" data-c="${c.id}">${esc(c.title || '…')}</button><button class="cx" data-d="${c.id}" aria-label="${t('deleteChat')}">×</button></div>`).join('') : `<p class="tip pad">${t('noChats')}</p>`; })()}
     <div class="sec"></div>
+    <button class="row" id="m-me"><b>${t('menuMe')}</b><span>${esc(getProfile().name) || t('menuMeHint')}</span></button>
     <button class="row" id="m-models"><b>${t('menuModels')}</b><span>${t(E.MODEL_NAME_KEY as keyof Strings)} · ${SIZE}</span></button>
     <button class="row" id="m-lang"><b>${t('menuLanguage')}</b><span>English · हिन्दी</span></button>
     <button class="row" id="m-priv"><b>${t('menuPrivacy')}</b></button>
     <button class="row" id="m-about"><b>${t('menuAbout')}</b></button>
     <button class="row" id="m-lic"><b>${t('menuLicenses')}</b></button>
-    <p class="tip">${t('installTip')}</p><p class="tip pad">Version ${APP_VERSION}</p>`);
+    <p class="tip">${t(/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent)) ? 'installTip' : 'installTipPc')}</p><p class="tip pad">Version ${APP_VERSION}</p>`);
   $('#m-models').onclick = () => sheet(`<h3>${t('menuModels')}</h3><div class="status-slot"></div><div class="box"><div class="mh"><b>${t('modelStandard')}</b><span>${t('comingSoon')}</span></div><p class="d">${t('modelStandardDesc')}</p></div>`) ; 
   $('#m-models').addEventListener('click', () => renderStatus());
   document.querySelectorAll<HTMLButtonElement>('[data-c]').forEach((b) => (b.onclick = () => openChat(loadChats().find((c) => c.id === b.dataset.c))));
@@ -355,6 +361,17 @@ function menuSheet() {
     const id = b.dataset.d!; saveChats(loadChats().filter((c) => c.id !== id));
     if (id === chatId) openChat(undefined); else menuSheet();
   }));
+  $('#m-me').onclick = () => {
+    const pr = getProfile();
+    sheet(`<h3>${t('menuMe')}</h3><p>${t('meIntro')}</p>
+      <label class="fl">${t('meName')}<input id="pn" maxlength="40" value="${esc(pr.name)}"></label>
+      <label class="fl">${t('meStudy')}<input id="ps" maxlength="60" placeholder="${t('meStudyHint')}" value="${esc(pr.study)}"></label>
+      <button class="primary" id="psave">${t('save')}</button>`);
+    $('#psave').onclick = () => {
+      localStorage.setItem('elric.profile', JSON.stringify({ name: $<HTMLInputElement>('#pn').value.trim(), study: $<HTMLInputElement>('#ps').value.trim() }));
+      shell();
+    };
+  };
   $('#m-lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
   $('#m-priv').onclick = () => sheet(`<h3>${t('menuPrivacy')}</h3><p>${t('privacyBody')}</p>`);
   $('#m-about').onclick = () => sheet(`<h3>${t('menuAbout')}</h3><p>${t('aboutBody')}</p>`);
