@@ -122,6 +122,11 @@ export async function removeStored(): Promise<void> {
     /* not there */
   }
   try {
+    await root?.removeEntry(LITE.fileName + '.part');
+  } catch {
+    /* not there */
+  }
+  try {
     await caches.delete('elric-models');
   } catch {
     /* ignore */
@@ -133,68 +138,107 @@ export interface Progress {
   total: number;
 }
 
-/** Downloads the model once and saves it on the device. Does not load it. */
+const PART_NAME = () => LITE.fileName + '.part';
+const CHUNK = 16 * 1024 * 1024; // 16 MB pieces, each saved to disk as it lands
+
+/** Bytes already saved from an earlier, unfinished download (0 if none). */
+export async function partialBytes(): Promise<number> {
+  const root = await opfsRoot();
+  if (!root) return 0;
+  try {
+    return (await (await root.getFileHandle(PART_NAME())).getFile()).size;
+  } catch {
+    return 0;
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Downloads the model in pieces and saves each piece on the device as it arrives,
+ * so a download interrupted by switching apps (iOS pauses background tabs) resumes
+ * where it stopped instead of starting over.
+ */
 export async function downloadModel(onProgress: (p: Progress) => void, signal: AbortSignal): Promise<void> {
   try {
     await navigator.storage?.persist?.();
   } catch {
     /* best effort */
   }
+  const total = LITE.sizeBytes;
+  const root = await opfsRoot();
+  const canResume = !!root && typeof (FileSystemFileHandle.prototype as any).createWritable === 'function';
+  if (!canResume) return downloadWhole(onProgress, signal);
+
+  const part = await root!.getFileHandle(PART_NAME(), { create: true });
+  let done = (await part.getFile()).size;
+  if (done > total) {
+    await root!.removeEntry(PART_NAME());
+    return downloadModel(onProgress, signal);
+  }
+  onProgress({ done, total });
+  let failures = 0;
+  while (done < total) {
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    const endByte = Math.min(done + CHUNK, total) - 1;
+    try {
+      const res = await fetch(LITE.url, { signal, cache: 'no-store', headers: { Range: `bytes=${done}-${endByte}` } });
+      if (res.status !== 206) throw new Error(`Download failed (HTTP ${res.status})`);
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (buf.byteLength !== endByte - done + 1) throw new Error('Short read');
+      const w: FileSystemWritableFileStream = await (part as any).createWritable({ keepExistingData: true });
+      await w.seek(done);
+      await w.write(buf);
+      await w.close(); // commits this piece to disk
+      done += buf.byteLength;
+      failures = 0;
+      onProgress({ done, total });
+    } catch (e: any) {
+      if (e?.name === 'AbortError' || signal.aborted) throw e;
+      // Network blip or the tab was paused: retry this piece a few times before giving up.
+      if (++failures > 5) throw new Error(`Download paused at ${Math.floor((done / total) * 100)}%. Tap Resume to continue.`);
+      await sleep(1500 * failures);
+      done = (await part.getFile()).size; // trust what is actually on disk
+    }
+  }
+  // Rename .part to the final file (copy for engines without move()).
+  if (typeof (part as any).move === 'function') {
+    try { await root!.removeEntry(LITE.fileName); } catch { /* none */ }
+    await (part as any).move(LITE.fileName);
+  } else {
+    const fin = await root!.getFileHandle(LITE.fileName, { create: true });
+    const w: FileSystemWritableFileStream = await (fin as any).createWritable();
+    await (await part.getFile()).stream().pipeTo(w);
+    await root!.removeEntry(PART_NAME());
+  }
+  const size = (await (await root!.getFileHandle(LITE.fileName)).getFile()).size;
+  if (size !== total) throw new Error(`Incomplete download (${size} of ${total} bytes)`);
+  localStorage.setItem(STORED_FLAG, 'opfs');
+  onProgress({ done: total, total });
+}
+
+/** Fallback for browsers without OPFS writable files: one-shot download into Cache API. */
+async function downloadWhole(onProgress: (p: Progress) => void, signal: AbortSignal): Promise<void> {
   const res = await fetch(LITE.url, { signal, cache: 'no-store' });
   if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status})`);
   const total = Number(res.headers.get('Content-Length')) || LITE.sizeBytes;
   let done = 0;
   let last = 0;
-  const counter = new TransformStream<Uint8Array, Uint8Array>({
+  const body = res.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, ctrl) {
       done += chunk.byteLength;
       const now = performance.now();
-      if (now - last > 200) {
-        last = now;
-        onProgress({ done, total });
-      }
+      if (now - last > 200) { last = now; onProgress({ done, total }); }
       ctrl.enqueue(chunk);
     },
-  });
-  const body = res.body.pipeThrough(counter);
-
-  const root = await opfsRoot();
-  let usedOpfs = false;
-  if (root) {
-    try {
-      const handle = await root.getFileHandle(LITE.fileName, { create: true });
-      if (typeof (handle as any).createWritable === 'function') {
-        const writable: FileSystemWritableFileStream = await (handle as any).createWritable();
-        usedOpfs = true;
-        await body.pipeTo(writable, { signal });
-        const size = (await handle.getFile()).size;
-        if (size !== LITE.sizeBytes) throw new Error(`Incomplete download (${size} of ${LITE.sizeBytes} bytes)`);
-        localStorage.setItem(STORED_FLAG, 'opfs');
-      }
-    } catch (e) {
-      if (usedOpfs) {
-        try {
-          await root.removeEntry(LITE.fileName);
-        } catch {
-          /* ignore */
-        }
-        throw e;
-      }
-      // OPFS writable not supported: fall back to Cache API below.
-    }
+  }));
+  const cache = await caches.open('elric-models');
+  await cache.put(LITE.fileName, new Response(body, { headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(total) } }));
+  if (done !== LITE.sizeBytes) {
+    await caches.delete('elric-models');
+    throw new Error(`Incomplete download (${done} of ${LITE.sizeBytes} bytes)`);
   }
-  if (!usedOpfs) {
-    const cache = await caches.open('elric-models');
-    await cache.put(
-      LITE.fileName,
-      new Response(body, { headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(total) } }),
-    );
-    if (done !== LITE.sizeBytes) {
-      await caches.delete('elric-models');
-      throw new Error(`Incomplete download (${done} of ${LITE.sizeBytes} bytes)`);
-    }
-    localStorage.setItem(STORED_FLAG, 'cache');
-  }
+  localStorage.setItem(STORED_FLAG, 'cache');
   onProgress({ done: total, total });
 }
 

@@ -7,6 +7,8 @@ let mode: Mode = 'study';
 let turns: E.Turn[] = [];
 let busy = false;
 let device: E.DeviceReport | null = null;
+let partial = 0;
+E.partialBytes().then((b) => { partial = b; renderStatus(); });
 let modelState: 'idle' | 'downloading' | 'stored' | 'loading' | 'ready' | 'failed' = E.isStored() ? 'stored' : 'idle';
 let progress = 0;
 let failMsg = '';
@@ -102,34 +104,58 @@ function renderStatus() {
   let body = '';
   const soft = device.soft.map((r) => `<p class="w">${reasonText(r)}</p>`).join('');
   if (modelState === 'idle') {
-    body = `${soft}${device.isIOS ? `<p class="w">${t('iosWarning')}</p>` : ''}<button class="primary" id="dl">${t('downloadSize', { size: SIZE })}</button><p class="tip">${t('wifiTip')}</p>`;
+    const resume = partial > 0 ? `<div class="bar"><i style="width:${((partial / E.LITE.sizeBytes) * 100).toFixed(1)}%"></i></div><p class="tip">${t('downloadedOf', { done: gb(partial), total: SIZE })}</p>` : '';
+    body = `${soft}${device.isIOS ? `<p class="w">${t('iosWarning')}</p>` : ''}${resume}<button class="primary" id="dl">${partial > 0 ? t('resume') : t('downloadSize', { size: SIZE })}</button><p class="tip">${t('wifiTip')}</p>`;
   } else if (modelState === 'downloading') {
-    body = `<div class="bar"><i style="width:${(progress * 100).toFixed(1)}%"></i></div><p class="tip">${t('downloading', { pct: Math.floor(progress * 100) + '%' })} · ${t('downloadedOf', { done: gb(progress * E.LITE.sizeBytes), total: SIZE })}</p><button class="ghost" id="cx">${t('cancel')}</button>`;
+    body = `<div class="bar"><i style="width:${(progress * 100).toFixed(1)}%"></i></div><p class="tip">${t('downloading', { pct: Math.floor(progress * 100) + '%' })} · ${t('downloadedOf', { done: gb(progress * E.LITE.sizeBytes), total: SIZE })}</p><p class="tip">${t('keepOpen')}</p><button class="ghost" id="cx">${t('cancel')}</button>`;
   } else if (modelState === 'stored') {
     body = `${soft}<p class="tip">✓ ${t('ready')}</p><button class="primary" id="ld">${device.soft.length ? t('tryAnyway') : t('loadModel')}</button><button class="ghost" id="rm">${t('remove')}</button>`;
   } else if (modelState === 'loading') {
     body = `<div class="bar"><i style="width:${(progress * 100).toFixed(1)}%"></i></div><p class="tip">${t('loading')}</p>`;
   } else if (modelState === 'failed') {
-    body = `<h3>${t('cantRunTitle')}</h3><p class="w">${esc(failMsg)}</p><button class="primary" id="rt">${t('retry')}</button>`;
+    body = `<h3>${t('cantRunTitle')}</h3><p class="w">${esc(failMsg)}</p><button class="primary" id="rt">${partial > 0 ? t('resume') : t('retry')}</button>`;
   }
   el.innerHTML = `<div class="box"><div class="mh"><b>${t('modelLite')}</b><span>${SIZE}</span></div><p class="d">${t('modelLiteDesc')}</p>${body}</div>`;
   const on = (id: string, f: () => void) => { const b = document.getElementById(id); if (b) b.onclick = f; };
   on('dl', startDownload);
   on('cx', () => abort?.abort());
   on('ld', startLoad);
-  on('rt', () => { modelState = E.isStored() ? 'stored' : 'idle'; renderStatus(); });
+  on('rt', () => { if (!E.isStored() && partial > 0) { startDownload(); return; } modelState = E.isStored() ? 'stored' : 'idle'; renderStatus(); });
   on('rm', async () => { if (confirm(t('removeConfirm'))) { await E.removeStored(); modelState = 'idle'; renderStatus(); } });
 }
 
-async function startDownload() {
-  modelState = 'downloading'; progress = 0; abort = new AbortController(); renderStatus();
+let wakeLock: any = null;
+async function keepAwake(on: boolean) {
   try {
-    await E.downloadModel((p) => { progress = p.done / p.total; renderStatus(); }, abort.signal);
-    modelState = 'stored';
+    if (on && !wakeLock && (navigator as any).wakeLock) wakeLock = await (navigator as any).wakeLock.request('screen');
+    if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch { wakeLock = null; }
+}
+let resumeOnReturn = false;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (modelState === 'downloading') keepAwake(true); // wake lock drops when hidden
+  else if (resumeOnReturn && !E.isStored()) startDownload();
+});
+
+async function startDownload() {
+  if (modelState === 'downloading') return;
+  partial = await E.partialBytes();
+  modelState = 'downloading'; progress = partial / E.LITE.sizeBytes; abort = new AbortController(); renderStatus();
+  resumeOnReturn = false;
+  keepAwake(true);
+  try {
+    await E.downloadModel((p) => { progress = p.done / p.total; partial = p.done; renderStatus(); }, abort.signal);
+    modelState = 'stored'; partial = 0;
   } catch (e: any) {
+    partial = await E.partialBytes();
     modelState = 'idle';
-    if (e?.name !== 'AbortError') { modelState = 'failed'; failMsg = String(e?.message || e); }
+    if (e?.name !== 'AbortError') {
+      if (document.visibilityState !== 'visible') { resumeOnReturn = true; } // paused by iOS: carry on when user comes back
+      else { modelState = 'failed'; failMsg = String(e?.message || e); }
+    }
   }
+  keepAwake(false);
   renderStatus();
 }
 
