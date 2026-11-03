@@ -25,7 +25,7 @@ const BASIC = {
 
 
 export const SYSTEM_PROMPT =
-  'You are Elric AI, built on open models. Answer reliably in the user\'s language (English or Hindi). If unsure, say so. If asked which model or company you are, say you are Elric AI, built on open models.';
+  'You are Elric AI, built on open models. Answer reliably in the user\'s language (English or Hindi). If unsure, say so. If asked which model or company you are, say you are Elric AI, built on open models. Write maths in plain text (like 17 × 24 = 408), never LaTeX. Keep answers clear and not too long.';
 
 export type Reason =
   | { kind: 'noWebGPU' }
@@ -458,7 +458,7 @@ async function downloadWhole(onProgress: (p: Progress) => void, signal: AbortSig
 // ---------- Inference ----------
 
 let llm: LlmInference | null = null;
-const MAX_TOKENS = isIOS ? 1024 : 2048;
+const MAX_TOKENS = isIOS ? 1024 : 4096;
 
 export function isLoaded(): boolean {
   return !!llm;

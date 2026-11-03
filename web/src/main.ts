@@ -31,6 +31,32 @@ function openChat(c: Chat | undefined) {
   shell();
 }
 { const cur = localStorage.getItem(CUR_KEY); const c = loadChats().find((x) => x.id === cur); if (c) { chatId = c.id; turns = c.turns; mode = c.mode; } }
+function tex(m: string): string {
+  let x = m;
+  for (let i = 0; i < 4; i++) x = x.replace(/\\(?:text|mathrm|mathbf)\{([^{}]*)\}/g, '$1').replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)');
+  return x.replace(/\\times/g, '×').replace(/\\div/g, '÷').replace(/\\cdot/g, '·').replace(/\\(?:long)?rightarrow/g, '→').replace(/\\quad/g, ' ')
+    .replace(/\\%/g, '%').replace(/_\{?(\d+)\}?/g, (_, d) => d.split('').map((c: string) => '₀₁₂₃₄₅₆₇₈₉'[+c]).join('')).replace(/\^\{?(\d+)\}?/g, (_, d) => d.split('').map((c: string) => '⁰¹²³⁴⁵⁶⁷⁸⁹'[+c]).join('')).replace(/[{}]/g, '').replace(/\\/g, '');
+}
+/** Light, safe Markdown for model answers (escape first, then format). */
+function md(src: string): string {
+  let s = src.replace(/\$\$([\s\S]*?)\$\$/g, (_, m) => `\u0001${tex(m).trim()}\u0002`).replace(/\$([^$\n]+?)\$/g, (_, m) => tex(m));
+  s = esc(s);
+  const out: string[] = []; let list = '';
+  const close = () => { if (list) { out.push(`</${list}>`); list = ''; } };
+  for (const raw of s.split('\n')) {
+    const line = raw.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, '$1<i>$2</i>').replace(/\u0001(.*?)\u0002/g, '<span class="eq">$1</span>');
+    let m;
+    if (/^\s*(\*{3,}|-{3,})\s*$/.test(raw)) { close(); out.push('<hr>'); }
+    else if ((m = line.match(/^#{1,4}\s+(.*)/))) { close(); out.push(`<h4>${m[1]}</h4>`); }
+    else if ((m = line.match(/^\s*[*-]\s+(.*)/))) { if (list !== 'ul') { close(); out.push('<ul>'); list = 'ul'; } out.push(`<li>${m[1]}</li>`); }
+    else if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { if (list !== 'ol') { close(); out.push('<ol>'); list = 'ol'; } out.push(`<li>${m[1]}</li>`); }
+    else if (!line.trim()) { close(); out.push(''); }
+    else { close(); out.push(`<p>${line}</p>`); }
+  }
+  close();
+  return out.join('');
+}
+const body = (x: E.Turn) => (x.role === 'model' ? md(x.text) : esc(x.text));
 const secs = (ms: number) => (ms / 1000).toFixed(1);
 function stats(x: E.Turn): string {
   if (x.role !== 'model' || !x.ms) return '';
@@ -114,7 +140,7 @@ function renderMain() {
     renderStatus();
     return;
   }
-  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${esc(x.text) || '<span class="dots">•••</span>'}</div>${stats(x)}`).join('')}
+  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || '<span class="dots">•••</span>'}</div>${stats(x)}`).join('')}
     ${mode === 'shopping' ? `<div class="note">${t('shoppingNote')}</div>` : ''}<div id="status"></div></div>`;
   renderStatus();
   m.scrollTop = m.scrollHeight;
@@ -245,7 +271,7 @@ async function send(text: string) {
       if (!reply.firstMs && txt.trim()) reply.firstMs = Math.round(performance.now() - t0);
       reply.text = txt;
       const last = document.getElementById('last');
-      if (last) last.textContent = txt; else renderMain();
+      if (last) last.innerHTML = md(txt); else renderMain();
       const m = $('#main'); m.scrollTop = m.scrollHeight;
     });
     reply.ms = Math.round(performance.now() - t0);
