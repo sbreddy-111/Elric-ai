@@ -71,6 +71,13 @@ class ElricStore(context: Context) {
   private val chatsFile = File(context.filesDir, CHATS_FILE)
   private val gson = Gson()
 
+  /** Backend ("cpu" or "gpu") that last started [modelName] on this phone, or "" if none yet. */
+  fun backendFor(modelName: String): String = prefs.getString("backend_$modelName", "") ?: ""
+
+  fun saveBackend(modelName: String, backend: String) {
+    prefs.edit().putString("backend_$modelName", backend).apply()
+  }
+
   var onboarded: Boolean
     get() = prefs.getBoolean("onboarded", false)
     set(v) = prefs.edit().putBoolean("onboarded", v).apply()

@@ -118,6 +118,80 @@ object LlmChatModelHelper : LlmModelHelper {
     coroutineScope: CoroutineScope?,
     enableResponseFormat: Boolean,
   ) {
+    initializeGuarded(
+      context = context,
+      model = model,
+      taskId = taskId,
+      supportImage = supportImage,
+      supportAudio = supportAudio,
+      onDone = onDone,
+      systemInstruction = systemInstruction,
+      tools = tools,
+      enableConversationConstrainedDecoding = enableConversationConstrainedDecoding,
+      initialMessages = initialMessages,
+      enableResponseFormat = enableResponseFormat,
+      abandoned = null,
+    )
+  }
+
+  /**
+   * Same as [initialize], but when [abandoned] is set (the caller gave up waiting, for example on
+   * a timeout) the engine that finishes late is closed instead of being attached to [model]. The
+   * check and the attach happen while holding [abandoned]'s lock, so a caller that sets it under
+   * the same lock knows the model was left alone. Every path calls [onDone], including errors
+   * (Throwable, not only Exception).
+   */
+  @OptIn(ExperimentalApi::class)
+  fun initializeGuarded(
+    context: Context,
+    model: Model,
+    taskId: String,
+    supportImage: Boolean,
+    supportAudio: Boolean,
+    onDone: (String) -> Unit,
+    systemInstruction: Contents?,
+    tools: List<ToolProvider>,
+    enableConversationConstrainedDecoding: Boolean,
+    initialMessages: List<Message>,
+    enableResponseFormat: Boolean,
+    abandoned: AtomicBoolean?,
+  ) {
+    try {
+      initializeInternal(
+        context = context,
+        model = model,
+        taskId = taskId,
+        supportImage = supportImage,
+        supportAudio = supportAudio,
+        onDone = onDone,
+        systemInstruction = systemInstruction,
+        tools = tools,
+        enableConversationConstrainedDecoding = enableConversationConstrainedDecoding,
+        initialMessages = initialMessages,
+        enableResponseFormat = enableResponseFormat,
+        abandoned = abandoned,
+      )
+    } catch (t: Throwable) {
+      Log.e(TAG, "Model initialization crashed", t)
+      onDone(t.message ?: t.javaClass.simpleName)
+    }
+  }
+
+  @OptIn(ExperimentalApi::class)
+  private fun initializeInternal(
+    context: Context,
+    model: Model,
+    taskId: String,
+    supportImage: Boolean,
+    supportAudio: Boolean,
+    onDone: (String) -> Unit,
+    systemInstruction: Contents?,
+    tools: List<ToolProvider>,
+    enableConversationConstrainedDecoding: Boolean,
+    initialMessages: List<Message>,
+    enableResponseFormat: Boolean,
+    abandoned: AtomicBoolean?,
+  ) {
     if (model.instance != null) {
       Log.d(TAG, "Model '${model.name}' already initialized in LlmChatModelHelper. Skipping.")
       model.markInitialized()
@@ -223,18 +297,39 @@ object LlmChatModelHelper : LlmModelHelper {
           } catch (_: Exception) {}
           throw e
         }
-      model.markInitialized(
-        LlmModelInstance(
-          engine = engine,
-          conversation = conversation,
-          metricsTracker = metricsTracker,
-        )
-      )
-    } catch (e: Exception) {
-      val errorMsg = cleanUpMediapipeTaskErrorMessage(e.message ?: "Unknown error")
-      model.markInitializationFailed(errorMsg)
-      metricsTracker.onModelInitialized()
-      onDone(errorMsg)
+      val instance =
+        LlmModelInstance(engine = engine, conversation = conversation, metricsTracker = metricsTracker)
+      if (abandoned != null) {
+        val attached =
+          synchronized(abandoned) {
+            if (abandoned.get()) {
+              false
+            } else {
+              model.markInitialized(instance)
+              true
+            }
+          }
+        if (!attached) {
+          Log.w(TAG, "Initialization of '${model.name}' finished after the caller gave up; closing.")
+          try {
+            conversation.close()
+          } catch (_: Throwable) {}
+          try {
+            engine.close()
+          } catch (_: Throwable) {}
+          onDone("abandoned")
+          return
+        }
+      } else {
+        model.markInitialized(instance)
+      }
+    } catch (e: Throwable) {
+      val errorMsg = cleanUpMediapipeTaskErrorMessage(e.message ?: e.javaClass.simpleName)
+      if (abandoned == null || !abandoned.get()) model.markInitializationFailed(errorMsg)
+      try {
+        metricsTracker.onModelInitialized()
+      } catch (_: Throwable) {}
+      onDone(errorMsg.ifEmpty { "Unknown error" })
       return
     }
     metricsTracker.onModelInitialized()

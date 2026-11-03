@@ -126,10 +126,10 @@ object T {
   val hello = Str("Hello, ", "नमस्ते, ")
   val there = Str("there", "दोस्त")
   val onDevice = Str("● On‑device · private", "● फ़ोन पर · प्राइवेट")
-  val onlineShop = Str("● Online · shopping", "● ऑनलाइन · शॉपिंग")
+  val shopOffline = Str("● Shopping · offline", "● शॉपिंग · ऑफ़लाइन")
   val livePricesSoon = Str("Live prices coming soon", "लाइव कीमतें जल्द आ रही हैं")
   val offlineStudy = Str("You're offline. Study still works.", "आप ऑफ़लाइन हैं। पढ़ाई फिर भी चलेगी।")
-  val shopNeedsNet = Str("Shopping needs internet", "शॉपिंग के लिए इंटरनेट चाहिए")
+  val offlineAll = Str("You're offline. Elric still works.", "आप ऑफ़लाइन हैं। Elric फिर भी चलेगा।")
   val sugQuiz = Str("Quiz me on a chapter", "किसी चैप्टर पर मेरा क्विज़ लें")
   val sugPhoto = Str("Explain a homework photo", "होमवर्क की फ़ोटो समझाएँ")
   val sugTimetable = Str("Make a study timetable", "पढ़ाई का टाइमटेबल बनाएँ")
@@ -151,12 +151,15 @@ object T {
   val statSpeed = Str("{n} words/sec", "{n} शब्द/सेकंड")
   val stopped = Str("(stopped)", "(रोक दिया गया)")
   val errorAnswer = Str("Something went wrong while answering. {err}", "जवाब देते समय कुछ गड़बड़ हुई। {err}")
-  val starting = Str("Elric is getting ready…", "Elric तैयार हो रहा है…")
+  val starting = Str("Elric is getting ready… {s} s", "Elric तैयार हो रहा है… {s} सेकंड")
+  val firstStartHint =
+    Str("First start can take up to a minute.", "पहली बार शुरू होने में एक मिनट तक लग सकता है।")
   val startFailed =
     Str(
-      "Elric couldn't start on this phone. Try Elric Lite, or close other apps and try again.",
-      "Elric इस फ़ोन पर शुरू नहीं हो सका। Elric Lite आज़माएँ, या दूसरे ऐप बंद करके फिर कोशिश करें।",
+      "Elric couldn't start on this phone. Try closing other apps and tap Retry.",
+      "Elric इस फ़ोन पर शुरू नहीं हो सका। दूसरे ऐप बंद करें और फिर से कोशिश करें दबाएँ।",
     )
+  val retryShort = Str("Retry", "फिर से कोशिश करें")
   val needModelTitle = Str("Download a model to get answers", "जवाब पाने के लिए एक मॉडल डाउनलोड करें")
   val needModelBody =
     Str(
@@ -172,7 +175,7 @@ object T {
   val shopping = Str("Shopping", "शॉपिंग")
   val general = Str("General", "सामान्य")
   val studyDesc = Str("Step-by-step tutor for school and college", "स्कूल और कॉलेज के लिए स्टेप-बाय-स्टेप ट्यूटर")
-  val shoppingDesc = Str("Compare products · needs internet", "प्रोडक्ट्स की तुलना · इंटरनेट चाहिए")
+  val shoppingDesc = Str("Compare products · works offline", "प्रोडक्ट्स की तुलना · ऑफ़लाइन चलता है")
   val generalDesc = Str("Anything else", "बाकी सब कुछ")
   val lengthSec = Str("Answer length", "जवाब की लंबाई")
   val short = Str("Short · fast", "छोटा · तेज़")
@@ -225,7 +228,10 @@ object T {
   val privacy1 = Str("Study answers work offline", "पढ़ाई के जवाब ऑफ़लाइन मिलते हैं")
   val privacy2 = Str("Nothing you type is sent anywhere", "आप जो लिखते हैं वह कहीं नहीं भेजा जाता")
   val privacy3 =
-    Str("Shopping mode uses internet only to find products", "शॉपिंग मोड सिर्फ़ प्रोडक्ट ढूँढने के लिए इंटरनेट इस्तेमाल करता है")
+    Str(
+      "Live prices are coming soon. Today everything runs on your phone.",
+      "लाइव कीमतें जल्द आ रही हैं। अभी सब कुछ आपके फ़ोन पर ही चलता है।",
+    )
 
   // Voice / misc
   val voiceUnavailable = Str("Voice input isn't available on this phone", "इस फ़ोन पर बोलकर पूछना उपलब्ध नहीं है")

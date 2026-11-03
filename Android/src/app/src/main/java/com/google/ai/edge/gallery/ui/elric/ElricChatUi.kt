@@ -72,6 +72,7 @@ import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import android.os.SystemClock
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -93,6 +94,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.ui.common.MarkdownText
 import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 fun modeLabel(m: ElricMode): Str =
@@ -151,17 +153,16 @@ fun HomeContent(
     modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 8.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp),
   ) {
-    if (offline) Banner(tr(if (shop) T.shopNeedsNet else T.offlineStudy), warn = shop)
-    val online = shop && !offline
+    if (offline) Banner(tr(if (shop) T.offlineAll else T.offlineStudy), warn = false)
     Box(
       modifier =
         Modifier.clip(CircleShape)
-          .background(if (online) p.indigoTint else p.greenTint)
+          .background(if (shop) p.indigoTint else p.greenTint)
           .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-      EText(tr(if (online) T.onlineShop else T.onDevice), size = 12.sp, color = if (online) p.indigoInk else p.green)
+      EText(tr(if (shop) T.shopOffline else T.onDevice), size = 12.sp, color = if (shop) p.indigoInk else p.green)
     }
-    if (online) TinyText(tr(T.livePricesSoon), modifier = Modifier.padding(top = 0.dp).graphicsLayer { translationY = -8.dp.toPx() })
+    if (shop) TinyText(tr(T.livePricesSoon), modifier = Modifier.padding(top = 0.dp).graphicsLayer { translationY = -8.dp.toPx() })
     Column {
       val who = name.trim().ifEmpty { T.there.get(lang) }
       androidx.compose.material3.Text(
@@ -333,6 +334,8 @@ fun ChatThread(
   turns: List<ElricTurn>,
   busy: Boolean,
   engine: ElricEngineState,
+  loadStartedAt: Long,
+  firstStart: Boolean,
   needsModel: Boolean,
   streamTick: Int,
   onEdit: (Int) -> Unit,
@@ -404,6 +407,8 @@ fun ChatThread(
               turn = t,
               streaming = streaming,
               engine = engine,
+              loadStartedAt = loadStartedAt,
+              firstStart = firstStart,
               isLast = i == lastModel,
               onCopy = { onCopy(t.text) },
               onSpeak = { onSpeak(t.text) },
@@ -485,6 +490,8 @@ private fun AnswerBlock(
   turn: ElricTurn,
   streaming: Boolean,
   engine: ElricEngineState,
+  loadStartedAt: Long,
+  firstStart: Boolean,
   isLast: Boolean,
   onCopy: () -> Unit,
   onSpeak: () -> Unit,
@@ -495,11 +502,18 @@ private fun AnswerBlock(
   val lang = LocalElricLang.current
   Column(modifier = Modifier.fillMaxWidth(0.94f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
     if (turn.text.isEmpty() && streaming) {
-      if (engine == ElricEngineState.Loading) TinyText(tr(T.starting)) else TypingDots()
+      if (engine == ElricEngineState.Loading) {
+        LoadingProgress(startedAt = loadStartedAt, firstStart = firstStart)
+      } else {
+        TypingDots()
+      }
       return@Column
     }
     if (turn.failed == true) {
       EText(turn.text, size = 14.sp, color = p.muted)
+      if (isLast && !streaming) {
+        EChip(tr(T.retryShort), selected = false, onClick = onRegenerate)
+      }
     } else {
       MarkdownText(
         text = displayAnswer(turn.text) + if (streaming) " ▍" else "",
@@ -544,6 +558,27 @@ private fun Act(icon: ImageVector, desc: String, on: Boolean, onClick: () -> Uni
     contentAlignment = Alignment.Center,
   ) {
     Icon(icon, contentDescription = desc, tint = if (on) p.goldInk else p.muted, modifier = Modifier.size(18.dp))
+  }
+}
+
+/** "Elric is getting ready… 12 s", plus a hint the first time a model starts on this phone. */
+@Composable
+private fun LoadingProgress(startedAt: Long, firstStart: Boolean) {
+  val lang = LocalElricLang.current
+  var now by remember(startedAt) { mutableStateOf(SystemClock.elapsedRealtime()) }
+  LaunchedEffect(startedAt) {
+    while (true) {
+      now = SystemClock.elapsedRealtime()
+      delay(1000)
+    }
+  }
+  val secs = if (startedAt > 0L) ((now - startedAt) / 1000L).coerceAtLeast(0L) else 0L
+  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      TypingDots()
+      TinyText(T.starting.format(lang, "s" to secs.toString()))
+    }
+    if (firstStart) TinyText(tr(T.firstStartHint))
   }
 }
 

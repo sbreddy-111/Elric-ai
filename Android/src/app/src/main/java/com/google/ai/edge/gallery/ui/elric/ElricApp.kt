@@ -384,6 +384,8 @@ fun ElricApp(
                   turns = vm.turns,
                   busy = vm.busy,
                   engine = vm.engine,
+                  loadStartedAt = vm.loadStartedAt,
+                  firstStart = vm.firstStart,
                   needsModel = vm.needsModel,
                   streamTick = vm.streamTick,
                   onEdit = { i -> vm.editQuestion(i)?.let { input = it } },
@@ -563,7 +565,7 @@ private fun ModeSheet(
   }
   SheetOption("✦", tr(T.general), tr(T.generalDesc), mode == ElricMode.GENERAL) { onMode(ElricMode.GENERAL) }
   if (mode == ElricMode.SHOPPING) {
-    Banner(tr(if (offline) T.shopNeedsNet else T.livePricesSoon), warn = offline)
+    Banner(tr(T.livePricesSoon), warn = false)
   }
   SecLabel(tr(T.lengthSec))
   Row(

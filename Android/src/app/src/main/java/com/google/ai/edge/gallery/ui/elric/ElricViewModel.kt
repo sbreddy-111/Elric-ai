@@ -38,16 +38,20 @@ import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Message
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import kotlin.coroutines.resume
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 private const val TAG = "ElricViewModel"
 
@@ -56,6 +60,20 @@ private const val SHORT_MAX_OUTPUT_TOKENS = 512
 
 /** Tokens kept free in the context window for the answer. */
 private const val ANSWER_RESERVE_TOKENS = 1100
+
+/** Time the GPU gets to start before Elric falls back to the CPU. */
+private const val GPU_INIT_TIMEOUT_MS = 45_000L
+
+/** Time the whole load gets before it ends in a clear failure with Retry. */
+private const val LOAD_TIMEOUT_MS = 180_000L
+
+/** The CPU always gets at least this long, even after a slow GPU attempt. */
+private const val MIN_CPU_TIMEOUT_MS = 90_000L
+
+/** Context size limits: small enough for the CPU and for phones with little memory. */
+private const val MIN_TOKENS = 1024
+private const val MAX_TOKENS_CAP = 4096
+private const val CPU_LOW_RAM_MAX_TOKENS = 2048
 
 /** Rough characters per token, kept low so Hindi text is not under-counted. */
 private const val CHARS_PER_TOKEN = 2.5
@@ -112,6 +130,14 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     private set
 
   var engine by mutableStateOf<ElricEngineState>(ElricEngineState.Idle)
+    private set
+
+  /** When the current load began ([SystemClock.elapsedRealtime]), for the seconds counter. */
+  var loadStartedAt by mutableStateOf(0L)
+    private set
+
+  /** True while loading a model that has never started on this phone before. */
+  var firstStart by mutableStateOf(false)
     private set
 
   /** True when the last question could not be answered because no model is downloaded. */
@@ -318,67 +344,199 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     return history.subList(start, history.size).toList()
   }
 
+  /**
+   * Loads [model] for answering. Returns null when ready, or an error. Never waits forever: the
+   * GPU gets [GPU_INIT_TIMEOUT_MS], and the whole load [LOAD_TIMEOUT_MS], after which it ends in
+   * [ElricEngineState.Failed].
+   */
   private suspend fun ensureLoaded(model: Model, system: String): String? {
     if (loadedModel === model && model.instance != null) return null
+    loadStartedAt = SystemClock.elapsedRealtime()
+    firstStart = store.backendFor(model.name).isEmpty()
     engine = ElricEngineState.Loading
-    val previous = loadedModel
-    if (previous != null && previous !== model && previous.instance != null) {
-      withContext(Dispatchers.Default) {
-        suspendCancellableCoroutine { cont ->
-          LlmChatModelHelper.cleanUp(previous) { if (cont.isActive) cont.resume(Unit) }
-          if (previous.instance == null && cont.isActive) cont.resume(Unit)
+    try {
+      val previous = loadedModel
+      if (previous != null && previous !== model && previous.instance != null) {
+        withTimeoutOrNull(15_000L) {
+          withContext(Dispatchers.Default) {
+            suspendCancellableCoroutine { cont ->
+              LlmChatModelHelper.cleanUp(previous) { if (cont.isActive) cont.resume(Unit) }
+              if (previous.instance == null && cont.isActive) cont.resume(Unit)
+            }
+          }
         }
       }
-    }
-    loadedModel = null
-    syncedKey = null
-    if (model.instance != null) {
-      // Initialized earlier (for example before a screen rotation); its conversation is unknown.
-      loadedModel = model
-      engine = ElricEngineState.Ready
-      return null
-    }
-    var error = initialize(model, system)
-    if (error.isNotEmpty() && model.currentAccelerator == Accelerator.GPU) {
-      Log.w(TAG, "GPU start failed ($error); trying CPU")
-      model.configValues =
-        model.configValues.toMutableMap().apply {
-          put(ConfigKeys.ACCELERATOR.label, Accelerator.CPU.label)
+      loadedModel = null
+      syncedKey = null
+      if (model.instance != null) {
+        // Initialized earlier (for example before a screen rotation, or a start that finished
+        // after a timeout); its conversation is unknown.
+        loadedModel = model
+        engine = ElricEngineState.Ready
+        return null
+      }
+
+      // A start from an earlier attempt is still running (it timed out but was kept): wait for it
+      // instead of loading a second copy into memory.
+      val pending = pendingStart
+      if (pending != null && pending.first === model && !pending.second.isCompleted) {
+        val err = initialize(model, system, LOAD_TIMEOUT_MS, abandonOnTimeout = false)
+        if (err == null && model.instance != null) {
+          val backend = if (model.currentAccelerator == Accelerator.GPU) "gpu" else "cpu"
+          started(model, system, backend)
+          // It was started with an older system prompt.
+          syncedKey = null
+          return null
         }
-      error = initialize(model, system)
-    }
-    return if (error.isEmpty() && model.instance != null) {
-      loadedModel = model
-      // A fresh conversation already holds this system prompt and no history.
-      syncedKey = keyOf(system, emptyList())
-      engine = ElricEngineState.Ready
-      null
-    } else {
-      Log.e(TAG, "Failed to start model: $error")
-      engine = ElricEngineState.Failed(error)
-      error.ifEmpty { "start failed" }
+        val msg = err ?: "timed out after ${LOAD_TIMEOUT_MS / 1000} s"
+        engine = ElricEngineState.Failed(msg)
+        return msg
+      }
+
+      val deadline = loadStartedAt + LOAD_TIMEOUT_MS
+      val saved = store.backendFor(model.name)
+      val lowRam = ElricDevice.isLowRam(context)
+      val startOnGpu =
+        when (saved) {
+          "cpu" -> false
+          "gpu" -> true
+          else -> !ElricDevice.preferCpu(context)
+        }
+      Log.i(
+        TAG,
+        "Starting ${model.name}: saved=$saved lowRam=$lowRam ${ElricDevice.describe(context)} " +
+          "gpuFirst=$startOnGpu",
+      )
+
+      var error: String? = null
+      if (startOnGpu) {
+        configure(model, Accelerator.GPU, lowRam)
+        // A timed-out GPU start is abandoned: its engine is closed if it ever finishes.
+        error = initialize(model, system, GPU_INIT_TIMEOUT_MS, abandonOnTimeout = true)
+        if (error == null && model.instance != null) {
+          return started(model, system, "gpu")
+        }
+        Log.w(TAG, "GPU start failed or timed out (${error ?: "timeout"}); trying CPU")
+      }
+      configure(model, Accelerator.CPU, lowRam)
+      val left = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(MIN_CPU_TIMEOUT_MS)
+      // The last attempt is not abandoned: a Retry waits for it instead of starting a second copy.
+      error = initialize(model, system, left, abandonOnTimeout = false)
+      if (error == null && model.instance != null) {
+        return started(model, system, "cpu")
+      }
+      val msg = error ?: "timed out after ${LOAD_TIMEOUT_MS / 1000} s"
+      Log.e(TAG, "Failed to start model: $msg")
+      engine = ElricEngineState.Failed(msg)
+      return msg
+    } catch (e: CancellationException) {
+      engine = ElricEngineState.Idle
+      throw e
+    } catch (t: Throwable) {
+      Log.e(TAG, "Failed to start model", t)
+      val msg = t.message ?: t.javaClass.simpleName
+      engine = ElricEngineState.Failed(msg)
+      return msg
     }
   }
 
-  private suspend fun initialize(model: Model, system: String): String =
-    withContext(Dispatchers.Default) {
-      suspendCancellableCoroutine { cont ->
-        LlmChatModelHelper.initialize(
-          context = context,
-          model = model,
-          taskId = BuiltInTaskId.LLM_CHAT,
-          supportImage = false,
-          supportAudio = false,
-          onDone = { err -> if (cont.isActive) cont.resume(err) },
-          systemInstruction = Contents.of(system),
-          tools = listOf(),
-          enableConversationConstrainedDecoding = false,
-          initialMessages = listOf(),
-          coroutineScope = null,
-          enableResponseFormat = false,
-        )
+  private fun started(model: Model, system: String, backend: String): String? {
+    store.saveBackend(model.name, backend)
+    loadedModel = model
+    // A fresh conversation already holds this system prompt and no history.
+    syncedKey = keyOf(system, emptyList())
+    engine = ElricEngineState.Ready
+    Log.i(TAG, "Started ${model.name} on $backend in ${SystemClock.elapsedRealtime() - loadStartedAt} ms")
+    return null
+  }
+
+  /** Sets the backend and a context size that suits it before a start. */
+  private fun configure(model: Model, accelerator: Accelerator, lowRam: Boolean) {
+    val current =
+      model.getIntConfigValue(key = ConfigKeys.MAX_TOKENS, defaultValue = DEFAULT_MAX_TOKEN)
+    val cap = if (accelerator == Accelerator.CPU && lowRam) CPU_LOW_RAM_MAX_TOKENS else MAX_TOKENS_CAP
+    val tokens = current.coerceIn(MIN_TOKENS, cap)
+    model.configValues =
+      model.configValues.toMutableMap().apply {
+        put(ConfigKeys.ACCELERATOR.label, accelerator.label)
+        put(ConfigKeys.MAX_TOKENS.label, tokens.toString())
       }
+  }
+
+  /** The start still running from an earlier attempt that was not abandoned, if any. */
+  private var pendingStart: Pair<Model, CompletableDeferred<String>>? = null
+
+  /**
+   * Starts the engine on its own thread (the native start blocks and cannot be interrupted) and
+   * waits at most [timeoutMs]. Returns null when started, the error text, or null with no
+   * instance on a timeout.
+   */
+  private suspend fun initialize(
+    model: Model,
+    system: String,
+    timeoutMs: Long,
+    abandonOnTimeout: Boolean,
+  ): String? {
+    val pending = pendingStart
+    val result: CompletableDeferred<String>
+    val abandoned = AtomicBoolean(false)
+    if (pending != null && pending.first === model && !pending.second.isCompleted) {
+      Log.i(TAG, "Waiting for the start that is still running")
+      result = pending.second
+    } else {
+      result = CompletableDeferred()
+      val r = result
+      Thread(
+          {
+            try {
+              LlmChatModelHelper.initializeGuarded(
+                context = context,
+                model = model,
+                taskId = BuiltInTaskId.LLM_CHAT,
+                supportImage = false,
+                supportAudio = false,
+                onDone = { err -> r.complete(err) },
+                systemInstruction = Contents.of(system),
+                tools = listOf(),
+                enableConversationConstrainedDecoding = false,
+                initialMessages = listOf(),
+                enableResponseFormat = false,
+                abandoned = abandoned,
+              )
+            } catch (t: Throwable) {
+              r.complete(t.message ?: t.javaClass.simpleName)
+            }
+            r.complete("start ended without a result")
+          },
+          "elric-engine-start",
+        )
+        .start()
+      if (!abandonOnTimeout) pendingStart = model to result
     }
+    val err = withTimeoutOrNull(timeoutMs) { result.await() }
+    if (err == null) {
+      if (abandonOnTimeout) {
+        synchronized(abandoned) { abandoned.set(true) }
+      }
+      // It may have finished just before giving up.
+      return if (model.instance != null) null else "timed out after ${timeoutMs / 1000} s"
+    }
+    if (pendingStart?.second === result) pendingStart = null
+    return err.ifEmpty { null }
+  }
+
+  /** True when the model file on the phone is complete (not a partial download). */
+  private fun modelFileComplete(model: Model): Boolean {
+    if (model.downloadInfo.imported) return true
+    val expected = model.downloadInfo.sizeInBytes
+    return try {
+      val f = File(model.getPath(context))
+      f.exists() && (expected <= 0L || f.length() >= expected)
+    } catch (e: Exception) {
+      Log.w(TAG, "model file check failed", e)
+      true
+    }
+  }
 
   /** Asks [text] in the open chat. [model] is the downloaded model to answer with, if any. */
   fun send(text: String, model: Model?) {
@@ -386,8 +544,9 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     if (q.isEmpty() || busy) return
     val history = turns.filter { it.failed != true && it.text.isNotBlank() }.toList()
     turns.add(ElricTurn(role = "user", text = q))
-    if (model == null) {
-      // Never fake an answer: the chat shows that a model is needed.
+    if (model == null || (model.instance == null && !modelFileComplete(model))) {
+      // Never fake an answer: the chat shows that a (complete) model is needed.
+      if (model != null) Log.w(TAG, "Model file for ${model.name} is incomplete")
       needsModel = true
       persist()
       return
@@ -400,7 +559,14 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     val system = systemPrompt()
 
     viewModelScope.launch {
-      val loadError = ensureLoaded(model, system)
+      val loadError =
+        try {
+          ensureLoaded(model, system)
+        } catch (e: CancellationException) {
+          throw e
+        } catch (t: Throwable) {
+          t.message ?: "start failed"
+        }
       if (loadError != null) {
         finishReply(replyIndex, ElricTurn(role = "model", text = T.startFailed.get(lang), failed = true))
         return@launch
