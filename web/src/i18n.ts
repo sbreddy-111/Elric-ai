@@ -60,6 +60,7 @@ const en = {
   // Device check
   checking: 'Checking this device…',
   cantRunTitle: "This device can't run Elric offline yet",
+  pausedTitle: 'Download paused',
   reasonNoWebGPU: "This browser doesn't support WebGPU, which Elric needs to run on your device. On iPhone, update to iOS 26 or later and use Safari.",
   reasonNoAdapter: "This browser has WebGPU, but no usable graphics adapter was found.",
   reasonSmallGpu: 'Your device graphics memory is too small for Elric Lite ({limit} available per buffer).',
@@ -146,6 +147,7 @@ const hi: Strings = {
   retry: 'फिर कोशिश करें',
   checking: 'इस डिवाइस की जाँच हो रही है…',
   cantRunTitle: 'यह डिवाइस अभी Elric को ऑफ़लाइन नहीं चला सकता',
+  pausedTitle: 'डाउनलोड रुका हुआ है',
   reasonNoWebGPU: 'यह ब्राउज़र WebGPU सपोर्ट नहीं करता, जो Elric को आपके डिवाइस पर चलाने के लिए ज़रूरी है। iPhone पर iOS 26 या नया वर्ज़न और Safari इस्तेमाल करें।',
   reasonNoAdapter: 'इस ब्राउज़र में WebGPU है, लेकिन कोई इस्तेमाल लायक ग्राफ़िक्स एडैप्टर नहीं मिला।',
   reasonSmallGpu: 'आपके डिवाइस की ग्राफ़िक्स मेमोरी Elric Lite के लिए बहुत कम है (हर बफ़र के लिए {limit})।',

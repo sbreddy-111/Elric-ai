@@ -193,21 +193,58 @@ export async function partialBytes(): Promise<number> {
   return opfs || (await piecesBytes());
 }
 
+let directUrl: string | null = null; // final CDN address (avoids a preflighted redirect on Safari)
+
+/** Follows the Hugging Face redirect with a plain request (no custom headers) to learn the CDN address. */
+async function resolveDirect(signal: AbortSignal): Promise<string> {
+  const c = new AbortController();
+  const onAbort = () => c.abort();
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    const res = await fetch(LITE.url, { signal: c.signal, cache: 'no-store' });
+    const url = res.url;
+    c.abort(); // we only need the address, not the 2 GB body
+    if (!res.ok || !url) throw new Error(`Download failed (HTTP ${res.status})`);
+    return url;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
 /** Fetches one byte range, with a stall timeout so a frozen request is retried instead of hanging. */
-async function fetchRange(from: number, to: number, signal: AbortSignal): Promise<Uint8Array> {
+async function fetchRangeOnce(url: string, from: number, to: number, signal: AbortSignal): Promise<Uint8Array> {
   const piece = new AbortController();
   const onAbort = () => piece.abort();
   signal.addEventListener('abort', onAbort, { once: true });
   const timer = setTimeout(() => piece.abort(), 90_000);
   try {
-    const res = await fetch(LITE.url, { signal: piece.signal, cache: 'no-store', headers: { Range: `bytes=${from}-${to}` } });
-    if (res.status !== 206) throw new Error(`Download failed (HTTP ${res.status})`);
+    const res = await fetch(url, { signal: piece.signal, cache: 'no-store', headers: { Range: `bytes=${from}-${to}` } });
+    if (res.status !== 206) throw new Error(`HTTP ${res.status}`);
     const buf = new Uint8Array(await res.arrayBuffer());
     if (buf.byteLength !== to - from + 1) throw new Error('Short read');
     return buf;
   } finally {
     clearTimeout(timer);
     signal.removeEventListener('abort', onAbort);
+  }
+}
+
+/** One byte range: tries the main address, then the CDN address (refreshed if it expired). */
+async function fetchRange(from: number, to: number, signal: AbortSignal): Promise<Uint8Array> {
+  if (!directUrl) {
+    try {
+      return await fetchRangeOnce(LITE.url, from, to, signal);
+    } catch (e) {
+      if (signal.aborted) throw e;
+      directUrl = await resolveDirect(signal);
+    }
+  }
+  try {
+    return await fetchRangeOnce(directUrl, from, to, signal);
+  } catch (e) {
+    if (signal.aborted) throw e;
+    directUrl = await resolveDirect(signal); // signed address may have expired
+    return await fetchRangeOnce(directUrl, from, to, signal);
   }
 }
 
@@ -229,31 +266,51 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
   const canResume = !!root && typeof (FileSystemFileHandle.prototype as any).createWritable === 'function';
   if (!canResume) return downloadPieces(onProgress, signal);
 
-  const part = await root!.getFileHandle(PART_NAME(), { create: true });
-  let done = (await part.getFile()).size;
+  let part: FileSystemFileHandle;
+  let done: number;
+  try {
+    part = await root!.getFileHandle(PART_NAME(), { create: true });
+    done = (await part.getFile()).size;
+  } catch {
+    return downloadPieces(onProgress, signal); // this browser's file storage refused: use the piece store
+  }
   if (done > total) {
     await root!.removeEntry(PART_NAME());
     return downloadModel(onProgress, signal);
   }
   onProgress({ done, total });
   let failures = 0;
+  let wroteAny = false;
+  let lastErr = '';
   while (done < total) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
     const endByte = Math.min(done + CHUNK, total) - 1;
     try {
       const buf = await fetchRange(done, endByte, signal);
-      const w: FileSystemWritableFileStream = await (part as any).createWritable({ keepExistingData: true });
-      await w.seek(done);
-      await w.write(buf as any);
-      await w.close(); // commits this piece to disk
+      try {
+        const w: FileSystemWritableFileStream = await (part as any).createWritable({ keepExistingData: true });
+        await w.seek(done);
+        await w.write(buf as any);
+        await w.close(); // commits this piece to disk
+      } catch (we: any) {
+        if (we?.name === 'QuotaExceededError') throw we;
+        if (!wroteAny && done === 0) {
+          // This browser can't write files this way: use the piece store instead.
+          try { await root!.removeEntry(PART_NAME()); } catch { /* none */ }
+          return downloadPieces(onProgress, signal);
+        }
+        throw we;
+      }
+      wroteAny = true;
       done += buf.byteLength;
       failures = 0;
       onProgress({ done, total });
     } catch (e: any) {
       if (signal.aborted) throw e;
       if (e?.name === 'QuotaExceededError') throw new Error('Not enough free space on this device for Elric Lite.');
+      lastErr = String(e?.message || e);
       // Network blip or the tab was paused: retry this piece a few times before giving up.
-      if (++failures > 5) throw new Error(`Download paused at ${Math.floor((done / total) * 100)}%. Tap Resume to continue.`);
+      if (++failures > 5) throw new Error(`Download paused at ${Math.floor((done / total) * 100)}% (${lastErr}). Tap Resume to continue.`);
       await sleep(1500 * failures);
       done = (await part.getFile()).size; // trust what is actually on disk
     }
@@ -294,7 +351,7 @@ async function downloadPieces(onProgress: (p: Progress) => void, signal: AbortSi
     } catch (e: any) {
       if (signal.aborted) throw e;
       if (e?.name === 'QuotaExceededError') throw new Error('Not enough free space on this device for Elric Lite.');
-      if (++failures > 5) throw new Error(`Download paused at ${Math.floor((from / total) * 100)}%. Tap Resume to continue.`);
+      if (++failures > 5) throw new Error(`Download paused at ${Math.floor((from / total) * 100)}% (${String(e?.message || e)}). Tap Resume to continue.`);
       await sleep(1500 * failures);
     }
   }

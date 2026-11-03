@@ -12,6 +12,7 @@ E.partialBytes().then((b) => { partial = b; renderStatus(); });
 let modelState: 'idle' | 'downloading' | 'stored' | 'loading' | 'ready' | 'failed' = E.isStored() ? 'stored' : 'idle';
 let progress = 0;
 let failMsg = '';
+let failIsDownload = false;
 let abort: AbortController | null = null;
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -114,7 +115,7 @@ function renderStatus() {
   } else if (modelState === 'loading') {
     body = `<div class="bar"><i style="width:${(progress * 100).toFixed(1)}%"></i></div><p class="tip">${t('loading')}</p>`;
   } else if (modelState === 'failed') {
-    body = `<h3>${t('cantRunTitle')}</h3><p class="w">${esc(failMsg)}</p><button class="primary" id="rt">${partial > 0 ? t('resume') : t('retry')}</button>`;
+    body = `<h3>${t(failIsDownload ? 'pausedTitle' : 'cantRunTitle')}</h3><p class="w">${esc(failMsg)}</p><button class="primary" id="rt">${partial > 0 ? t('resume') : t('retry')}</button>`;
   }
   el.innerHTML = `<div class="box"><div class="mh"><b>${t('modelLite')}</b><span>${SIZE}</span></div><p class="d">${t('modelLiteDesc')}</p>${body}</div>`;
   const on = (id: string, f: () => void) => { document.querySelectorAll<HTMLElement>(`[id="${id}"]`).forEach((b) => (b.onclick = f)); };
@@ -153,7 +154,7 @@ async function startDownload() {
     modelState = 'idle';
     if (e?.name !== 'AbortError') {
       if (document.visibilityState !== 'visible') { resumeOnReturn = true; } // paused by iOS: carry on when user comes back
-      else { modelState = 'failed'; failMsg = String(e?.message || e); }
+      else { modelState = 'failed'; failIsDownload = true; failMsg = String(e?.message || e); }
     }
   }
   keepAwake(false);
@@ -171,6 +172,7 @@ async function startLoad() {
     if (lastTurn?.role === 'user') { const q = turns.pop()!; setTimeout(() => send(q.text)); }
   } catch (e: any) {
     modelState = 'failed';
+    failIsDownload = false;
     failMsg = reasonText({ kind: 'loadFailed', err: String(e?.message || e) });
   }
   renderMain();
