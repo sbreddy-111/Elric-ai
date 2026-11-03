@@ -1,0 +1,1777 @@
+/*
+ * Copyright 2025 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.ai.edge.gallery.ui.common
+
+// import androidx.compose.ui.tooling.preview.Preview
+// import com.google.ai.edge.gallery.ui.preview.MODEL_TEST1
+// import com.google.ai.edge.gallery.ui.theme.GalleryTheme
+import android.util.Log
+import androidx.annotation.StringRes
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.MultiChoiceSegmentedButtonRow
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.Hyphens
+import androidx.compose.ui.text.style.LineBreak
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.data.BooleanSwitchConfig
+import com.google.ai.edge.gallery.data.BottomSheetSelectorConfig
+import com.google.ai.edge.gallery.data.BottomSheetSelectorItem
+import com.google.ai.edge.gallery.data.Config
+import com.google.ai.edge.gallery.data.ConfigKeys
+import com.google.ai.edge.gallery.data.DropdownConfig
+import com.google.ai.edge.gallery.data.LabelConfig
+import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.data.NumberSliderConfig
+import com.google.ai.edge.gallery.data.SegmentedButtonConfig
+import com.google.ai.edge.gallery.data.ValueType
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigAsrSectionUiState
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigAudioLanguageDropdownUiState
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigAudioModelDropdownItemUiState
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigAudioModelItemStatus
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigAudioModelSelectionTarget
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigAudioStatusRowUiState
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigAudioStatusTone
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigAudioTabActions
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigAudioTabUiState
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigAudioText
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigTtsSectionUiState
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigTtsVoiceDropdownUiState
+import com.google.ai.edge.gallery.ui.modelmanager.ConfigTtsVoiceItemUiState
+import com.google.ai.edge.gallery.ui.modelmanager.LanguagePackStatusControl
+import com.google.ai.edge.gallery.ui.modelmanager.LanguagePackUiStatus
+import com.google.ai.edge.gallery.ui.modelmanager.LanguagePacksPanel
+import com.google.ai.edge.gallery.ui.modelmanager.VoicePreviewButton
+import com.google.ai.edge.gallery.ui.modelmanager.VoicePreviewStatus
+import com.google.ai.edge.gallery.ui.modelmanager.languagePackStatusText
+import com.google.ai.edge.gallery.ui.modelmanager.toSupportedLanguagesUiState
+import com.google.ai.edge.gallery.ui.theme.labelSmallNarrow
+import java.util.Locale
+import kotlin.math.ceil
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+/** Minimum height of a config dialog tab, matching the Material 3 text tab height. */
+private val TAB_MIN_HEIGHT = 48.dp
+
+/** Horizontal padding around a tab label; narrower than the 16dp text tab default. */
+private val TAB_LABEL_HORIZONTAL_PADDING = 4.dp
+
+/** Vertical padding around a tab label, so two-line labels don't touch the indicator. */
+private val TAB_LABEL_VERTICAL_PADDING = 8.dp
+
+/** Floor font size for config dialog tab titles before allowing two-line wrapping. */
+private val TAB_TITLE_MIN_FONT_SIZE = 12.sp
+
+/** Step size when auto-sizing config dialog tab titles down from [TextStyle.fontSize]. */
+private const val TAB_TITLE_FONT_STEP_SP = 0.5f
+
+private const val TAG = "AGConfigDialog"
+
+enum class ConfigTab {
+  MODEL_CONFIGS,
+  SYSTEM_PROMPT,
+  AUDIO,
+}
+
+/**
+ * Displays a configuration side sheet allowing users to modify model parameters, the system prompt,
+ * and task audio (ASR and TTS) settings.
+ */
+@Suppress("DEPRECATION", "UNUSED_PARAMETER")
+@Composable
+fun ConfigDialog(
+  title: String = "",
+  configs: List<Config>,
+  initialValues: Map<String, Any>,
+  onDismissed: () -> Unit,
+  onOk: (values: Map<String, Any>, oldSystemPrompt: String, newSystemPrompt: String) -> Unit,
+  okBtnLabel: String = stringResource(R.string.ok),
+  subtitle: String = "",
+  showCancel: Boolean = true,
+  showSystemPromptEditorTab: Boolean = false,
+  defaultSystemPrompt: String = "",
+  curSystemPrompt: String = "",
+  audioUiState: ConfigAudioTabUiState = ConfigAudioTabUiState(),
+  audioActions: ConfigAudioTabActions = ConfigAudioTabActions(),
+  initialTab: ConfigTab = ConfigTab.MODEL_CONFIGS,
+) {
+  val values: SnapshotStateMap<String, Any> = remember {
+    mutableStateMapOf<String, Any>().apply { putAll(initialValues) }
+  }
+  val savedSystemPrompt = remember { curSystemPrompt }
+  var systemPrompt by remember { mutableStateOf(curSystemPrompt) }
+
+  val modelConfigsTabTitle = stringResource(R.string.config_dialog_tab_model_configs)
+  val systemPromptTabTitle = stringResource(R.string.config_dialog_tab_system_prompt)
+  val hasAudioTab = audioUiState.isVisible
+  val audioTabTitle = stringResource(R.string.config_dialog_tab_audio)
+  val tabs =
+    remember(
+      hasAudioTab,
+      showSystemPromptEditorTab,
+      modelConfigsTabTitle,
+      systemPromptTabTitle,
+      audioTabTitle,
+    ) {
+      buildList {
+        add(ConfigTab.MODEL_CONFIGS to modelConfigsTabTitle)
+        if (showSystemPromptEditorTab) {
+          add(ConfigTab.SYSTEM_PROMPT to systemPromptTabTitle)
+        }
+        if (hasAudioTab) {
+          add(ConfigTab.AUDIO to audioTabTitle)
+        }
+      }
+    }
+  var selectedTabIndex by
+    remember(tabs, initialTab) {
+      val initialIndex = tabs.indexOfFirst { it.first == initialTab }
+      mutableIntStateOf(if (initialIndex >= 0) initialIndex else 0)
+    }
+  val selectedTab = tabs.getOrElse(selectedTabIndex) { tabs.first() }.first
+
+  SideSheetDialog(onDismissed = onDismissed) { requestDismiss ->
+    Column(
+      modifier = Modifier.fillMaxSize().padding(20.dp),
+      verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+      // Header: Title and Close button.
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            stringResource(R.string.config_dialog_configure_settings_title),
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(bottom = 4.dp),
+          )
+          if (subtitle.isNotEmpty()) {
+            Text(
+              subtitle,
+              style = labelSmallNarrow,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+        }
+        IconButton(onClick = requestDismiss) {
+          Icon(
+            Icons.Rounded.Close,
+            contentDescription = stringResource(R.string.cancel),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+      }
+
+      // Tab bar.
+      if (tabs.size > 1) {
+        ConfigTabRow(
+          tabTitles = tabs.map { it.second },
+          selectedTabIndex = selectedTabIndex,
+          onSelectTab = { selectedTabIndex = it },
+        )
+      }
+
+      // Content tab (scrollable inside weight(1f)).
+      Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        when (selectedTab) {
+          ConfigTab.MODEL_CONFIGS -> {
+            val scrollState = rememberScrollState()
+            val scrollbarColor = MaterialTheme.colorScheme.onSurfaceVariant
+            Column(
+              modifier =
+                Modifier.fillMaxSize()
+                  .verticalScrollbar(scrollState = scrollState, color = scrollbarColor)
+                  .verticalScroll(scrollState),
+              verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+              ConfigEditorsPanel(configs = configs, values = values)
+            }
+          }
+          ConfigTab.SYSTEM_PROMPT ->
+            OutlinedTextField(
+              value = systemPrompt,
+              modifier = Modifier.fillMaxSize(),
+              textStyle = MaterialTheme.typography.bodySmall,
+              onValueChange = { systemPrompt = it },
+              placeholder = {
+                Text(
+                  text = stringResource(R.string.system_prompt_placeholder),
+                  modifier =
+                    Modifier.offset(y = (4).dp), // Adjust to align the cursor with the text.
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+              },
+            )
+          ConfigTab.AUDIO ->
+            AudioSettingsPanel(
+              modifier = Modifier.fillMaxSize(),
+              uiState = audioUiState,
+              actions = audioActions,
+            )
+        }
+      }
+
+      // Footer action bar: Restore default on the left, Cancel and OK on the right.
+      Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        OutlinedButton(
+          onClick = {
+            when (selectedTab) {
+              ConfigTab.MODEL_CONFIGS -> {
+                for (config in configs) {
+                  values[config.key.label] = config.defaultValue
+                }
+              }
+              ConfigTab.SYSTEM_PROMPT -> {
+                systemPrompt = defaultSystemPrompt
+              }
+              ConfigTab.AUDIO -> {
+                audioActions.onRestoreDefaults()
+              }
+            }
+          },
+          contentPadding = SMALL_BUTTON_CONTENT_PADDING,
+        ) {
+          Text(stringResource(R.string.restore_default))
+        }
+
+        Row(
+          horizontalArrangement = Arrangement.End,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          if (showCancel) {
+            TextButton(onClick = requestDismiss) { Text(stringResource(R.string.cancel)) }
+            Spacer(modifier = Modifier.width(8.dp))
+          }
+
+          Button(
+            onClick = {
+              Log.d(TAG, "Values from dialog: $values")
+              onOk(values.toMap(), savedSystemPrompt, systemPrompt)
+            }
+          ) {
+            Text(okBtnLabel)
+          }
+        }
+      }
+    }
+  }
+}
+
+/** Composable function to display a list of config editor rows. */
+@Composable
+fun ConfigEditorsPanel(configs: List<Config>, values: SnapshotStateMap<String, Any>) {
+  for (config in configs) {
+    when (config) {
+      // Label.
+      is LabelConfig -> {
+        LabelRow(config = config, values = values)
+      }
+
+      // Number slider.
+      is NumberSliderConfig -> {
+        NumberSliderRow(config = config, values = values)
+      }
+
+      // Boolean switch.
+      is BooleanSwitchConfig -> {
+        BooleanSwitchRow(config = config, values = values)
+      }
+
+      // Segmented button.
+      is SegmentedButtonConfig -> {
+        SegmentedButtonRow(config = config, values = values)
+      }
+
+      // Bottom sheet selector.
+      is BottomSheetSelectorConfig -> {
+        BottomSheetSelectorRow(config = config, values = values)
+      }
+
+      // Dropdown selector.
+      is DropdownConfig -> {
+        DropdownRow(config = config, values = values)
+      }
+
+      else -> {}
+    }
+  }
+}
+
+@Composable
+fun LabelRow(config: LabelConfig, values: SnapshotStateMap<String, Any>) {
+  Column(modifier = Modifier.fillMaxWidth()) {
+    // Field label.
+    Text(stringResource(config.key.labelRes), style = MaterialTheme.typography.titleSmall)
+    // Content label.
+    val label =
+      try {
+        values[config.key.label] as String
+      } catch (e: Exception) {
+        ""
+      }
+    Text(label, style = MaterialTheme.typography.bodyMedium)
+  }
+}
+
+internal fun getTextFieldDisplayValue(valueType: ValueType, value: Float): String {
+  return try {
+    when (valueType) {
+      ValueType.FLOAT -> {
+        "%.2f".format(value)
+      }
+
+      ValueType.INT -> {
+        "${value.toInt()}"
+      }
+
+      else -> {
+        ""
+      }
+    }
+  } catch (e: Exception) {
+    ""
+  }
+}
+
+/**
+ * Composable function to display a number slider with an associated text input field.
+ *
+ * This function renders a row containing a slider and a text field, both used to modify a numeric
+ * value. The slider allows users to visually adjust the value within a specified range, while the
+ * text field provides precise numeric input.
+ */
+@Suppress("DEPRECATION")
+@Composable
+fun NumberSliderRow(config: NumberSliderConfig, values: SnapshotStateMap<String, Any>) {
+  val focusManager = LocalFocusManager.current
+
+  Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
+    // Field label.
+    val minStr = getTextFieldDisplayValue(config.valueType, config.sliderMin)
+    val maxStr = getTextFieldDisplayValue(config.valueType, config.sliderMax)
+    Text(
+      "${stringResource(config.key.labelRes)} ($minStr-$maxStr)",
+      style = MaterialTheme.typography.titleSmall,
+    )
+
+    // Controls row.
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+      var isFocused by remember { mutableStateOf(false) }
+      val focusRequester = remember { FocusRequester() }
+
+      // The displaying value for the Text field. It allows hold invalid values that is not a proper
+      // value or out of the slider range, temporary while user is still editing the text.
+      var textFieldDisplayValue by remember {
+        mutableStateOf(
+          getTextFieldDisplayValue(config.valueType, values[config.key.label] as Float)
+        )
+      }
+
+      // Number slider.
+      val sliderValue =
+        try {
+          values[config.key.label] as Float
+        } catch (e: Exception) {
+          0f
+        }
+
+      Slider(
+        modifier = Modifier.height(24.dp).weight(1f).padding(end = 8.dp),
+        value = sliderValue,
+        valueRange = config.sliderMin..config.sliderMax,
+        onValueChange = {
+          values[config.key.label] = it
+          textFieldDisplayValue = getTextFieldDisplayValue(config.valueType, it)
+        },
+      )
+
+      Spacer(modifier = Modifier.width(8.dp))
+
+      // A smaller text field.
+      BasicTextField(
+        value = textFieldDisplayValue,
+        modifier =
+          Modifier.width(80.dp).focusRequester(focusRequester).onFocusChanged {
+            isFocused = it.isFocused
+
+            // When leaving focus, display the internal value so that any invalid value is cleared.
+            if (!isFocused) {
+              textFieldDisplayValue =
+                getTextFieldDisplayValue(config.valueType, values[config.key.label] as Float)
+            }
+          },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+        singleLine = true,
+        onValueChange = {
+          // Always update the display value to reflect the update on the UI.
+          textFieldDisplayValue = it
+
+          // Only if the new value could be converted to a float, then update the internal value,
+          // bounded by the slider range. It prevents invalid values like NaN from crashing the app.
+          it.toFloatOrNull()?.let { floatValue ->
+            values[config.key.label] = minOf(maxOf(floatValue, config.sliderMin), config.sliderMax)
+          }
+        },
+        textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+      ) { innerTextField ->
+        Box(
+          modifier =
+            Modifier.border(
+              width = if (isFocused) 2.dp else 1.dp,
+              color =
+                if (isFocused) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.outline,
+              shape = RoundedCornerShape(4.dp),
+            )
+        ) {
+          Box(modifier = Modifier.padding(8.dp)) { innerTextField() }
+        }
+      }
+    }
+
+    if (config.key == ConfigKeys.MAX_TOKENS) {
+      val sliderValue =
+        try {
+          values[config.key.label] as Float
+        } catch (e: Exception) {
+          0f
+        }
+      if (sliderValue >= 10000f) {
+        Text(
+          text = stringResource(R.string.max_tokens_warning_message),
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.error,
+          modifier = Modifier.padding(top = 8.dp),
+        )
+      }
+    }
+  }
+}
+
+/**
+ * Composable function to display a row with a boolean switch.
+ *
+ * This function renders a row containing a label and a switch, allowing users to toggle a boolean
+ * value.
+ */
+@Composable
+fun BooleanSwitchRow(config: BooleanSwitchConfig, values: SnapshotStateMap<String, Any>) {
+  val switchValue =
+    try {
+      values[config.key.label] as Boolean
+    } catch (e: Exception) {
+      false
+    }
+  Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
+    Text(stringResource(config.key.labelRes), style = MaterialTheme.typography.titleSmall)
+    val descriptionRes = config.descriptionRes
+    when {
+      descriptionRes != null -> {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          stringResource(descriptionRes),
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+      config.description.isNotEmpty() -> {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          config.description,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+    }
+    Switch(checked = switchValue, onCheckedChange = { values[config.key.label] = it })
+  }
+}
+
+/**
+ * Composable function to display a row with a segmented button.
+ *
+ * This function renders a row containing a label and a segmented button, allowing users to select
+ * one or more options from a list.
+ */
+@Composable
+fun SegmentedButtonRow(config: SegmentedButtonConfig, values: SnapshotStateMap<String, Any>) {
+  val selectedOptions: List<String> = remember { (values[config.key.label] as String).split(",") }
+  var selectionStates: List<Boolean> by remember {
+    mutableStateOf(List(config.options.size) { index -> config.options[index] in selectedOptions })
+  }
+
+  Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
+    Text(stringResource(config.key.labelRes), style = MaterialTheme.typography.titleSmall)
+    MultiChoiceSegmentedButtonRow {
+      config.options.forEachIndexed { index, label ->
+        SegmentedButton(
+          shape = SegmentedButtonDefaults.itemShape(index = index, count = config.options.size),
+          onCheckedChange = {
+            var newSelectionStates = selectionStates.toMutableList()
+            val selectedCount = newSelectionStates.count { it }
+
+            // Single select.
+            if (!config.allowMultiple) {
+              if (!newSelectionStates[index]) {
+                newSelectionStates = MutableList(config.options.size) { it == index }
+              }
+            }
+            // Multiple select.
+            else {
+              if (!(selectedCount == 1 && newSelectionStates[index])) {
+                newSelectionStates[index] = !newSelectionStates[index]
+              }
+            }
+            selectionStates = newSelectionStates
+
+            values[config.key.label] =
+              config.options
+                .filterIndexed { index, option -> selectionStates[index] }
+                .joinToString(",")
+          },
+          checked = selectionStates[index],
+          label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, softWrap = false) },
+        )
+      }
+    }
+  }
+}
+
+/**
+ * Composable function to display a row with a bottom sheet selector.
+ *
+ * This function renders a row containing a label and a button, allowing users to select an option
+ * from a bottom sheet.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Suppress("DEPRECATION")
+@Composable
+fun BottomSheetSelectorRow(
+  config: BottomSheetSelectorConfig,
+  values: SnapshotStateMap<String, Any>,
+  showLabel: Boolean = true,
+  onSelected: (BottomSheetSelectorItem) -> Unit = {},
+) {
+  var selectedOption by remember {
+    mutableStateOf(
+      if (config.options.isEmpty()) {
+        null
+      } else {
+        val currentValue = values[config.key.label]?.toString() ?: config.defaultValue
+        config.options.find { it.label == currentValue }
+      }
+    )
+  }
+  var showBottomSheet by remember { mutableStateOf(false) }
+  val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  val scope = rememberCoroutineScope()
+
+  Column(
+    modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    if (showLabel) {
+      Text(stringResource(config.key.labelRes), style = MaterialTheme.typography.titleSmall)
+    }
+    Row(
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+      modifier =
+        Modifier.height(40.dp)
+          .clip(CircleShape)
+          .clickable { showBottomSheet = true }
+          .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+          .padding(start = 12.dp, end = 8.dp),
+    ) {
+      Text(
+        selectedOption?.label ?: "-",
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.weight(1f),
+        maxLines = 1,
+        overflow = TextOverflow.MiddleEllipsis,
+      )
+      Icon(
+        Icons.Rounded.ArrowDropDown,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.onSurface,
+      )
+    }
+  }
+
+  if (showBottomSheet) {
+    ModalBottomSheet(
+      onDismissRequest = { showBottomSheet = false },
+      sheetState = sheetState,
+      containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+      Column(modifier = Modifier.fillMaxWidth()) {
+        val titleResId = config.bottomSheetTitleResId
+        if (titleResId != null) {
+          Text(
+            stringResource(titleResId),
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(16.dp),
+          )
+        }
+        LazyColumn {
+          items(config.options) { option ->
+            Row(
+              modifier =
+                Modifier.clickable {
+                    selectedOption = option
+                    values[config.key.label] = option.label
+                    onSelected(option)
+                    scope.launch {
+                      delay(200)
+                      sheetState.hide()
+                      showBottomSheet = false
+                    }
+                  }
+                  .padding(horizontal = 16.dp, vertical = 12.dp)
+                  .fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+              Icon(
+                Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.alpha(if (option == selectedOption) 1f else 0f),
+              )
+              Text(
+                option.label,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelLarge,
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+internal fun AudioSettingsPanel(
+  uiState: ConfigAudioTabUiState,
+  actions: ConfigAudioTabActions,
+  modifier: Modifier = Modifier,
+) {
+  Column(
+    modifier = modifier.verticalScroll(rememberScrollState()),
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+  ) {
+    uiState.tts?.let { tts -> TtsAudioSection(uiState = tts, actions = actions) }
+    if (uiState.tts != null && uiState.asr != null) {
+      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    }
+    uiState.asr?.let { asr -> AsrAudioSection(uiState = asr, actions = actions) }
+  }
+}
+
+@Composable
+private fun AsrAudioSection(uiState: ConfigAsrSectionUiState, actions: ConfigAudioTabActions) {
+  var showAsrModelMenu by remember { mutableStateOf(false) }
+
+  Text(
+    text = stringResource(R.string.asr_config_section_title),
+    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+    color = MaterialTheme.colorScheme.onSurface,
+  )
+
+  // 1. ASR model dropdown + status row.
+  Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Text(
+      stringResource(R.string.asr_config_model_title),
+      style = MaterialTheme.typography.titleSmall,
+      color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+      stringResource(R.string.asr_config_model_description),
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Box(
+      modifier =
+        Modifier.fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+          .clickable { showAsrModelMenu = !showAsrModelMenu }
+          .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          resolveAudioText(uiState.selectedModelLabel),
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+        Icon(
+          Icons.Rounded.ArrowDropDown,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+      DropdownMenu(expanded = showAsrModelMenu, onDismissRequest = { showAsrModelMenu = false }) {
+        for (item in uiState.modelItems) {
+          AudioModelDropdownMenuItem(
+            item = item,
+            onSelect = { actions.onSelectModel(item.target) },
+            onDownloadModel = actions.onDownloadModel,
+          )
+        }
+      }
+    }
+    uiState.statusRow?.let { statusRow -> AudioStatusIndicatorRow(statusRow = statusRow) }
+  }
+
+  // 2. ASR language dropdown.
+  uiState.languageDropdown?.let { languageDropdown ->
+    AudioLanguageDropdownSection(
+      dropdown = languageDropdown,
+      onSelectLanguage = actions.onSelectAsrLanguage,
+      onDownloadLanguagePack = actions.onDownloadLanguagePack,
+      onDropdownExpanded = actions.onLanguageDropdownExpanded,
+    )
+  }
+
+  // 3. Show live transcription toggle.
+  if (uiState.showLiveTranscriptionToggle) {
+    AudioToggleRow(
+      titleRes = R.string.asr_config_live_transcription_title,
+      descriptionRes = R.string.asr_config_live_transcription_description,
+      checked = uiState.liveTranscriptionEnabled,
+      onCheckedChange = actions.onLiveTranscriptionChanged,
+    )
+  }
+}
+
+@Composable
+private fun TtsAudioSection(uiState: ConfigTtsSectionUiState, actions: ConfigAudioTabActions) {
+  var showTtsModelMenu by remember { mutableStateOf(false) }
+
+  Text(
+    text = stringResource(R.string.tts_config_section_title),
+    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+    color = MaterialTheme.colorScheme.onSurface,
+  )
+
+  // 1. Auto-play TTS switch.
+  if (uiState.showAutoPlayToggle) {
+    AudioToggleRow(
+      titleRes = R.string.tts_config_autoplay_title,
+      descriptionRes = R.string.tts_config_autoplay_description,
+      checked = uiState.autoPlayEnabled,
+      onCheckedChange = actions.onAutoPlayTtsChanged,
+    )
+  }
+
+  // 2. TTS model dropdown + status row.
+  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Text(
+      stringResource(R.string.tts_config_model_title),
+      style = MaterialTheme.typography.titleSmall,
+      color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+      stringResource(R.string.tts_config_model_description),
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Box(
+      modifier =
+        Modifier.fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+          .clickable { showTtsModelMenu = !showTtsModelMenu }
+          .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          resolveAudioText(uiState.selectedModelLabel),
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+        Icon(
+          Icons.Rounded.ArrowDropDown,
+          contentDescription = stringResource(R.string.tts_config_model_select_cd),
+          tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+      DropdownMenu(expanded = showTtsModelMenu, onDismissRequest = { showTtsModelMenu = false }) {
+        for (item in uiState.modelItems) {
+          AudioModelDropdownMenuItem(
+            item = item,
+            onSelect = { actions.onSelectModel(item.target) },
+            onDownloadModel = actions.onDownloadModel,
+          )
+        }
+      }
+    }
+    uiState.statusRow?.let { statusRow -> AudioStatusIndicatorRow(statusRow = statusRow) }
+  }
+
+  // 3. TTS language dropdown.
+  uiState.languageDropdown?.let { languageDropdown ->
+    AudioLanguageDropdownSection(
+      dropdown = languageDropdown,
+      onSelectLanguage = actions.onSelectTtsLanguage,
+      onDownloadLanguagePack = actions.onDownloadLanguagePack,
+      onDropdownExpanded = actions.onLanguageDropdownExpanded,
+    )
+  }
+
+  // 4. TTS voice dropdown.
+  TtsVoiceDropdownSection(
+    voiceDropdown = uiState.voiceDropdown,
+    onSelectVoice = actions.onSelectTtsVoice,
+    onToggleVoicePreview = actions.onToggleVoicePreview,
+    onStopVoicePreview = actions.onStopVoicePreview,
+  )
+}
+
+@Composable
+internal fun AudioModelDropdownMenuItem(
+  item: ConfigAudioModelDropdownItemUiState,
+  onSelect: () -> Unit,
+  onDownloadModel: (Model) -> Unit,
+) {
+  val labelText = resolveAudioText(item.label)
+  val isSelectable = item.isSelectable
+  val isSelected = item.isSelected && isSelectable
+  val isBuiltIn =
+    item.target is ConfigAudioModelSelectionTarget.SystemAsr ||
+      item.target is ConfigAudioModelSelectionTarget.SystemTts
+  val subtitle = modelItemStatusSubtitle(item.status)
+  // Items that can't be selected yet are greyed out, label and subtitle alike. The row ignores
+  // taps, but its trailing download button stays clickable.
+  val disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+  DropdownMenuItem(
+    modifier =
+      Modifier.background(
+        if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+      ),
+    text = {
+      Column {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          Text(
+            text = labelText,
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+            color =
+              when {
+                isSelected -> MaterialTheme.colorScheme.onSecondaryContainer
+                isSelectable -> MaterialTheme.colorScheme.onSurface
+                else -> disabledContentColor
+              },
+          )
+        }
+        if (subtitle != null) {
+          Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color =
+              when {
+                isSelected -> MaterialTheme.colorScheme.onSecondaryContainer
+                isSelectable -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> disabledContentColor
+              },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+      }
+    },
+    trailingIcon = {
+      when (val status = item.status) {
+        ConfigAudioModelItemStatus.Ready ->
+          if (!isBuiltIn) {
+            LanguagePackStatusControl(
+              status = LanguagePackUiStatus.Installed,
+              languageDisplayName = labelText,
+              onDownload = {},
+              showInstalledBadge = true,
+            )
+          }
+        is ConfigAudioModelItemStatus.Unavailable -> Unit
+        is ConfigAudioModelItemStatus.Downloadable ->
+          LanguagePackStatusControl(
+            status = LanguagePackUiStatus.Downloadable,
+            languageDisplayName = labelText,
+            onDownload = { onDownloadModel(status.model) },
+          )
+        is ConfigAudioModelItemStatus.Downloading ->
+          LanguagePackStatusControl(
+            status =
+              LanguagePackUiStatus.Downloading(
+                receivedBytes = status.receivedBytes,
+                totalBytes = status.totalBytes,
+              ),
+            languageDisplayName = labelText,
+            onDownload = {},
+          )
+        // A queued download shows the downloading badge, like a language pack that is queued.
+        ConfigAudioModelItemStatus.Queued ->
+          LanguagePackStatusControl(
+            status = LanguagePackUiStatus.Downloading(receivedBytes = 0L, totalBytes = 0L),
+            languageDisplayName = labelText,
+            onDownload = {},
+          )
+        ConfigAudioModelItemStatus.Checking ->
+          LanguagePackStatusControl(
+            status = LanguagePackUiStatus.Checking,
+            languageDisplayName = labelText,
+            onDownload = {},
+          )
+      }
+    },
+    enabled = isSelectable,
+    onClick = onSelect,
+  )
+}
+
+@Composable
+private fun modelItemStatusSubtitle(status: ConfigAudioModelItemStatus): String? =
+  when (status) {
+    ConfigAudioModelItemStatus.Ready -> null
+    is ConfigAudioModelItemStatus.Downloadable ->
+      stringResource(R.string.model_status_not_downloaded)
+    is ConfigAudioModelItemStatus.Downloading -> {
+      val percent =
+        if (status.totalBytes > 0L) {
+          ((status.receivedBytes * 100L) / status.totalBytes).toInt().coerceIn(0, 100)
+        } else {
+          null
+        }
+      when {
+        status.continuesInBackground && percent != null ->
+          stringResource(R.string.supplementary_status_downloading_background_percent, percent)
+        status.continuesInBackground ->
+          stringResource(R.string.supplementary_status_downloading_background)
+        percent != null -> stringResource(R.string.model_status_downloading_percent, percent)
+        else -> stringResource(R.string.tts_downloading)
+      }
+    }
+    ConfigAudioModelItemStatus.Queued -> stringResource(R.string.supplementary_status_queued)
+    ConfigAudioModelItemStatus.Checking -> stringResource(R.string.supplementary_status_checking)
+    is ConfigAudioModelItemStatus.Unavailable -> stringResource(status.reasonRes)
+  }
+
+@Composable
+private fun AudioLanguageDropdownSection(
+  dropdown: ConfigAudioLanguageDropdownUiState,
+  onSelectLanguage: (String) -> Unit,
+  onDownloadLanguagePack: (model: Model, languageCode: String) -> Unit,
+  onDropdownExpanded: (Model) -> Unit,
+) {
+  if (!dropdown.isSelectionEnabled) {
+    val model = dropdown.model
+    LanguagePacksPanel(
+      modelName = model?.name ?: SYSTEM_ASR_LANGUAGES_KEY,
+      languages = dropdown.toSupportedLanguagesUiState(),
+      onExpanded = { model?.let(onDropdownExpanded) },
+      onDownloadLanguage = { code -> model?.let { onDownloadLanguagePack(it, code) } },
+      onRetryLanguage = { model?.let(onDropdownExpanded) },
+      onSelectLanguage = onSelectLanguage,
+      description = dropdown.description?.let { resolveAudioText(it) },
+      showTopDivider = false,
+      // The side sheet itself is surfaceContainer, so the list is one step darker to stay visible.
+      listContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+      selectionRowStyle = true,
+      showRadioButtons = false,
+    )
+    return
+  }
+
+  var expanded by remember { mutableStateOf(false) }
+  val selectedDisplayName =
+    remember(dropdown.selectedLanguageCode) {
+      formatLanguageDisplayName(dropdown.selectedLanguageCode)
+    }
+
+  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Text(
+      stringResource(R.string.tts_language_packs_title),
+      style = MaterialTheme.typography.titleSmall,
+      color = MaterialTheme.colorScheme.onSurface,
+    )
+    dropdown.description?.let { description ->
+      Text(
+        resolveAudioText(description),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
+    Box(
+      modifier =
+        Modifier.fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+          .clickable {
+            val willExpand = !expanded
+            if (willExpand) {
+              dropdown.model?.let(onDropdownExpanded)
+            }
+            expanded = willExpand
+          }
+          .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          selectedDisplayName,
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+        Icon(
+          Icons.Rounded.ArrowDropDown,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+      DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = { expanded = false },
+        modifier = Modifier.heightIn(max = 320.dp),
+      ) {
+        val disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        for (item in dropdown.items) {
+          val languageName =
+            remember(item.languageCode) { formatLanguageDisplayName(item.languageCode) }
+          val isCurrent = item.isSelected
+          val statusLine =
+            if (dropdown.supportsPerLanguageDownload) {
+              languageItemStatusSubtitle(item.packStatus)
+            } else {
+              null
+            }
+          DropdownMenuItem(
+            modifier =
+              Modifier.background(
+                if (isCurrent) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+              ),
+            text = {
+              Column {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                  Text(
+                    text = languageName,
+                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                    color =
+                      when {
+                        isCurrent -> MaterialTheme.colorScheme.onSecondaryContainer
+                        item.isSelectable -> MaterialTheme.colorScheme.onSurface
+                        else -> disabledContentColor
+                      },
+                  )
+                }
+                if (statusLine != null) {
+                  Text(
+                    text = statusLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color =
+                      when {
+                        item.packStatus == LanguagePackUiStatus.Failed ->
+                          MaterialTheme.colorScheme.error
+                        isCurrent -> MaterialTheme.colorScheme.onSecondaryContainer
+                        item.isSelectable -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> disabledContentColor
+                      },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                }
+              }
+            },
+            trailingIcon = {
+              LanguagePackStatusControl(
+                status = item.packStatus,
+                languageDisplayName = languageName,
+                onDownload = {
+                  dropdown.model?.let { model -> onDownloadLanguagePack(model, item.languageCode) }
+                },
+                showInstalledBadge = true,
+              )
+            },
+            enabled = item.isSelectable,
+            onClick = {
+              if (item.isSelectable) {
+                onSelectLanguage(item.languageCode)
+              }
+            },
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun languageItemStatusSubtitle(status: LanguagePackUiStatus): String? =
+  languagePackStatusText(status)
+    ?: when (status) {
+      LanguagePackUiStatus.Downloadable -> stringResource(R.string.model_status_not_downloaded)
+      is LanguagePackUiStatus.Downloading ->
+        stringResource(R.string.supplementary_status_downloading_background)
+      LanguagePackUiStatus.Unavailable ->
+        stringResource(R.string.supplementary_language_not_offered)
+      LanguagePackUiStatus.Checking -> stringResource(R.string.supplementary_status_checking)
+      LanguagePackUiStatus.Failed,
+      LanguagePackUiStatus.Installed -> null
+    }
+
+@Composable
+private fun TtsVoiceDropdownSection(
+  voiceDropdown: ConfigTtsVoiceDropdownUiState,
+  onSelectVoice: (String) -> Unit,
+  onToggleVoicePreview: (String) -> Unit,
+  onStopVoicePreview: () -> Unit = {},
+) {
+  var showVoiceMenu by remember { mutableStateOf(false) }
+  val isVoiceListLoading = voiceDropdown.isLoading
+
+  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Text(
+      stringResource(R.string.tts_config_voice_title),
+      style = MaterialTheme.typography.titleSmall,
+      color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+      stringResource(R.string.tts_config_voice_description),
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Box(
+      modifier =
+        Modifier.fillMaxWidth()
+          .alpha(if (isVoiceListLoading) 0.38f else 1f)
+          .clip(RoundedCornerShape(12.dp))
+          .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+          .clickable(enabled = !isVoiceListLoading) {
+            if (showVoiceMenu) {
+              onStopVoicePreview()
+              showVoiceMenu = false
+            } else {
+              showVoiceMenu = true
+            }
+          }
+          .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          if (isVoiceListLoading) stringResource(R.string.model_status_initializing)
+          else resolveVoiceItemLabel(voiceDropdown.selectedItem),
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+        Icon(
+          Icons.Rounded.ArrowDropDown,
+          contentDescription = stringResource(R.string.tts_config_voice_select_cd),
+          tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+      DropdownMenu(
+        expanded = showVoiceMenu && !isVoiceListLoading,
+        onDismissRequest = {
+          onStopVoicePreview()
+          showVoiceMenu = false
+        },
+      ) {
+        for (voice in voiceDropdown.items) {
+          val isSelected = voice.id == voiceDropdown.selectedItem.id
+          val voiceLabel = resolveVoiceItemLabel(voice)
+          val isThisVoiceActive =
+            voiceDropdown.voicePreviewUiState.activeVoiceId == voice.id &&
+              (voiceDropdown.engineId.isEmpty() ||
+                voiceDropdown.voicePreviewUiState.activeEngineId == voiceDropdown.engineId)
+          val rowPreviewStatus =
+            if (isThisVoiceActive) voiceDropdown.voicePreviewUiState.status
+            else VoicePreviewStatus.IDLE
+          DropdownMenuItem(
+            modifier =
+              Modifier.background(
+                if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+              ),
+            text = {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+              ) {
+                Text(
+                  text = voiceLabel,
+                  fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                  color =
+                    if (isSelected) {
+                      MaterialTheme.colorScheme.onSecondaryContainer
+                    } else {
+                      MaterialTheme.colorScheme.onSurface
+                    },
+                )
+              }
+            },
+            trailingIcon = {
+              VoicePreviewButton(
+                voiceDisplayName = voiceLabel,
+                status = rowPreviewStatus,
+                onClick = { onToggleVoicePreview(voice.id) },
+              )
+            },
+            onClick = { onSelectVoice(voice.id) },
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AudioToggleRow(
+  @StringRes titleRes: Int,
+  @StringRes descriptionRes: Int,
+  checked: Boolean,
+  onCheckedChange: (Boolean) -> Unit,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Column(modifier = Modifier.weight(1f)) {
+      Text(
+        stringResource(titleRes),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurface,
+      )
+      Text(
+        stringResource(descriptionRes),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
+    Spacer(modifier = Modifier.width(12.dp))
+    Switch(checked = checked, onCheckedChange = onCheckedChange)
+  }
+}
+
+@Composable
+private fun AudioStatusIndicatorRow(statusRow: ConfigAudioStatusRowUiState) {
+  val dotColor =
+    when (statusRow.tone) {
+      ConfigAudioStatusTone.READY -> MaterialTheme.colorScheme.primary
+      ConfigAudioStatusTone.PROGRESS -> MaterialTheme.colorScheme.tertiary
+      ConfigAudioStatusTone.ERROR -> MaterialTheme.colorScheme.error
+      ConfigAudioStatusTone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+  Row(
+    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    // While something is in progress (initializing, downloading, checking), a tiny spinner takes
+    // the dot's place. Both sit in the same fixed slot so the text doesn't move.
+    Box(modifier = Modifier.size(STATUS_INDICATOR_SLOT_SIZE), contentAlignment = Alignment.Center) {
+      if (statusRow.tone == ConfigAudioStatusTone.PROGRESS) {
+        CircularProgressIndicator(
+          modifier = Modifier.size(STATUS_INDICATOR_SLOT_SIZE),
+          color = dotColor,
+          strokeWidth = STATUS_SPINNER_STROKE_WIDTH,
+        )
+      } else {
+        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(dotColor))
+      }
+    }
+    Text(
+      text = resolveAudioText(statusRow.text),
+      style = MaterialTheme.typography.labelSmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+  }
+}
+
+/**
+ * Remembers whether the ASR "Supported languages" list is expanded when no model owns the
+ * languages, such as the built-in Android recognizer.
+ */
+private const val SYSTEM_ASR_LANGUAGES_KEY = "system_asr"
+
+/** Size of the slot that holds the status dot or spinner below an audio model dropdown. */
+private val STATUS_INDICATOR_SLOT_SIZE = 10.dp
+
+/** Stroke width of the status spinner below an audio model dropdown. */
+private val STATUS_SPINNER_STROKE_WIDTH = 1.5.dp
+
+@Composable
+private fun resolveAudioText(text: ConfigAudioText): String =
+  when (text) {
+    is ConfigAudioText.Resource -> stringResource(text.resId)
+    is ConfigAudioText.Formatted -> {
+      val resolvedArgs =
+        text.args
+          .map { arg ->
+            when (arg) {
+              is ConfigAudioText -> resolveAudioText(arg)
+              else -> arg
+            }
+          }
+          .toTypedArray()
+      stringResource(text.resId, *resolvedArgs)
+    }
+    is ConfigAudioText.Literal -> text.text
+  }
+
+@Composable
+private fun resolveVoiceItemLabel(item: ConfigTtsVoiceItemUiState): String {
+  if (item.isDefaultForLanguage) {
+    val languageName = remember(item.languageCode) { formatLanguageDisplayName(item.languageCode) }
+    return if (languageName.isNotEmpty()) {
+      stringResource(R.string.tts_default_voice_for_language, languageName)
+    } else {
+      stringResource(R.string.default_voice_label)
+    }
+  }
+  return item.displayName.ifEmpty { item.id }
+}
+
+private fun formatLanguageDisplayName(languageCode: String): String {
+  if (languageCode.isBlank()) return ""
+  val locale = Locale.forLanguageTag(languageCode)
+  return locale.getDisplayName(Locale.getDefault()).ifEmpty { languageCode }
+}
+
+/**
+ * Composable function to display a row with a dropdown menu selector.
+ *
+ * Renders a label and a pill-shaped trigger that opens a [DropdownMenu] listing
+ * [DropdownConfig.options].
+ */
+@Composable
+fun DropdownRow(config: DropdownConfig, values: SnapshotStateMap<String, Any>) {
+  var expanded by remember { mutableStateOf(false) }
+  val selectedOption = values[config.key.label]?.toString() ?: config.defaultValue
+
+  Column(
+    modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    Text(stringResource(config.key.labelRes), style = MaterialTheme.typography.titleSmall)
+    Box(modifier = Modifier.fillMaxWidth()) {
+      Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier =
+          Modifier.fillMaxWidth()
+            .height(40.dp)
+            .clip(CircleShape)
+            .clickable(role = Role.DropdownList) { expanded = true }
+            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+            .padding(start = 12.dp, end = 8.dp),
+      ) {
+        Text(
+          selectedOption.ifEmpty { "-" },
+          style = MaterialTheme.typography.labelLarge,
+          color = MaterialTheme.colorScheme.onSurface,
+          modifier = Modifier.weight(1f),
+          maxLines = 1,
+          overflow = TextOverflow.MiddleEllipsis,
+        )
+        Icon(
+          Icons.Rounded.ArrowDropDown,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.onSurface,
+        )
+      }
+      DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        for (option in config.options) {
+          DropdownMenuItem(
+            text = { Text(option, style = MaterialTheme.typography.labelLarge) },
+            onClick = {
+              values[config.key.label] = option
+              expanded = false
+            },
+          )
+        }
+      }
+    }
+  }
+}
+
+private fun Modifier.verticalScrollbar(
+  scrollState: ScrollState,
+  color: Color,
+  width: Dp = 4.dp,
+  endOffset: Dp = 8.dp,
+  minThumbHeight: Dp = 24.dp,
+): Modifier = drawWithContent {
+  drawContent()
+  val maxScroll = scrollState.maxValue
+  if (maxScroll <= 0 || maxScroll == Int.MAX_VALUE) return@drawWithContent
+  val viewportHeight = size.height
+  val totalContentHeight = viewportHeight + maxScroll
+  if (totalContentHeight <= 0f) return@drawWithContent
+  val barWidthPx = width.toPx()
+  val barX = size.width + endOffset.toPx()
+  val cornerRadius = CornerRadius(barWidthPx / 2f, barWidthPx / 2f)
+  val thumbHeight =
+    (viewportHeight * (viewportHeight / totalContentHeight))
+      .coerceAtLeast(minThumbHeight.toPx())
+      .coerceAtMost(viewportHeight)
+  val scrollableRange = (viewportHeight - thumbHeight).coerceAtLeast(0f)
+  val scrollFraction = (scrollState.value.toFloat() / maxScroll).coerceIn(0f, 1f)
+  val thumbTop = scrollFraction * scrollableRange
+
+  drawRoundRect(
+    color = color.copy(alpha = 0.15f),
+    topLeft = Offset(barX, 0f),
+    size = Size(barWidthPx, viewportHeight),
+    cornerRadius = cornerRadius,
+  )
+  drawRoundRect(
+    color = color.copy(alpha = 0.5f),
+    topLeft = Offset(barX, thumbTop),
+    size = Size(barWidthPx, thumbHeight),
+    cornerRadius = cornerRadius,
+  )
+}
+
+/**
+ * Config side-sheet tab bar whose labels share one auto-sized font size and stay on one line.
+ *
+ * Each tab is as wide as its label, plus an equal share of the leftover width, so a short label
+ * like "Audio" leaves room for longer ones. Steps down from `titleSmall` (`14.sp`) to a `12.sp`
+ * floor, picking the largest size at which every label fits on 1 line this way. Only when no size
+ * down to the floor fits, such as with very large accessibility text, do the tabs split the width
+ * equally and wrap their labels onto 2 lines at the largest size that fits that way. Labels with an
+ * explicit line break, such as "Model\nconfigs", always render on 2 centered lines.
+ */
+@Composable
+internal fun ConfigTabRow(
+  tabTitles: List<String>,
+  selectedTabIndex: Int,
+  onSelectTab: (Int) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val textMeasurer = rememberTextMeasurer()
+  val density = LocalDensity.current
+  val baseStyle =
+    MaterialTheme.typography.titleSmall.copy(lineBreak = LineBreak.Heading, hyphens = Hyphens.Auto)
+
+  BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+    val rowWidthPx = constraints.maxWidth
+    val tabCount = tabTitles.size.coerceAtLeast(1)
+    val horizontalPaddingPx = with(density) { (TAB_LABEL_HORIZONTAL_PADDING * 2).roundToPx() }
+    val equalTabAvailableWidthPx = ((rowWidthPx / tabCount) - horizontalPaddingPx).coerceAtLeast(1)
+
+    val layout =
+      remember(tabTitles, rowWidthPx, baseStyle, density) {
+        val startSp = baseStyle.fontSize.value
+        val floorSp = TAB_TITLE_MIN_FONT_SIZE.value
+        var candidateSp = startSp
+        while (candidateSp >= floorSp - 0.001f) {
+          // Width of each label on one line at this size.
+          val labelWidthsPx = tabTitles.map { title ->
+            ceil(
+                textMeasurer
+                  .measure(text = title, style = baseStyle.copy(fontSize = candidateSp.sp))
+                  .multiParagraph
+                  .intrinsics
+                  .maxIntrinsicWidth
+              )
+              .toInt()
+          }
+          val leftoverPx = rowWidthPx - labelWidthsPx.sumOf { it + horizontalPaddingPx }
+          if (leftoverPx >= 0) {
+            return@remember ConfigTabRowLayout.SingleLine(
+              fontSize = candidateSp.sp,
+              tabWidthsPx = labelWidthsPx.map { it + horizontalPaddingPx + leftoverPx / tabCount },
+              labelWidthsPx = labelWidthsPx,
+            )
+          }
+          candidateSp -= TAB_TITLE_FONT_STEP_SP
+        }
+        // Even the floor size doesn't fit on one line: equal tabs, labels on up to 2 lines.
+        candidateSp = startSp
+        while (candidateSp >= floorSp - 0.001f) {
+          val fitsAll = tabTitles.all { title ->
+            val result =
+              textMeasurer.measure(
+                text = title,
+                style = baseStyle.copy(fontSize = candidateSp.sp),
+                constraints = Constraints(maxWidth = equalTabAvailableWidthPx),
+              )
+            result.lineCount <= 2 && !result.hasVisualOverflow
+          }
+          if (fitsAll) {
+            return@remember ConfigTabRowLayout.Wrapped(fontSize = candidateSp.sp)
+          }
+          candidateSp -= TAB_TITLE_FONT_STEP_SP
+        }
+        ConfigTabRowLayout.Wrapped(fontSize = TAB_TITLE_MIN_FONT_SIZE)
+      }
+
+    when (layout) {
+      is ConfigTabRowLayout.SingleLine ->
+        ContentWidthTabRow(
+          tabTitles = tabTitles,
+          selectedTabIndex = selectedTabIndex,
+          onSelectTab = onSelectTab,
+          layout = layout,
+        )
+      is ConfigTabRowLayout.Wrapped ->
+        PrimaryTabRow(selectedTabIndex = selectedTabIndex, containerColor = Color.Transparent) {
+          tabTitles.forEachIndexed { index, tabTitle ->
+            ConfigTab(
+              title = tabTitle,
+              selected = selectedTabIndex == index,
+              onClick = { onSelectTab(index) },
+              fontSize = layout.fontSize,
+              maxLines = 2,
+            )
+          }
+        }
+    }
+  }
+}
+
+/** How [ConfigTabRow] lays out its tabs. */
+private sealed interface ConfigTabRowLayout {
+  /**
+   * Every label fits on one line at [fontSize] when each tab is [tabWidthsPx] wide; its label is
+   * [labelWidthsPx] wide.
+   */
+  data class SingleLine(
+    val fontSize: TextUnit,
+    val tabWidthsPx: List<Int>,
+    val labelWidthsPx: List<Int>,
+  ) : ConfigTabRowLayout
+
+  /** Equal-width tabs whose labels wrap onto up to 2 lines at [fontSize]. */
+  data class Wrapped(val fontSize: TextUnit) : ConfigTabRowLayout
+}
+
+/**
+ * Tab row styled like [PrimaryTabRow] whose tabs have the widths in [layout] instead of equal
+ * widths. The indicator spans the selected tab's label and slides between tabs.
+ */
+@Composable
+private fun ContentWidthTabRow(
+  tabTitles: List<String>,
+  selectedTabIndex: Int,
+  onSelectTab: (Int) -> Unit,
+  layout: ConfigTabRowLayout.SingleLine,
+) {
+  val density = LocalDensity.current
+  val selectedIndex = selectedTabIndex.coerceIn(0, (tabTitles.size - 1).coerceAtLeast(0))
+  val tabLeftPx = layout.tabWidthsPx.take(selectedIndex).sum()
+  val tabWidthPx = layout.tabWidthsPx.getOrElse(selectedIndex) { 0 }
+  val labelWidthPx = layout.labelWidthsPx.getOrElse(selectedIndex) { 0 }
+  val indicatorWidth by
+    animateDpAsState(
+      targetValue = with(density) { labelWidthPx.toDp() },
+      label = "ConfigTabIndicatorWidth",
+    )
+  val indicatorLeft by
+    animateDpAsState(
+      targetValue = with(density) { (tabLeftPx + (tabWidthPx - labelWidthPx) / 2).toDp() },
+      label = "ConfigTabIndicatorLeft",
+    )
+  Column(modifier = Modifier.fillMaxWidth()) {
+    Box(modifier = Modifier.fillMaxWidth()) {
+      Row(modifier = Modifier.fillMaxWidth().selectableGroup()) {
+        tabTitles.forEachIndexed { index, tabTitle ->
+          Box(modifier = Modifier.width(with(density) { layout.tabWidthsPx[index].toDp() })) {
+            ConfigTab(
+              title = tabTitle,
+              selected = selectedTabIndex == index,
+              onClick = { onSelectTab(index) },
+              fontSize = layout.fontSize,
+              // Titles with an explicit line break (e.g. "Model\nconfigs") render on 2 lines.
+              maxLines = 2,
+            )
+          }
+        }
+      }
+      TabRowDefaults.PrimaryIndicator(
+        width = indicatorWidth,
+        modifier =
+          Modifier.align(Alignment.BottomStart).offset {
+            IntOffset(x = indicatorLeft.roundToPx(), y = 0)
+          },
+      )
+    }
+    HorizontalDivider()
+  }
+}
+
+/**
+ * Config dialog tab rendered at the shared [fontSize] and [maxLines] computed by [ConfigTabRow].
+ */
+@Composable
+internal fun ConfigTab(
+  title: String,
+  selected: Boolean,
+  onClick: () -> Unit,
+  fontSize: TextUnit = MaterialTheme.typography.titleSmall.fontSize,
+  maxLines: Int = 2,
+) {
+  Tab(
+    selected = selected,
+    onClick = onClick,
+    modifier = Modifier.heightIn(min = TAB_MIN_HEIGHT),
+    selectedContentColor = MaterialTheme.colorScheme.primary,
+    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+  ) {
+    Text(
+      text = title,
+      style =
+        MaterialTheme.typography.titleSmall.copy(
+          fontSize = fontSize,
+          lineBreak = LineBreak.Heading,
+          hyphens = Hyphens.Auto,
+        ),
+      textAlign = TextAlign.Center,
+      maxLines = maxLines,
+      overflow = TextOverflow.Ellipsis,
+      modifier =
+        Modifier.padding(
+          horizontal = TAB_LABEL_HORIZONTAL_PADDING,
+          vertical = TAB_LABEL_VERTICAL_PADDING,
+        ),
+    )
+  }
+}

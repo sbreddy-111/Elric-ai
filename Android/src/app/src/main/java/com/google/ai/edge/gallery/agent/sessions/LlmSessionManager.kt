@@ -1,0 +1,288 @@
+/*
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.ai.edge.gallery.agent.sessions
+
+import android.graphics.Bitmap
+import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.proto.ChatMessageProto
+import com.google.ai.edge.gallery.proto.ChatSessionProto
+import com.google.ai.edge.gallery.runtime.CleanUpListener
+import com.google.ai.edge.gallery.runtime.ResultListener
+import com.google.ai.edge.litertlm.Message
+import java.util.UUID
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+
+/** Generates a unique session identifier. */
+fun generateSessionId(): String = UUID.randomUUID().toString()
+
+/**
+ * Orchestration manager for LLM sessions in AI Edge Gallery.
+ *
+ * Coordinates session lifecycle, chat history persistence, LLM instance configuration, inference
+ * execution, and feedback linkage across models and tasks.
+ *
+ * Assumptions:
+ * - **Single Active Session**: Only one active LLM session can run at a time in the application. At
+ *   any given moment, the system assumes a single session is executing inference or interacting
+ *   with the runtime.
+ * - **Model Independence**: A session ID identifies a conversation history and does not tie the
+ *   session to a specific model. A conversation session can switch between different models across
+ *   its lifecycle, and historical sessions can be restored or resumed using a different model than
+ *   the one originally used to generate earlier messages.
+ */
+interface LlmSessionManager {
+  /** The unique identifier of the currently active session, or null if uninitialized. */
+  var activeSessionId: String?
+    get() = null
+    set(value) {}
+
+  /** Reactive stream of persisted chat sessions, ordered by recency. */
+  val chatSessions: Flow<List<ChatSessionProto>>
+    get() = emptyFlow()
+
+  /**
+   * Creates a new LLM session, initializes the conversation context on the config's model, sets it
+   * as [activeSessionId], and returns the newly generated unique session ID.
+   *
+   * By definition, a new session starts with an empty conversation history. It does not write an
+   * empty placeholder record to persistent storage; persistence occurs when messages are saved via
+   * [saveSessionHistory].
+   *
+   * @param config The [SessionConfig] for the new session.
+   * @return The newly generated unique session ID.
+   */
+  suspend fun createSession(config: SessionConfig): String
+
+  /**
+   * Loads an existing session by ID from persistent storage, sets it as [activeSessionId],
+   * initializes the conversation context on the config's model with its stored messages, and
+   * returns the restored list of chat messages.
+   *
+   * @param sessionId The ID of the session to load.
+   * @param config The [SessionConfig] for the session.
+   * @return The restored list of chat messages for the session.
+   */
+  suspend fun loadSession(sessionId: String, config: SessionConfig): List<ChatMessageProto>
+
+  /**
+   * Resets or reconfigures a session's conversation context on the config's model with the provided
+   * in-memory [initialMessages] (e.g. prompt update, tool toggles, turn rollback, or recovery after
+   * interrupt).
+   *
+   * @param sessionId The session identifier to reset. Defaults to [activeSessionId] or a new ID.
+   * @param config The updated [SessionConfig].
+   * @param initialMessages The messages used to seed or reinitialize the conversation context.
+   *   Defaults to empty.
+   * @param enableConversationConstrainedDecoding Whether conversation constrained decoding is
+   *   enabled.
+   */
+  suspend fun resetSession(
+    sessionId: String = activeSessionId ?: generateSessionId(),
+    config: SessionConfig,
+    initialMessages: List<Message> = emptyList(),
+    enableConversationConstrainedDecoding: Boolean = false,
+  )
+
+  /**
+   * Registers the configuration to use for [sessionId] and sets it as [activeSessionId] without
+   * resetting the conversation on the model.
+   *
+   * @param sessionId The session identifier to register.
+   * @param config The [SessionConfig] to associate with [sessionId].
+   */
+  fun setSessionConfig(sessionId: String, config: SessionConfig)
+
+  /**
+   * Lists metadata for all persisted chat sessions.
+   *
+   * @param taskId Optional task ID filter. If null, returns sessions across all tasks.
+   * @return The list of persisted chat session metadata, ordered by recency.
+   */
+  suspend fun listSessions(taskId: String? = null): List<ChatSessionProto>
+
+  /**
+   * Deletes a session and its history from persistence.
+   *
+   * @param sessionId The unique ID of the session to delete.
+   */
+  suspend fun deleteSession(sessionId: String)
+
+  /** Clears all saved chat sessions from persistent storage and cleans up cached resources. */
+  suspend fun clearAllSessions()
+
+  /**
+   * Saves/updates the entire message history for a given session.
+   *
+   * The session ID identifies the conversation history independently of the model. The optional
+   * [originalModel] records the model currently or originally associated with this snapshot for
+   * display or metadata purposes, but does not constrain the session to that model.
+   *
+   * @param sessionId The session identifier.
+   * @param messages The complete list of messages in protobuf format to persist.
+   * @param originalModel Optional name of the model associated with the session snapshot.
+   * @param taskId Optional task ID associated with the session.
+   */
+  suspend fun saveSessionHistory(
+    sessionId: String,
+    messages: List<ChatMessageProto>,
+    originalModel: String? = null,
+    taskId: String? = null,
+  )
+
+  /**
+   * Caches the given [bitmaps] for [sessionId] to local session storage and returns the resulting
+   * absolute file paths.
+   */
+  suspend fun cacheSessionImages(sessionId: String, bitmaps: List<Bitmap>): List<String> =
+    emptyList()
+
+  /**
+   * Caches the given raw PCM [audioData] for [sessionId] to local session storage and returns the
+   * resulting absolute file path, or null if caching fails.
+   */
+  suspend fun cacheSessionAudio(sessionId: String, audioData: ByteArray): String? = null
+
+  /**
+   * Runs inference for the given session on the specified [model].
+   *
+   * Assumes only one session and inference operation can run at a time in the application.
+   *
+   * @param sessionId The session identifier.
+   * @param model The model to run inference on.
+   * @param input The text query input.
+   * @param resultListener Callback receiving partial tokens, completion status, and thinking
+   *   channel output.
+   * @param cleanUpListener Callback invoked when inference cleanup finishes.
+   * @param onError Callback invoked upon an error during inference.
+   * @param images Optional input images.
+   * @param audioClips Optional input audio clips.
+   * @param extraContext Optional key-value parameters for engine inference (e.g.
+   *   "enable_thinking").
+   */
+  suspend fun generateResponse(
+    sessionId: String,
+    model: Model,
+    input: String,
+    resultListener: ResultListener,
+    cleanUpListener: CleanUpListener = {},
+    onError: (message: String) -> Unit = {},
+    images: List<Bitmap> = emptyList(),
+    audioClips: List<ByteArray> = emptyList(),
+    extraContext: Map<String, String> = emptyMap(),
+  )
+
+  /**
+   * Stops any ongoing inference for the given session on the specified [model].
+   *
+   * @param sessionId The session identifier whose active inference should be cancelled.
+   * @param model The model to stop.
+   */
+  fun stopResponse(sessionId: String, model: Model)
+
+  /**
+   * Links a feedback submission ID to a session for tracking. This unifies chat history and
+   * feedback history so feedback no longer needs to maintain its own version of the chat history.
+   *
+   * @param sessionId The session identifier.
+   * @param feedbackId Unique identifier for the feedback submission.
+   * @param messageIndex Optional index of the message receiving feedback.
+   */
+  suspend fun linkFeedbackToSession(
+    sessionId: String,
+    feedbackId: String,
+    messageIndex: Int? = null,
+  )
+
+  /**
+   * Checks the active conversation token budget against model limits and compacts the conversation
+   * context (e.g. by summarizing or truncating it) and resets the conversation KV-cache if
+   * approaching token limits.
+   *
+   * @param sessionId The session identifier.
+   * @param model The model whose conversation context should be inspected and compacted.
+   * @param onCompactionStart Optional callback invoked at most once, immediately when compaction is
+   *   triggered and before the context is compacted.
+   * @param force Whether to force compaction regardless of token budget thresholds.
+   * @return [CompactionResult.COMPACTED] if context was compacted and conversation was reset,
+   *   [CompactionResult.NOT_NEEDED] if compaction was not needed, or [CompactionResult.FAILED] if
+   *   compaction was needed (or forced) and attempted, but failed.
+   */
+  suspend fun compactContextIfNeeded(
+    sessionId: String,
+    model: Model,
+    onCompactionStart: (() -> Unit)? = null,
+    force: Boolean = false,
+  ): CompactionResult = CompactionResult.NOT_NEEDED
+
+  /**
+   * Checks the active conversation token budget against model limits and performs context
+   * compaction and conversation KV-cache reset if approaching token limits, returning the
+   * [ContextCompactionOutcome] when compaction succeeds or `null` otherwise.
+   *
+   * @param sessionId The session identifier.
+   * @param model The model whose conversation context should be inspected and compacted.
+   * @param onCompactionStart Optional callback invoked at most once, immediately when compaction is
+   *   triggered and before the context is compacted.
+   * @param onCompactionFailed Optional callback invoked when compaction was needed (or forced) and
+   *   attempted, but failed.
+   * @param force Whether to force compaction regardless of token budget thresholds.
+   * @param source The [ContextCompactionSource] describing what initiated the compaction check.
+   * @return [ContextCompactionOutcome] if context was compacted, or `null` otherwise.
+   */
+  suspend fun compactContextWithOutcome(
+    sessionId: String,
+    model: Model,
+    onCompactionStart: (() -> Unit)? = null,
+    onCompactionFailed: (() -> Unit)? = null,
+    force: Boolean = false,
+    source: ContextCompactionSource = ContextCompactionSource.TOKEN_LIMIT,
+  ): ContextCompactionOutcome? {
+    val result =
+      compactContextIfNeeded(
+        sessionId = sessionId,
+        model = model,
+        onCompactionStart = onCompactionStart,
+        force = force,
+      )
+    when (result) {
+      CompactionResult.COMPACTED -> {
+        val algorithm =
+          if (source == ContextCompactionSource.TOKEN_LIMIT) {
+            ContextCompactionAlgorithm.SUMMARIZATION
+          } else {
+            ContextCompactionAlgorithm.TRUNCATION
+          }
+        return ContextCompactionOutcome(algorithm = algorithm, source = source)
+      }
+      CompactionResult.NOT_NEEDED -> return null
+      CompactionResult.FAILED -> {
+        onCompactionFailed?.invoke()
+        return null
+      }
+    }
+  }
+
+  /**
+   * Checks whether the active conversation has reached or is approaching the model's token limit.
+   *
+   * @param sessionId The session identifier.
+   * @param model The target model instance.
+   * @return True if the token limit is reached, false otherwise.
+   */
+  fun isTokenLimitReached(sessionId: String, model: Model): Boolean = false
+}

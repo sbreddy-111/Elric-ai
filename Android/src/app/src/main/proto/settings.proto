@@ -1,0 +1,193 @@
+/* Copyright 2025 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
+syntax = "proto3";
+
+package com.google.ai.edge.gallery.proto;
+
+import "chat_history.proto";
+
+option java_package = "com.google.ai.edge.gallery.proto";
+option java_multiple_files = true;
+
+enum Theme {
+  THEME_UNSPECIFIED = 0;
+
+  // Force to use light theme.
+  THEME_LIGHT = 1;
+
+  // Force to use dark theme.
+  THEME_DARK = 2;
+
+  // Use the system them setting on user's phone.
+  THEME_AUTO = 3;
+}
+
+message AccessTokenData {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_at_ms = 3;
+}
+
+message ImportedModel {
+  string file_name = 1;
+  int64 file_size = 2;
+
+  oneof config {
+    LlmConfig llm_config = 3;
+  }
+  // Only set for models imported from url.
+  string url = 4;
+}
+
+message LlmConfig {
+  repeated string compatible_accelerators = 1;
+  int32 default_max_tokens = 2;
+  int32 default_topk = 3;
+  float default_topp = 4;
+  float default_temperature = 5;
+  bool support_image = 6;
+  bool support_audio = 7;
+  bool support_tiny_garden = 8;
+  bool support_mobile_actions = 9;
+  bool support_thinking = 10;
+  bool support_speculative_decoding = 11;
+}
+
+message TtsSettingsProto {
+  string selected_engine_id = 1;
+  string selected_voice_id = 2;
+  bool is_auto_play_enabled = 3;
+  bool is_explicitly_selected = 4;
+  // BCP-47 tag of the language selected for read aloud. Empty means the engine
+  // default.
+  string selected_language_code = 5;
+}
+
+message AsrSettingsProto {
+  reserved 3;
+  // AsrModelIdentifier of the selected engine. Empty means the system default.
+  string selected_model_id = 1;
+  // BCP-47 tag of the recognition language. Empty means the default language.
+  string selected_language_code = 2;
+  // Unset means the default (show interim results).
+  optional bool show_interim_results = 4;
+  bool is_explicitly_selected = 5;
+}
+
+// Modality filter of the Model Manager's Supplementary tab.
+enum SupplementaryModelFilterProto {
+  // Not chosen yet; shown as all models.
+  SUPPLEMENTARY_MODEL_FILTER_UNSPECIFIED = 0;
+  SUPPLEMENTARY_MODEL_FILTER_ALL = 1;
+  SUPPLEMENTARY_MODEL_FILTER_TTS = 2;
+  SUPPLEMENTARY_MODEL_FILTER_ASR = 3;
+}
+
+message Settings {
+  Theme theme = 1;
+  AccessTokenData access_token_data = 2;  // deprecated
+  repeated string text_input_history = 3;
+  repeated ImportedModel imported_model = 4;
+  // Has the app tos been accepted.
+  bool is_tos_accepted = 5;
+  bool has_run_tiny_garden = 6;
+  bool has_seen_benchmark_comparison_help = 7;
+  // Has the Gemma terms of use been accepted.
+  bool is_gemma_terms_accepted = 8;
+  AsrSettingsProto asr_settings = 13;
+  TtsSettingsProto tts_settings = 14;
+  SupplementaryModelFilterProto supplementary_model_filter = 17;
+
+  repeated string viewed_promo_id = 10;
+  bool disable_firebase_analytics = 11;
+  map<string, bool> auto_context_compact_by_task = 15;
+  map<string, bool> show_live_metrics_by_task = 16;
+  // Name of the main model last launched from the model selection screen of
+  // each task that has one, by task id.
+  map<string, string> last_main_model_by_task = 18;
+}
+
+message McpAuth {
+  message RequestHeader {
+    string header_name = 1;
+    string header_value = 2;
+  }
+
+  message OAuth {}
+
+  oneof auth_method {
+    bool none = 1;
+    RequestHeader request_header = 2;
+    OAuth oauth = 3;
+  }
+}
+
+message UserData {
+  AccessTokenData access_token_data = 1;
+  map<string, string> secrets = 2;
+  repeated ChatSessionProto chat_sessions = 3;
+  // MCP server URL to MCP auth data.
+  map<string, McpAuth> mcp_auths = 4;
+}
+
+enum FillMode {
+  FILL_MODE_UNSPECIFIED = 0;
+  FILL_MODE_DISABLED = 1;
+  FILL_MODE_SOLID = 2;
+  FILL_MODE_COLORIZE = 3;
+}
+
+message Point {
+  float x = 1;
+  float y = 2;
+}
+
+message StrokePath {
+  repeated Point point = 1;
+  int32 brush_color = 2;
+  float brush_size = 3;
+  float brush_softness = 4;
+  int32 blur_type = 5;
+}
+
+// A single cutout, used in scrapbook demo.
+message Cutout {
+  // id of the cutout.
+  string id = 1;
+
+  // Rotation degree applied to the cutout.
+  int32 rotation_degree = 2;
+
+  // The width of the border.
+  int32 border_width = 3;
+
+  // The color of the border.
+  int32 border_color = 4;
+
+  // The fill color.
+  int32 fill_color = 5;
+
+  // The fill mode.
+  FillMode fill_mode = 6;
+
+  // Doodle stroke paths.
+  repeated StrokePath doodle_stroke = 7;
+}
+
+// A collection of cutout, used in scrapbook demo.
+message CutoutCollection {
+  repeated Cutout cutout = 1;
+}
