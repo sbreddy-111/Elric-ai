@@ -12,8 +12,10 @@
 //              grounding instead (not free for keys created after the 2.5
 //              models closed; 3.x grounding is paid-only).
 //
-// Protection: deployed with verify_jwt=false but REQUIRES POST with header
-// x-autofix-secret == AUTOFIX_SECRET (Edge secret; cron reads it from Vault).
+// Protection: deployed with verify_jwt=false but REQUIRES POST with either
+//   - header x-autofix-secret == AUTOFIX_SECRET (Edge secret; cron reads it from Vault), or
+//   - Authorization: Bearer <user JWT> of the owner (theinfo222@gmail.com), checked
+//     against Supabase Auth — used by the "Run checker now" button in Elric AI Admin.
 
 const MODEL = Deno.env.get("AUTOFIX_MODEL") ?? "gemini-3.5-flash-lite";
 const GOOGLE_GROUNDING = Deno.env.get("AUTOFIX_GOOGLE_GROUNDING") === "1";
@@ -28,6 +30,9 @@ const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const SB_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 const SECRET = Deno.env.get("AUTOFIX_SECRET") ?? "";
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const OWNER_EMAIL = "theinfo222@gmail.com";
+const ADMIN_ORIGINS = ["https://elricai.sbs", "http://localhost:5173"];
 const UA = "ElricAI-autofix/1.0 (https://elricai.sbs)";
 
 type Row = { id: string; question: string | null; answer: string | null; note: string | null };
@@ -215,10 +220,42 @@ async function mark(id: string, status: string, verdict: string, sources: unknow
   });
 }
 
+function cors(req: Request): Record<string, string> {
+  const o = req.headers.get("origin") ?? "";
+  return ADMIN_ORIGINS.includes(o)
+    ? { "Access-Control-Allow-Origin": o, "Access-Control-Allow-Headers": "authorization, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS", "Vary": "Origin" }
+    : {};
+}
+
+// Owner JWT: verified by Supabase Auth itself (signature + expiry), then exact email match.
+async function isOwner(req: Request): Promise<boolean> {
+  const m = (req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i);
+  if (!m || !ANON_KEY || m[1] === ANON_KEY || m[1] === SB_KEY) return false;
+  try {
+    const r = await fetch(`${SB_URL}/auth/v1/user`, {
+      headers: { apikey: ANON_KEY, Authorization: `Bearer ${m[1]}` }, signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return false;
+    const u = await r.json();
+    return String(u?.email ?? "").toLowerCase() === OWNER_EMAIL;
+  } catch { return false; }
+}
+
 Deno.serve(async (req) => {
-  if (req.method !== "POST" || !safeEq(req.headers.get("x-autofix-secret") ?? "", SECRET)) {
-    return new Response("forbidden", { status: 403 });
+  const ch = cors(req);
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: ch });
+  if (req.method !== "POST") return new Response("forbidden", { status: 403, headers: ch });
+  if (!safeEq(req.headers.get("x-autofix-secret") ?? "", SECRET) && !(await isOwner(req))) {
+    return new Response("forbidden", { status: 403, headers: ch });
   }
+  const res = await run();
+  const h = new Headers(res.headers);
+  for (const [k, v] of Object.entries(ch)) h.set(k, v);
+  return new Response(res.body, { status: res.status, headers: h });
+});
+
+async function run(): Promise<Response> {
   const started = Date.now();
   const out: Record<string, unknown> = { no_question: 0, checked: 0, auto_added: 0, duplicate: 0, needs_review: 0, rejected: 0, deferred: 0, errors: 0 };
   const inc = (k: string) => (out[k] = (out[k] as number) + 1);
@@ -297,4 +334,4 @@ Deno.serve(async (req) => {
   }
   await Promise.all(rows.map(handle));
   return Response.json(out);
-});
+}

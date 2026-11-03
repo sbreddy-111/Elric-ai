@@ -18,3 +18,13 @@ Deploy: `POST https://api.supabase.com/v1/projects/<ref>/functions/deploy?slug=a
 SQL editor: `select created_at, question, answer, note, ai_verdict, ai_sources from ai_feedback where review_status='needs_review' order by created_at desc;`
 Approve: insert the suggested fact into `ai_facts` (source 'manual') and set the row to `auto_added`/`rejected`;
 undo an auto fact: `update ai_facts set active=false where id=…;`
+
+## Elric AI Admin (https://elricai.sbs/admin/)
+- Web page `web/admin/index.html` + `web/src/admin/*` (separate Vite entry; the service worker ignores `/admin/`).
+- Sign-in: Supabase Auth magic link, owner email only (`theinfo222@gmail.com`, existing user; `create_user:false`).
+  `https://elricai.sbs/admin/` is in the Auth redirect allow list.
+- `supabase/migrations/20261103_ai_admin.sql`: `authenticated` table grants + RLS policies `ai_*_owner_all`
+  (`lower(auth.jwt()->>'email') = 'theinfo222@gmail.com'`), and `ai_admin_checker_status()` (last cron run, owner only).
+  Other signed-in users (gym app) match no policy → see/change nothing. Anon grants/policies unchanged.
+- "Run checker now": `ai-autofix` also accepts `Authorization: Bearer <owner JWT>` (verified via `/auth/v1/user`),
+  CORS for https://elricai.sbs only. The secret never reaches the browser.
