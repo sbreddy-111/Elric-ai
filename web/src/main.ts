@@ -189,7 +189,7 @@ function renderStatus() {
   const els = Array.from(document.querySelectorAll<HTMLElement>('#status, .status-slot'));
   if (!els.length) return;
   const el = { set innerHTML(h: string) { els.forEach((e) => (e.innerHTML = h)); } };
-  if (modelState === 'ready') { el.innerHTML = turns.length ? '' : `<div class="ok">● ${t(E.MODEL_NAME_KEY as keyof Strings)} · ${t('loaded')}</div>`; return; }
+  if (modelState === 'ready') { el.innerHTML = turns.length ? '' : `<div class="ok">● ${t(E.MODEL_NAME_KEY as keyof Strings)} · ${t(O.isOn() ? 'loadedBackup' : 'loaded')}</div>`; return; }
   if (!device) { el.innerHTML = `<div class="box muted">${t('checking')}</div>`; return; }
   if (!device.ok) { el.innerHTML = `<div class="box warn"><h3>${t('cantRunTitle')}</h3><p>${reasonText(device.hard!)}</p></div>`; return; }
   let body = '';
@@ -414,7 +414,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.3.6';
+const APP_VERSION = '0.3.7';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],

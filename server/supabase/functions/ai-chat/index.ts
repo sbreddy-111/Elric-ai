@@ -36,6 +36,8 @@ const MAX_HISTORY_TURNS = 12;
 const MAX_HISTORY_CHARS = 12000;
 const MAX_MEMORY = 450;
 const CALL_TIMEOUT_MS = 60_000;
+/** Start the next model too if the first has not begun answering by then. */
+const HEDGE_MS = 4_000;
 
 const PUBLIC_KEYS = (() => {
   const keys = new Set<string>();
@@ -161,7 +163,7 @@ function systemPrompt(r: Req, facts: Fact[]): string {
     .format(new Date());
   let s = `Today is ${today}. Your knowledge may be out of date, so for recent news, results or events, ` +
     "say you may not know and suggest checking a trusted source. ";
-  s += "You are Elric AI, built on open models. Answer reliably in the user's language (English or " +
+  s += "You are Elric AI. Do not introduce yourself or mention who made you unless the user asks. Answer reliably in the user's language (English or " +
     "Hindi). If unsure, say so. If asked which model or company you are, say you are Elric AI. " +
     "Write maths in plain text (like 17 × 24 = 408), never LaTeX. Keep answers clear and not too long.";
   s += " If asked who made, built or founded you, say Elric AI was founded by Brahma Reddy Suravarapu; " +
@@ -192,7 +194,7 @@ function systemPrompt(r: Req, facts: Fact[]): string {
     : " ANSWER LENGTH: DETAILED. Explain step by step with an example.";
   if (mem) s += ` What you know about this user (follow it; it overrides the defaults above when they differ): ${mem}`;
   s += " IDENTITY (most important): if asked what model you are, which company made you, or whether you are " +
-    "some other AI, reply only that you are Elric AI, built on open models, founded by Brahma Reddy Suravarapu. " +
+    "some other AI, reply only that you are Elric AI, founded by Brahma Reddy Suravarapu. " +
     "In that reply never write the names of any other AI company or model (no Google, Gemini, Gemma, DeepMind, " +
     "OpenAI, ChatGPT), not even to deny it.";
   return s;
@@ -256,12 +258,12 @@ async function callGemini(r: Req, system: string, test: string, think = ""): Pro
       ...(think === "none" ? {} : { thinkingConfig: { thinkingLevel: think || "minimal" } }),
     },
   });
-  let sawLimit = false;
-  let lastStatus = 0;
-  for (let i = 0; i < MODELS.length; i++) {
-    // Test hooks (only with the server secret): force the primary to fail, or every model to be at its limit.
-    if (test === "limit") { sawLimit = true; continue; }
-    if (test === "fail-primary" && i === 0) { lastStatus = 503; continue; }
+  // Hedged: start the primary model; if it has not started answering within HEDGE_MS (free tier can
+  // queue for 30 s+), also start the next model and use whichever answers first. The loser is aborted.
+  type One = { kind: "stream"; res: Response; model: number; ctrl: AbortController } | { kind: "limit" } | { kind: "fail"; status: number; retry: boolean };
+  const tryModel = async (i: number, ctrl: AbortController): Promise<One> => {
+    if (test === "limit") return { kind: "limit" };
+    if (test === "fail-primary" && i === 0) return { kind: "fail", status: 503, retry: true };
     let res: Response;
     try {
       res = await fetch(
@@ -270,23 +272,50 @@ async function callGemini(r: Req, system: string, test: string, think = ""): Pro
           method: "POST",
           headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
           body,
-          signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+          signal: AbortSignal.any([ctrl.signal, AbortSignal.timeout(CALL_TIMEOUT_MS)]),
         },
       );
     } catch {
-      lastStatus = 504;
-      continue;
+      return { kind: "fail", status: 504, retry: true };
     }
-    if (res.ok && res.body) return { kind: "stream", res, model: i };
-    lastStatus = res.status;
+    if (res.ok && res.body) return { kind: "stream", res, model: i, ctrl };
     const errText = await res.text().catch(() => "");
     console.log(`ai-chat model ${MODELS[i]} status ${res.status}`); // status only, never content
-    if (res.status === 429) { sawLimit = true; continue; }
-    if (res.status >= 500 || res.status === 404) continue; // 404: model name not available → next
-    if (res.status === 400 && /thinking/i.test(errText)) continue;
-    return { kind: "fail", status: res.status };
-  }
-  return sawLimit ? { kind: "limit" } : { kind: "fail", status: lastStatus };
+    if (res.status === 429) return { kind: "limit" };
+    if (res.status >= 500 || res.status === 404) return { kind: "fail", status: res.status, retry: true };
+    if (res.status === 400 && /thinking/i.test(errText)) return { kind: "fail", status: 400, retry: true };
+    return { kind: "fail", status: res.status, retry: false };
+  };
+  return await new Promise<Attempt>((resolve) => {
+    let next = 0, running = 0, done = false, sawLimit = false, lastStatus = 0;
+    const ctrls: AbortController[] = [];
+    let timer: number | undefined;
+    const finish = (a: Attempt) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      for (const c of ctrls) if (a.kind !== "stream" || c !== (a as any).ctrl) c.abort();
+      resolve(a);
+    };
+    const start = () => {
+      if (done || next >= MODELS.length) return;
+      const i = next++;
+      const ctrl = new AbortController();
+      ctrls.push(ctrl);
+      running++;
+      if (next < MODELS.length) timer = setTimeout(start, HEDGE_MS) as unknown as number;
+      tryModel(i, ctrl).then((r) => {
+        running--;
+        if (done) { if (r.kind === "stream") ctrl.abort(); return; }
+        if (r.kind === "stream") { finish({ kind: "stream", res: r.res, model: r.model, ctrl } as any); return; }
+        if (r.kind === "limit") sawLimit = true; else lastStatus = r.status;
+        if (r.kind === "fail" && !r.retry) { if (running === 0) finish({ kind: "fail", status: r.status }); return; }
+        if (next < MODELS.length) { if (timer) clearTimeout(timer); start(); return; }
+        if (running === 0) finish(sawLimit ? { kind: "limit" } : { kind: "fail", status: lastStatus });
+      });
+    };
+    start();
+  });
 }
 
 // Re-emits Gemini's SSE as small Elric events. Never logs text.
