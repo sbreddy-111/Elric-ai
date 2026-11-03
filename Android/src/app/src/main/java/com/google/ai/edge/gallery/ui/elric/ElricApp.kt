@@ -428,6 +428,8 @@ fun ElricApp(
                 vm.updateActiveModel(m.name)
                 go(Screen.HOME)
               },
+              canChatOnline = vm.onlineOn && !offline,
+              onChatOnline = { go(Screen.HOME) },
             )
           Screen.HOME,
           Screen.CHAT ->
@@ -486,6 +488,7 @@ fun ElricApp(
                 HomeContent(
                   mode = vm.mode,
                   offline = offline,
+                  online = vm.onlineOn && !offline,
                   name = vm.name,
                   onSuggestion = { i, text ->
                     if (i == 1) {
@@ -884,6 +887,19 @@ private fun ElricDrawer(
       DrawerRow("☺", tr(T.aboutYou), onClick = onAboutYou)
       DrawerRow("✦", tr(T.memory), onClick = onMemory)
       DrawerRow("▦", tr(T.models), onClick = onModels)
+      DrawerRow(
+        "☁",
+        tr(T.onlineAnswers),
+        trailing = {
+          Row {
+            EText(tr(T.on), size = 12.sp, weight = FontWeight.Medium, color = if (vm.onlineOn) p.goldInk else p.muted)
+            EText(" · ", size = 12.sp, color = p.muted)
+            EText(tr(T.off), size = 12.sp, weight = FontWeight.Medium, color = if (!vm.onlineOn) p.goldInk else p.muted)
+          }
+        },
+        onClick = { vm.updateOnlineOn(!vm.onlineOn) },
+      )
+      TinyText(tr(T.onlineHow), modifier = Modifier.padding(start = 44.dp, end = 12.dp, bottom = 4.dp))
       DrawerRow(
         "अ",
         tr(T.language),

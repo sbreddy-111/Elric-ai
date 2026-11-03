@@ -153,6 +153,7 @@ fun ElricTopBar(
 fun HomeContent(
   mode: ElricMode,
   offline: Boolean,
+  online: Boolean = false,
   name: String,
   onSuggestion: (index: Int, text: String) -> Unit,
   modifier: Modifier = Modifier,
@@ -171,7 +172,11 @@ fun HomeContent(
           .background(if (shop) p.indigoTint else p.greenTint)
           .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-      EText(tr(if (shop) T.shopOffline else T.onDevice), size = 12.sp, color = if (shop) p.indigoInk else p.green)
+      EText(
+        tr(if (shop) T.shopOffline else if (online) T.onlinePill else T.onDevice),
+        size = 12.sp,
+        color = if (shop) p.indigoInk else p.green,
+      )
     }
     if (shop) TinyText(tr(T.livePricesSoon), modifier = Modifier.padding(top = 0.dp).graphicsLayer { translationY = -8.dp.toPx() })
     Column {
@@ -692,12 +697,19 @@ private fun AnswerBlock(
         }
       }
       val ms = turn.ms
-      if (ms != null) {
+      val tag =
+        when (turn.src) {
+          "online" -> T.tagOnline.get(lang)
+          "offline" -> T.tagOffline.get(lang)
+          else -> null
+        }
+      if (ms != null || tag != null) {
         val parts = mutableListOf<String>()
-        turn.firstMs?.let { parts.add(T.statFirst.format(lang, "s" to secs(it))) }
+        tag?.let { parts.add(it) }
+        if (ms != null) turn.firstMs?.let { parts.add(T.statFirst.format(lang, "s" to secs(it))) }
         val w = words(turn.text)
-        val gen = (ms - (turn.firstMs ?: 0L)).coerceAtLeast(1L)
-        if (w > 3) {
+        val gen = ((ms ?: 0L) - (turn.firstMs ?: 0L)).coerceAtLeast(1L)
+        if (ms != null && w > 3) {
           parts.add(T.statSpeed.format(lang, "n" to String.format(Locale.US, "%.1f", w / (gen / 1000.0))))
         }
         if (parts.isNotEmpty()) {

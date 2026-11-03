@@ -126,6 +126,7 @@ object T {
   val hello = Str("Hello, ", "नमस्ते, ")
   val there = Str("there", "दोस्त")
   val onDevice = Str("● On‑device · private", "● फ़ोन पर · प्राइवेट")
+  val onlinePill = Str("● Online · phone backup", "● ऑनलाइन · फ़ोन बैकअप")
   val shopOffline = Str("● Shopping · offline", "● शॉपिंग · ऑफ़लाइन")
   val livePricesSoon = Str("Live prices coming soon", "लाइव कीमतें जल्द आ रही हैं")
   val offlineStudy = Str("You're offline. Study still works.", "आप ऑफ़लाइन हैं। पढ़ाई फिर भी चलेगी।")
@@ -163,9 +164,16 @@ object T {
   val needModelTitle = Str("Download a model to get answers", "जवाब पाने के लिए एक मॉडल डाउनलोड करें")
   val needModelBody =
     Str(
-      "Answers are made on your phone, so Elric needs its model first. Nothing was sent anywhere.",
-      "जवाब आपके फ़ोन पर बनते हैं, इसलिए पहले Elric का मॉडल चाहिए। कुछ भी कहीं नहीं भेजा गया।",
+      "To answer without internet, Elric needs its model on your phone.",
+      "बिना इंटरनेट जवाब देने के लिए Elric का मॉडल आपके फ़ोन पर होना चाहिए।",
     )
+  val onlineUnavailable =
+    Str(
+      "Online answers aren't available right now. Download a model to answer on your phone.",
+      "ऑनलाइन जवाब अभी उपलब्ध नहीं हैं। फ़ोन पर जवाब पाने के लिए एक मॉडल डाउनलोड करें।",
+    )
+  val tagOnline = Str("Online", "ऑनलाइन")
+  val tagOffline = Str("Offline", "ऑफ़लाइन")
   val openModels = Str("Open Models", "मॉडल खोलें")
   val scrollLatest = Str("Scroll to latest", "नए मैसेज पर जाएँ")
 
@@ -187,8 +195,8 @@ object T {
   val chooseGallery = Str("Choose from gallery", "गैलरी से चुनें")
   val photoPrivate =
     Str(
-      "Photos and voice are read on your phone. Nothing is uploaded.",
-      "फ़ोटो और आवाज़ आपके फ़ोन पर ही पढ़ी जाती हैं। कुछ भी अपलोड नहीं होता।",
+      "Voice is turned into text on your phone. Photos stay on your phone, except when Online answers are on: then the photo is sent to answer you.",
+      "आवाज़ आपके फ़ोन पर ही टेक्स्ट बनती है। फ़ोटो फ़ोन पर रहती हैं, सिर्फ़ ऑनलाइन जवाब चालू होने पर फ़ोटो जवाब के लिए भेजी जाती है।",
     )
   val photoDefault = Str("Explain this photo.", "इस फ़ोटो को समझाइए।")
   val removePhoto = Str("Remove photo", "फ़ोटो हटाएँ")
@@ -225,6 +233,15 @@ object T {
   val light = Str("Light", "लाइट")
   val privacy = Str("Privacy", "प्राइवेसी")
   val memory = Str("Memory", "मेमोरी")
+  val onlineAnswers = Str("Online answers", "ऑनलाइन जवाब")
+  val onlineHow =
+    Str(
+      "When online, answers come from our server; offline, from your phone.",
+      "इंटरनेट होने पर जवाब हमारे सर्वर से, बिना इंटरनेट आपके फ़ोन से।",
+    )
+  val on = Str("On", "चालू")
+  val off = Str("Off", "बंद")
+  val chatOnlineNow = Str("Chat online while it downloads", "डाउनलोड होने तक ऑनलाइन चैट करें")
 
   // Memory screen
   val memoryOnly = Str("Saved only on this phone.", "सिर्फ़ इसी फ़ोन पर सेव होता है।")
@@ -263,14 +280,16 @@ object T {
   val privacy1 = Str("Study answers work offline", "पढ़ाई के जवाब ऑफ़लाइन मिलते हैं")
   val privacy2 =
     Str(
-      "Nothing you type is sent anywhere, unless you choose to send feedback",
-      "आप जो लिखते हैं वह कहीं नहीं भेजा जाता, जब तक आप खुद फ़ीडबैक न भेजें",
+      "With Online answers on, your question, recent messages of the chat, any photo you attach and the memory used for it are sent to our server and an AI provider to answer. We don't store them.",
+      "ऑनलाइन जवाब चालू होने पर आपका सवाल, चैट के हाल के मैसेज, जोड़ी गई फ़ोटो और उसके लिए इस्तेमाल हुई मेमोरी जवाब के लिए हमारे सर्वर और एक AI प्रोवाइडर को भेजी जाती है। हम इन्हें सेव नहीं करते।",
+    )
+  val privacyOffline =
+    Str(
+      "Offline answers keep everything on your phone. Turn off Online answers in the menu to stay fully offline.",
+      "ऑफ़लाइन जवाब में सब कुछ आपके फ़ोन पर रहता है। पूरी तरह ऑफ़लाइन रहने के लिए मेनू में ऑनलाइन जवाब बंद करें।",
     )
   val privacy3 =
-    Str(
-      "Live prices are coming soon. Today answers run on your phone.",
-      "लाइव कीमतें जल्द आ रही हैं। अभी जवाब आपके फ़ोन पर ही बनते हैं।",
-    )
+    Str("Live prices are coming soon.", "लाइव कीमतें जल्द आ रही हैं।")
   val privacy4 =
     Str(
       "Feedback and error reports are optional and off by default. They are stored on our server (Supabase), which may be outside India.",

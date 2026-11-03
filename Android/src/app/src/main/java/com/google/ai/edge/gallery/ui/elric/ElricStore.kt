@@ -56,6 +56,8 @@ data class ElricTurn(
   val memSaved: Boolean? = null,
   /** Private path of the photo sent with this question (user turns only), if any. */
   val image: String? = null,
+  /** Where the answer was made: "online" or "offline" (model turns; null in older chats). */
+  val src: String? = null,
 ) {
   val isUser: Boolean
     get() = role == "user"
@@ -124,6 +126,11 @@ class ElricStore(context: Context) {
   var activeModel: String
     get() = prefs.getString("active_model", "") ?: ""
     set(v) = prefs.edit().putString("active_model", v).apply()
+
+  /** Online answers when available: on by default. */
+  var onlineOn: Boolean
+    get() = prefs.getBoolean("online_on", true)
+    set(v) = prefs.edit().putBoolean("online_on", v).apply()
 
   /** Memory is on by default. */
   var memoryOn: Boolean

@@ -382,6 +382,8 @@ fun DownloadScreen(
   onDownload: (Model) -> Unit,
   onBack: () -> Unit,
   onReady: (Model) -> Unit,
+  canChatOnline: Boolean = false,
+  onChatOnline: () -> Unit = {},
 ) {
   val p = pal()
   var pickStandard by rememberSaveable { mutableStateOf(false) }
@@ -457,6 +459,9 @@ fun DownloadScreen(
             }
           }
           if (failed) Banner(tr(T.dlFailed), warn = true)
+          if (canChatOnline && downloading && !ready) {
+            GoldButton(tr(T.chatOnlineNow), onClick = onChatOnline, small = true)
+          }
         }
       }
     }
@@ -613,7 +618,7 @@ fun PrivacyScreen(reportsOn: Boolean, onReports: (Boolean) -> Unit, onBack: () -
         textAlign = TextAlign.Center,
       )
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (point in listOf(T.privacy1, T.privacy2, T.photoPrivate, T.privacy3, T.privacy4, T.privacy5)) {
+        for (point in listOf(T.privacy1, T.privacy2, T.privacyOffline, T.photoPrivate, T.privacy3, T.privacy4, T.privacy5)) {
           Row(
             modifier =
               Modifier.fillMaxWidth()
