@@ -33,6 +33,10 @@ export interface Body {
   lang: 'en' | 'hi';
   name?: string;
   study?: string;
+  /** Spoken conversation (Talk): plain, short sentences. */
+  talk?: boolean;
+  /** A photo with the question (JPEG, base64). */
+  image?: { mime: string; data: string };
 }
 
 // ---------- settings

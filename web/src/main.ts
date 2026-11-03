@@ -2,12 +2,16 @@ import './style.css';
 import { t, getLang, setLang, Strings } from './i18n';
 import * as E from './engine';
 import * as O from './online';
+import * as V from './voice';
+import * as P from './photo';
 
 type Mode = 'study' | 'shopping' | 'general';
 let mode: Mode = 'study';
 let short = localStorage.getItem('elric.length') !== 'long';
-let turns: E.Turn[] = [];
-interface Chat { id: string; title: string; mode: Mode; turns: E.Turn[]; at: number }
+/** A chat turn; photo (with its full image) lives only in memory, never in saved chats. */
+type Turn = E.Turn & { photo?: P.Photo };
+let turns: Turn[] = [];
+interface Chat { id: string; title: string; mode: Mode; turns: Turn[]; at: number }
 const CHATS_KEY = 'elric.chats';
 const CUR_KEY = 'elric.currentChat';
 let chatId = '';
@@ -18,7 +22,8 @@ function saveChats(cs: Chat[]) {
   for (;;) { try { localStorage.setItem(CHATS_KEY, JSON.stringify(list)); return; } catch { if (list.length <= 1) return; list = list.slice(0, -1); } }
 }
 function persist() {
-  const done = turns.filter((x) => x.text);
+  // Saved chats keep a placeholder instead of the photo (browser storage is small).
+  const done = turns.filter((x) => x.text).map(({ photo, ...x }) => (photo ? { ...x, text: `📷 ${t('photoLabel')} · ${x.text}` } : x));
   if (!done.length) return;
   if (!chatId) { chatId = Date.now().toString(36); localStorage.setItem(CUR_KEY, chatId); }
   const cs = loadChats().filter((c) => c.id !== chatId);
@@ -67,13 +72,15 @@ function md(src: string): string {
   close();
   return out.join('');
 }
-const body = (x: E.Turn) => (x.role === 'model' ? md(x.text) : esc(x.text));
+const body = (x: Turn) => (x.role === 'model' ? md(x.text) : (x.photo ? `<img class="ph" src="${x.photo.thumb}" alt="${t('photoLabel')}">` : '') + esc(x.text));
 interface Profile { name: string; study: string }
 function getProfile(): Profile { try { return { name: '', study: '', ...JSON.parse(localStorage.getItem('elric.profile') || '{}') }; } catch { return { name: '', study: '' }; } }
 const secs = (ms: number) => (ms / 1000).toFixed(1);
-function stats(x: E.Turn): string {
+function stats(x: Turn, i = -1): string {
   if (x.role !== 'model') return '';
-  const tag = x.src ? t(x.src === 'online' ? 'tagOnline' : 'tagOffline') : '';
+  const ra = x.src && !x.failed && x.text && i >= 0 && V.canSpeak() && !(busy && i === turns.length - 1)
+    ? ` <button class="ra${reading === i ? ' on' : ''}" data-r="${i}" aria-label="${t('readAloud')}">🔊</button>` : '';
+  const tag = (x.src ? t(x.src === 'online' ? 'tagOnline' : 'tagOffline') : '') + ra;
   if (!x.ms) return tag ? `<div class="stat">${tag}</div>` : '';
   const words = x.text.trim().split(/\s+/).filter(Boolean).length;
   const gen = Math.max(1, x.ms - (x.firstMs || 0));
@@ -104,6 +111,7 @@ const ic = {
   newc: '<path d="M12 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6M16 19h6M19 16v6"/>',
   cam: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
   send: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   stop: '<rect x="7" y="7" width="10" height="10" rx="2"/>',
   down: '<path d="M6 9l6 6 6-6"/>',
@@ -120,10 +128,12 @@ function shell() {
   </header>
   <div class="pill ${mode === 'shopping' || O.isOn() ? 'online' : ''}"><i></i>${mode === 'shopping' ? t('privacyOnline') : O.isOn() ? t('pillOnline') : t('privacyOnDevice')}</div>
   <main id="main"></main>
+  <div class="att" id="att"></div>
   <form class="composer" id="form">
+    <input type="file" id="file" accept="image/*" hidden>
     <button type="button" class="snap" id="snap" aria-label="${t('cdSnap')}">${svg(ic.cam)}</button>
-    <textarea id="input" rows="1" placeholder="${t('composerHint')}"></textarea>
-    <button type="button" class="icon" id="mic" aria-label="${t('cdMic')}">${svg(ic.mic)}</button>
+    <textarea id="input" rows="1" placeholder="${t(pending ? 'photoHint' : 'composerHint')}"></textarea>
+    <button type="button" class="icon mic${dictation ? ' on' : ''}" id="mic" aria-label="${t(dictation ? 'cdMicStop' : 'cdMic')}">${svg(ic.mic)}</button>
     <button type="submit" class="send" id="send" aria-label="${busy ? t('cdStop') : t('cdSend')}">${svg(busy ? ic.stop : ic.send)}</button>
   </form>
   <div id="sheet"></div>`;
@@ -131,8 +141,10 @@ function shell() {
   $('#modebtn').onclick = modeSheet;
   $('#lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
   $('#newc').onclick = () => openChat(undefined);
-  $('#snap').onclick = () => sheet(`<h3>${t('photoSoonTitle')}</h3><p>${t('photoSoonBody')}</p>`);
-  $('#mic').onclick = () => sheet(`<h3>${t('micSoonTitle')}</h3><p>${t('micSoonBody')}</p>`);
+  $('#snap').onclick = pickPhoto;
+  $<HTMLInputElement>('#file').onchange = onPhotoPicked;
+  wireMic($('#mic'));
+  renderAtt();
   const input = $<HTMLTextAreaElement>('#input');
   input.oninput = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; };
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !matchMedia('(pointer:coarse)').matches) { e.preventDefault(); submit(); } };
@@ -156,15 +168,17 @@ function renderMain() {
     renderStatus();
     return;
   }
-  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || waitDots()}</div>${stats(x)}${x.role === 'user' && !busy ? `<button class="edit" data-e="${i}">✎ ${t('editQ')}</button>` : ''}`).join('')}
+  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || waitDots()}</div>${stats(x, i)}${x.role === 'user' && !busy ? `<button class="edit" data-e="${i}">✎ ${t('editQ')}</button>` : ''}`).join('')}
     ${mode === 'shopping' ? `<div class="note">${t('shoppingNote')}</div>` : ''}${showStatusInChat() ? '<div id="status"></div>' : ''}</div>`;
   renderStatus();
   m.scrollTop = m.scrollHeight;
   m.querySelectorAll<HTMLButtonElement>('[data-e]').forEach((b) => (b.onclick = () => {
     const i = +b.dataset.e!; const q = turns[i].text;
+    if (turns[i].photo) pending = turns[i].photo!;
     turns = turns.slice(0, i); shell();
-    const inp = $<HTMLTextAreaElement>('#input'); inp.value = q; inp.focus(); inp.dispatchEvent(new Event('input'));
+    const inp = $<HTMLTextAreaElement>('#input'); inp.value = pending && q === t('photoAsk') ? '' : q; inp.focus(); inp.dispatchEvent(new Event('input'));
   }));
+  m.querySelectorAll<HTMLButtonElement>('[data-r]').forEach((b) => (b.onclick = () => readAloud(+b.dataset.r!)));
 }
 
 /** In a chat, the model card shows when offline answers are on, or when a question still needs the model. */
@@ -273,6 +287,7 @@ function system(): string {
   if (mode === 'study') s += ' Mode: Study. Be a patient tutor for Indian students.';
   if (mode === 'shopping') s += ' Mode: Shopping. You have NO access to live prices, stock or offers. Never state or guess specific prices. Help compare features and explain what to look for, and say live prices are coming soon.';
   if (getLang() === 'hi') s += ' The user prefers Hindi.';
+  if (talk) s += ' This is a spoken conversation: reply in plain spoken sentences, with no markdown, lists, tables, symbols or emojis, in the language the user spoke.';
   const pr = getProfile();
   if (pr.name) s += ` The user's name is ${pr.name}.`;
   if (pr.study) s += ` The user studies: ${pr.study}. Match explanations to this level.`;
@@ -286,14 +301,18 @@ function submit() {
   if (busy) { stopRequested = true; E.stop(); O.stop(); return; }
   const i = $<HTMLTextAreaElement>('#input');
   const text = i.value.trim();
-  if (!text) return;
+  if (!text && !pending) return;
+  if (dictation) dictation.stop();
+  const photo = pending;
+  if (photo && !photoOk()) return;
   i.value = ''; i.style.height = 'auto';
-  send(text);
+  pending = null;
+  send(text || t('photoAsk'), photo);
 }
 
 /** Turns that can be sent to a model as history (no notices, no empty replies). */
-function historyOf(list: E.Turn[]): E.Turn[] {
-  return list.filter((x) => !x.failed && x.text.trim());
+function historyOf(list: Turn[]): E.Turn[] {
+  return list.filter((x) => !x.failed && x.text.trim()).map(({ photo, ...x }) => (photo ? { ...x, text: `[${t('photoLabel')}] ${x.text}` } : x));
 }
 
 let frame = 0;
@@ -317,7 +336,7 @@ function waitDots(): string {
 }
 
 /** Online answer. Returns true when the reply is final (answered or stopped), false to answer on the device. */
-async function answerOnline(reply: E.Turn, question: string, history: E.Turn[]): Promise<boolean> {
+async function answerOnline(reply: Turn, question: string, history: E.Turn[], photo: P.Photo | null = null): Promise<boolean> {
   const pr = getProfile();
   const t0 = performance.now();
   let raw = '';
@@ -328,6 +347,8 @@ async function answerOnline(reply: E.Turn, question: string, history: E.Turn[]):
     mode,
     short,
     lang: getLang(),
+    talk: !!talk,
+    ...(photo ? { image: { mime: photo.mime, data: photo.data } } : {}),
     ...(pr.name ? { name: pr.name.trim() } : {}),
     ...(pr.study ? { study: pr.study } : {}),
   }, (piece) => {
@@ -372,26 +393,225 @@ async function answerOffline(reply: E.Turn, history: E.Turn[]) {
 }
 
 let stopRequested = false;
-async function send(text: string) {
-  if (busy) return;
+/** Asks a question (optionally with a photo). Resolves with the answer turn, or null if none was started. */
+async function send(text: string, photo: P.Photo | null = null): Promise<Turn | null> {
+  if (busy) return null;
+  stopReading();
   const history = historyOf(turns);
-  turns.push({ role: 'user', text });
+  turns.push(photo ? { role: 'user', text, photo } : { role: 'user', text });
   const online = O.ready();
-  if (!E.isLoaded() && !online) { renderMain(); return; } // status card explains what's needed; never fake an answer
+  if (!E.isLoaded() && !online) { renderMain(); return null; } // status card explains what's needed; never fake an answer
   busy = true;
   stopRequested = false;
-  const reply: E.Turn = { role: 'model', text: '' };
+  const reply: Turn = { role: 'model', text: '' };
   turns.push(reply);
   shell();
   let final = false;
-  if (online) final = await answerOnline(reply, text, history);
+  if (online) final = await answerOnline(reply, text, history, photo);
   if (!final) {
-    if (E.isLoaded()) { paint(reply); await answerOffline(reply, [...history, { role: 'user', text }]); }
+    if (photo) { reply.text = t('photoFailed'); reply.failed = true; } // the device model can't see photos
+    else if (E.isLoaded()) { paint(reply); await answerOffline(reply, [...history, { role: 'user', text }]); }
     else { reply.text = t('onlineBusy'); reply.failed = true; }
   }
   busy = false;
   persist();
   shell();
+  return reply;
+}
+
+// ---------------------------------------------------------------- photo
+
+let pending: P.Photo | null = null;
+
+function renderAtt() {
+  const a = $('#att');
+  if (!a) return;
+  a.innerHTML = pending ? `<div class="chip"><img src="${pending.thumb}" alt=""><span>${t('photoLabel')}</span><button type="button" id="attx" aria-label="${t('removePhoto')}">${svg(ic.x)}</button></div>` : '';
+  const input = $<HTMLTextAreaElement>('#input');
+  if (input) input.placeholder = t(pending ? 'photoHint' : 'composerHint');
+  if (pending) $('#attx').onclick = () => { pending = null; renderAtt(); };
+}
+
+/** Photos are read online; explains (with a way to turn it on) when Online answers can't be used. */
+function photoOk(): boolean {
+  if (!O.isOn()) {
+    sheet(`<h3>${t('photoNeedsOnlineTitle')}</h3><p>${t('photoNeedsOnlineBody')}</p><button class="primary" id="pon">${t('turnOnOnline')}</button>`);
+    $('#pon').onclick = () => { $('#sheet').innerHTML = ''; toggleOnline(); };
+    return false;
+  }
+  if (!O.ready()) { sheet(`<h3>${t('photoNeedsOnlineTitle')}</h3><p>${t('photoUnavailable')}</p>`); return false; }
+  return true;
+}
+
+function pickPhoto() {
+  if (talk || !photoOk()) return;
+  const f = $<HTMLInputElement>('#file');
+  f.value = '';
+  f.click();
+}
+
+async function onPhotoPicked() {
+  const f = $<HTMLInputElement>('#file');
+  const file = f.files?.[0];
+  if (!file) return;
+  try { pending = await P.prepare(file); renderAtt(); }
+  catch { sheet(`<h3>${t('photoLabel')}</h3><p>${t('photoError')}</p>`); }
+}
+
+// ---------------------------------------------------------------- voice input
+
+let dictation: V.Listener | null = null;
+
+function micMessage(err?: string): boolean {
+  const k = err === 'not-allowed' || err === 'service-not-allowed' ? 'micDenied' : err === 'network' ? 'micNetwork' : '';
+  if (k) sheet(`<h3>${t('cdMic')}</h3><p>${t(k)}</p>`);
+  return !!k;
+}
+
+function setMicUi() {
+  const b = document.getElementById('mic');
+  if (!b) return;
+  b.classList.toggle('on', !!dictation);
+  b.setAttribute('aria-label', t(dictation ? 'cdMicStop' : 'cdMic'));
+}
+
+function toggleDictation() {
+  if (talk) return;
+  if (dictation) { dictation.stop(); return; }
+  if (!V.canListen()) { sheet(`<h3>${t('cdMic')}</h3><p>${t('micUnsupported')}</p>`); return; }
+  const cur = $<HTMLTextAreaElement>('#input').value.trim();
+  const base = cur ? cur + ' ' : '';
+  const put = (txt: string) => { const i = $<HTMLTextAreaElement>('#input'); if (!i) return; i.value = base + txt; i.dispatchEvent(new Event('input')); };
+  const me = V.listen(V.speechLang(getLang()), {
+    interim: (txt) => { if (dictation === me) put(txt); },
+    end: (txt, err) => {
+      if (dictation !== me) return;
+      dictation = null; setMicUi();
+      if (txt) put(txt);
+      micMessage(err);
+    },
+  });
+  dictation = me;
+  setMicUi();
+}
+
+/** Mic: tap for voice input; hold for Talk (hands-free). Talk starts on release, inside the tap, so iPhone allows speech. */
+function wireMic(b: HTMLElement) {
+  let downAt = 0; let longFired = false;
+  b.onpointerdown = () => { downAt = Date.now(); longFired = false; };
+  b.onpointerup = () => { if (downAt && Date.now() - downAt >= 550 && !dictation && !talk) { longFired = true; startTalk(); } downAt = 0; };
+  b.onpointerleave = () => { downAt = 0; };
+  b.oncontextmenu = (e) => e.preventDefault();
+  b.onclick = () => { if (longFired) { longFired = false; return; } toggleDictation(); };
+}
+
+// ---------------------------------------------------------------- read aloud
+
+let reading = -1;
+let cancelReading: (() => void) | null = null;
+function stopReading() {
+  if (cancelReading) { cancelReading(); cancelReading = null; }
+  if (reading >= 0) { reading = -1; document.querySelectorAll('.ra.on').forEach((e) => e.classList.remove('on')); }
+}
+function readAloud(i: number) {
+  const was = reading;
+  stopReading();
+  if (was === i || !turns[i]) return;
+  V.unlockSpeech(); // inside the tap, for iPhone
+  reading = i;
+  document.querySelector(`[data-r="${i}"]`)?.classList.add('on');
+  cancelReading = V.speak(V.plain(turns[i].text), () => { if (reading === i) { cancelReading = null; stopReading(); } });
+}
+
+// ---------------------------------------------------------------- talk (hands-free)
+
+type TalkState = 'listening' | 'thinking' | 'speaking' | 'paused';
+let talk: { state: TalkState; caption: string; session: number; misses: number; rec: V.Listener | null; hush: (() => void) | null } | null = null;
+
+function startTalk() {
+  if (talk) return;
+  if (busy) { sheet(`<h3>${t('talk')}</h3><p>${t('talkWait')}</p>`); return; }
+  if (!V.canListen()) { sheet(`<h3>${t('talk')}</h3><p>${t('talkNoMic')}</p>`); return; }
+  if (!O.ready() && !E.isLoaded()) { sheet(`<h3>${t('talk')}</h3><p>${t('talkNeedsAnswer')}</p>`); return; }
+  V.unlockSpeech(); // inside the tap: lets iPhone read answers aloud later
+  stopReading();
+  if (dictation) { dictation.abort(); dictation = null; setMicUi(); }
+  $('#sheet').innerHTML = '';
+  talk = { state: 'paused', caption: '', session: 0, misses: 0, rec: null, hush: null };
+  talkListen();
+}
+
+function renderTalk() {
+  let el = document.getElementById('talk');
+  if (!talk) { el?.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'talk'; el.className = 'talk'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', t('talk'));
+    el.innerHTML = `<div class="tk-h">${t('talk')}</div><button class="orb" id="tk-orb">${svg(ic.mic)}</button><p class="tk-s" aria-live="polite"></p><p class="tk-c"></p><p class="tk-hint">${t('talkHint')}</p><button class="tk-end" id="tk-end">${t('talkEnd')}</button>`;
+    document.body.appendChild(el);
+    el.querySelector<HTMLElement>('#tk-orb')!.onclick = tapTalk;
+    el.querySelector<HTMLElement>('#tk-end')!.onclick = stopTalk;
+  }
+  const lab: Record<TalkState, keyof Strings> = { listening: 'talkListening', thinking: 'talkThinking', speaking: 'talkSpeaking', paused: 'talkPaused' };
+  el.querySelector('.orb')!.className = `orb s-${talk.state}`;
+  el.querySelector('.orb')!.setAttribute('aria-label', t(lab[talk.state]));
+  el.querySelector('.tk-s')!.textContent = t(lab[talk.state]);
+  el.querySelector('.tk-c')!.textContent = talk.caption;
+}
+
+function talkPause(caption: string) {
+  if (!talk) return;
+  talk.state = 'paused'; talk.caption = caption; talk.rec = null;
+  renderTalk();
+}
+
+function talkListen() {
+  if (!talk) return;
+  const sess = ++talk.session;
+  talk.state = 'listening'; talk.caption = ''; renderTalk();
+  talk.rec = V.listen(V.speechLang(getLang()), {
+    interim: (txt) => { if (talk && talk.session === sess) { talk.caption = txt; renderTalk(); } },
+    end: (txt, err) => {
+      if (!talk || talk.session !== sess) return;
+      talk.rec = null;
+      if (txt) { talkAsk(txt, sess); return; }
+      if (err === 'not-allowed' || err === 'service-not-allowed') talkPause(t('micDenied'));
+      else if (err === 'network') talkPause(t('micNetwork'));
+      else if (err !== 'start' && ++talk.misses < 2) talkListen();
+      else talkPause('');
+    },
+  });
+}
+
+async function talkAsk(text: string, sess: number) {
+  if (!talk) return;
+  talk.misses = 0; talk.state = 'thinking'; talk.caption = text; renderTalk();
+  const reply = await send(text);
+  if (!talk || talk.session !== sess) return;
+  if (!reply || reply.failed || !reply.text.trim()) { talkPause(t('talkFailed')); return; }
+  if (!V.canSpeak()) { talkPause(t('talkNoVoice')); return; }
+  const said = V.plain(reply.text);
+  talk.state = 'speaking'; talk.caption = said; renderTalk();
+  talk.hush = V.speak(said, () => { if (talk && talk.session === sess) { talk.hush = null; talkListen(); } });
+}
+
+/** Tap on the circle: send now while listening, interrupt while speaking, listen again when paused. */
+function tapTalk() {
+  if (!talk) return;
+  if (talk.state === 'listening') talk.rec?.stop();
+  else if (talk.state === 'speaking') { talk.hush?.(); talk.hush = null; talkListen(); }
+  else if (talk.state === 'paused') { V.unlockSpeech(); talk.misses = 0; talkListen(); }
+}
+
+function stopTalk() {
+  if (!talk) return;
+  talk.session++;
+  talk.rec?.abort();
+  talk.hush?.();
+  if (V.canSpeak()) try { speechSynthesis.cancel(); } catch { /* ignore */ }
+  if (busy) { stopRequested = true; E.stop(); O.stop(); }
+  talk = null;
+  renderTalk();
 }
 
 function sheet(html: string, withClose = true) {
@@ -423,7 +643,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.4.1';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
@@ -445,6 +665,7 @@ function menuSheet() {
     ${nav('m-models', t('menuModels'), t(E.MODEL_NAME_KEY as keyof Strings))}
     <button class="it" id="m-online" role="switch" aria-checked="${O.isOn()}"><span class="tl"><b>${t('onlineAnswers')}</b><small>${t('onlineHow')}</small></span><i class="sw ${O.isOn() ? 'on' : ''}"></i></button>
     ${nav('m-lang', t('menuLanguage'), getLang() === 'hi' ? 'हिन्दी' : 'English')}
+    <button class="it" id="m-talk"><span class="tl"><b>${t('talk')}</b><small>${t('talkDesc')}</small></span><i class="chev">›</i></button>
     </div>
     <div class="grp">
     ${nav('m-priv', t('menuPrivacy'))}
@@ -470,6 +691,7 @@ function menuSheet() {
     };
   };
   $('#m-online').onclick = toggleOnline;
+  $('#m-talk').onclick = startTalk;
   $('#m-lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
   $('#m-priv').onclick = () => sheet(`<h3>${t('menuPrivacy')}</h3><p>${t('privacyBody')}</p>${LEGAL_LINKS()}`);
   $('#m-about').onclick = () => sheet(`<h3>${t('menuAbout')}</h3><p>${t('aboutBody')}</p>${LEGAL_LINKS()}`);
