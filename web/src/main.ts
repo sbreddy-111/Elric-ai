@@ -68,7 +68,7 @@ function renderMain() {
       ['sugLecture', () => { const i = $<HTMLTextAreaElement>('#input'); i.value = t('promptLecture'); i.focus(); }],
       ['sugWatch', () => { mode = 'shopping'; shell(); send(t('promptWatch')); }],
     ];
-    m.innerHTML = `<section class="hero"><img src="/icons/mark.png" alt="" class="mark"><h1>${t('greeting')}</h1><p>${t('subtitle')}</p>
+    m.innerHTML = `<section class="hero"><img src="icons/mark.png" alt="" class="mark"><h1>${t('greeting')}</h1><p>${t('subtitle')}</p>
       <div class="cards">${cards.map(([k], i) => `<button class="card" data-i="${i}">${t(k)}</button>`).join('')}</div>
       <div id="status"></div></section>`;
     m.querySelectorAll<HTMLButtonElement>('.card').forEach((b) => (b.onclick = cards[+b.dataset.i!][1]));
@@ -210,7 +210,7 @@ const LICENSES = [
 ];
 
 function menuSheet() {
-  sheet(`<div class="brand"><img src="/icons/mark.png" alt=""><div><b>Elric AI</b><span>AI you can rely on</span></div></div>
+  sheet(`<div class="brand"><img src="icons/mark.png" alt=""><div><b>Elric AI</b><span>AI you can rely on</span></div></div>
     <button class="row" id="m-models"><b>${t('menuModels')}</b><span>${t('modelLite')} · ${SIZE}</span></button>
     <button class="row" id="m-lang"><b>${t('menuLanguage')}</b><span>English · हिन्दी</span></button>
     <button class="row" id="m-priv"><b>${t('menuPrivacy')}</b></button>
@@ -228,4 +228,4 @@ function menuSheet() {
 setLang(getLang());
 shell();
 E.checkDevice().then((r) => { device = r; renderStatus(); });
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});

@@ -2,8 +2,9 @@
 // The model file itself is stored separately by the app (OPFS / Cache API),
 // never by this worker.
 const VERSION = 'elric-shell-v1';
-const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/favicon.ico',
-  '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png', '/icons/mark.png'];
+const BASE = new URL('./', self.location).pathname;
+const SHELL = ['', 'index.html', 'manifest.webmanifest', 'favicon.ico',
+  'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/mark.png'].map((p) => BASE + p);
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -27,14 +28,14 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
       fetch(req).then((res) => {
         const copy = res.clone();
-        caches.open(VERSION).then((c) => c.put('/index.html', copy));
+        caches.open(VERSION).then((c) => c.put(BASE + 'index.html', copy));
         return res;
-      }).catch(() => caches.match('/index.html').then((r) => r || caches.match('/')))
+      }).catch(() => caches.match(BASE + 'index.html').then((r) => r || caches.match(BASE)))
     );
     return;
   }
   // Cache first for static files (hashed assets, icons).
-  if (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/icons/') ) {
+  if (url.pathname.startsWith(BASE + 'assets/') || url.pathname.startsWith(BASE + 'icons/')) {
     e.respondWith(
       caches.match(req).then((hit) => hit || fetch(req).then((res) => {
         if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); }
