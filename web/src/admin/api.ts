@@ -44,10 +44,16 @@ async function authFetch(path: string, init: RequestInit = {}, token?: string) {
 
 export class ApiError extends Error { constructor(m: string, public status = 0) { super(m); } }
 
+const SENT = 'elric-admin-sent';
+/** Times (ms) of sign-in emails sent from this browser in the last hour. */
+export function recentSends(): number[] {
+  try { return (JSON.parse(localStorage.getItem(SENT) || '[]') as number[]).filter((t) => Date.now() - t < 3600e3); } catch { return []; }
+}
 export async function sendMagicLink(email: string) {
   await authFetch('otp?redirect_to=' + encodeURIComponent(REDIRECT), {
     method: 'POST', body: JSON.stringify({ email: email.trim().toLowerCase(), create_user: false }),
   });
+  try { localStorage.setItem(SENT, JSON.stringify([...recentSends(), Date.now()])); } catch { /* ignore */ }
 }
 
 async function fromTokens(access_token: string, refresh_token: string, expires_in: number): Promise<Session> {
@@ -63,8 +69,12 @@ export async function consumeRedirect(): Promise<string | null> {
   const p = new URLSearchParams(location.hash.slice(1));
   history.replaceState(null, '', location.pathname + location.search);
   if (p.get('error') || p.get('error_description')) {
+    // A second open of an already-used link (e.g. Gmail → Safari, then "Open in Chrome") must not kick out a valid session.
+    if (session) return null;
     const d = (p.get('error_description') || p.get('error') || '').replace(/\+/g, ' ');
-    return /expired|invalid/i.test(d) ? 'That sign-in link has expired or was already used. Please request a new one.' : d;
+    return /expired|invalid|otp/i.test(d + (p.get('error_code') || ''))
+      ? 'That link was already used. Each link works once, in the first browser that opens it, so you may already be signed in there (for example Safari). To sign in here, send a new link and open it in this browser.'
+      : d;
   }
   const at = p.get('access_token'), rt = p.get('refresh_token');
   if (!at || !rt) return null;

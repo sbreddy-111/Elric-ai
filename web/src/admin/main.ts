@@ -1,6 +1,6 @@
 import './admin.css';
 import {
-  ApiError, consumeRedirect, countOf, ensureFresh, getSession, isOwner, rest, runChecker, sendMagicLink, signOut,
+  ApiError, consumeRedirect, countOf, recentSends, ensureFresh, getSession, isOwner, rest, runChecker, sendMagicLink, signOut,
   type Fact, type Feedback,
 } from './api';
 
@@ -139,7 +139,7 @@ function renderLogin(msg = '', sentTo = '') {
   app.innerHTML = `<div class="auth-card">
     <img src="../icons/mark.png" alt="" class="auth-mark" width="48" height="48">
     <h1>Elric AI Admin</h1>
-    ${sentTo ? `<div class="sent">${icon('mail')}<div><b>Check your email</b><p class="muted">We sent a sign-in link to <b>${esc(sentTo)}</b>. Open it on this device to continue. It can take a minute.</p></div></div>
+    ${sentTo ? `<div class="sent">${icon('mail')}<div><b>Check your email</b><p class="muted">We sent a sign-in link to <b>${esc(sentTo)}</b>. Tap it once and open it in this browser. Each link works one time, in the first browser that opens it. It can take a minute.</p></div></div>
       <button class="btn block" id="again">Use a different email</button>`
     : `<p class="muted">Sign in with your email to manage feedback, reports and facts.</p>
       <form id="lf" novalidate>
@@ -159,9 +159,14 @@ function renderLogin(msg = '', sentTo = '') {
     const b = $<HTMLButtonElement>('#sb'); b.disabled = true; b.textContent = 'Sending…';
     try { await sendMagicLink(email); renderLogin('', email); }
     catch (err) {
-      const m = (err as ApiError).status === 429 || /rate|limit|seconds/i.test((err as Error).message)
-        ? 'Too many sign-in emails were sent recently. Please wait a little and try again (about 2 emails per hour are allowed).'
-        : (err as Error).message;
+      const msg = (err as Error).message, secs = /after (\d+) seconds?/i.exec(msg);
+      let m = msg;
+      if (secs) m = `Please wait ${secs[1]} seconds, then send the link again.`;
+      else if ((err as ApiError).status === 429 || /rate|limit/i.test(msg)) {
+        const first = recentSends()[0];
+        const when = first ? new Date(first + 3600e3).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+        m = `Only 2 sign-in emails can be sent per hour, and that limit is used up. ${when ? `Try again after about ${when}.` : 'Try again in about an hour.'} If you already got a link, use the newest one.`;
+      }
       renderLogin(m);
     }
   });
