@@ -506,6 +506,10 @@ export interface Turn {
   firstMs?: number;
   /** Answer length in tokens, for speed. */
   tokens?: number;
+  /** Where the answer was made (model turns; missing in older chats). */
+  src?: 'online' | 'offline';
+  /** A notice instead of an answer (left out of the history sent to a model). */
+  failed?: boolean;
 }
 
 export function countTokens(text: string): number {

@@ -1,6 +1,7 @@
 import './style.css';
 import { t, getLang, setLang, Strings } from './i18n';
 import * as E from './engine';
+import * as O from './online';
 
 type Mode = 'study' | 'shopping' | 'general';
 let mode: Mode = 'study';
@@ -26,7 +27,7 @@ function persist() {
   saveChats(cs);
 }
 function openChat(c: Chat | undefined) {
-  if (busy) { E.stop(); return; } // let the current answer finish stopping and save first
+  if (busy) { stopRequested = true; E.stop(); O.stop(); return; } // let the current answer finish stopping and save first
   chatId = c?.id || ''; turns = c ? c.turns.map((x) => ({ ...x })) : []; if (c) mode = c.mode;
   if (chatId) localStorage.setItem(CUR_KEY, chatId); else localStorage.removeItem(CUR_KEY);
   shell();
@@ -71,12 +72,15 @@ interface Profile { name: string; study: string }
 function getProfile(): Profile { try { return { name: '', study: '', ...JSON.parse(localStorage.getItem('elric.profile') || '{}') }; } catch { return { name: '', study: '' }; } }
 const secs = (ms: number) => (ms / 1000).toFixed(1);
 function stats(x: E.Turn): string {
-  if (x.role !== 'model' || !x.ms) return '';
+  if (x.role !== 'model') return '';
+  const tag = x.src ? t(x.src === 'online' ? 'tagOnline' : 'tagOffline') : '';
+  if (!x.ms) return tag ? `<div class="stat">${tag}</div>` : '';
   const words = x.text.trim().split(/\s+/).filter(Boolean).length;
   const gen = Math.max(1, x.ms - (x.firstMs || 0));
   const parts = [`⏱ ${t('statTime', { s: secs(x.ms) })}`];
   if (x.firstMs) parts.push(t('statFirst', { s: secs(x.firstMs) }));
   if (words > 3) parts.push(t('statSpeed', { n: (words / (gen / 1000)).toFixed(1) }));
+  if (tag) parts.push(tag);
   return `<div class="stat">${parts.join(' · ')}</div>`;
 }
 let busy = false;
@@ -114,7 +118,7 @@ function shell() {
     <button class="lang" id="lang">${getLang() === 'en' ? 'हिं' : 'EN'}</button>
     <button class="icon" id="newc" aria-label="${t('cdNewChat')}">${svg(ic.newc)}</button>
   </header>
-  <div class="pill ${mode === 'shopping' ? 'online' : ''}"><i></i>${mode === 'shopping' ? t('privacyOnline') : t('privacyOnDevice')}</div>
+  <div class="pill ${mode === 'shopping' || O.isOn() ? 'online' : ''}"><i></i>${mode === 'shopping' ? t('privacyOnline') : O.isOn() ? t('pillOnline') : t('privacyOnDevice')}</div>
   <main id="main"></main>
   <form class="composer" id="form">
     <button type="button" class="snap" id="snap" aria-label="${t('cdSnap')}">${svg(ic.cam)}</button>
@@ -153,7 +157,7 @@ function renderMain() {
     return;
   }
   m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || '<span class="dots">•••</span>'}</div>${stats(x)}${x.role === 'user' && !busy ? `<button class="edit" data-e="${i}">✎ ${t('editQ')}</button>` : ''}`).join('')}
-    ${mode === 'shopping' ? `<div class="note">${t('shoppingNote')}</div>` : ''}<div id="status"></div></div>`;
+    ${mode === 'shopping' ? `<div class="note">${t('shoppingNote')}</div>` : ''}${showStatusInChat() ? '<div id="status"></div>' : ''}</div>`;
   renderStatus();
   m.scrollTop = m.scrollHeight;
   m.querySelectorAll<HTMLButtonElement>('[data-e]').forEach((b) => (b.onclick = () => {
@@ -161,6 +165,12 @@ function renderMain() {
     turns = turns.slice(0, i); shell();
     const inp = $<HTMLTextAreaElement>('#input'); inp.value = q; inp.focus(); inp.dispatchEvent(new Event('input'));
   }));
+}
+
+/** In a chat, the model card shows when offline answers are on, or when a question still needs the model. */
+function showStatusInChat(): boolean {
+  const last = turns[turns.length - 1];
+  return !O.isOn() || !last || last.role === 'user' || !!last.failed;
 }
 
 function reasonText(r: E.Reason): string {
@@ -248,7 +258,8 @@ async function startLoad() {
     await E.loadModel((p) => { progress = p.done / p.total; renderStatus(); });
     modelState = 'ready';
     const lastTurn = turns[turns.length - 1];
-    if (lastTurn?.role === 'user') { const q = turns.pop()!; setTimeout(() => send(q.text)); }
+    if (lastTurn?.role === 'model' && lastTurn.failed && turns[turns.length - 2]?.role === 'user') turns.pop();
+    if (turns[turns.length - 1]?.role === 'user') { const q = turns.pop()!; setTimeout(() => send(q.text)); }
   } catch (e: any) {
     modelState = 'failed';
     failIsDownload = false;
@@ -272,7 +283,7 @@ function system(): string {
 }
 
 function submit() {
-  if (busy) { E.stop(); return; }
+  if (busy) { stopRequested = true; E.stop(); O.stop(); return; }
   const i = $<HTMLTextAreaElement>('#input');
   const text = i.value.trim();
   if (!text) return;
@@ -280,46 +291,116 @@ function submit() {
   send(text);
 }
 
+/** Turns that can be sent to a model as history (no notices, no empty replies). */
+function historyOf(list: E.Turn[]): E.Turn[] {
+  return list.filter((x) => !x.failed && x.text.trim());
+}
+
+let frame = 0;
+/** Repaints the answer being written, following it only if the user is at the bottom. */
+function paint(reply: E.Turn) {
+  if (frame) return;
+  frame = requestAnimationFrame(() => {
+    frame = 0;
+    const m = $('#main');
+    const stick = m.scrollHeight - m.scrollTop - m.clientHeight < 120;
+    const last = document.getElementById('last');
+    if (last) last.innerHTML = md(reply.text) || '<span class="dots">•••</span>'; else renderMain();
+    if (stick) m.scrollTop = m.scrollHeight;
+  });
+}
+function flush() { if (frame) { cancelAnimationFrame(frame); frame = 0; } }
+
+/** Online answer. Returns true when the reply is final (answered or stopped), false to answer on the device. */
+async function answerOnline(reply: E.Turn, question: string, history: E.Turn[]): Promise<boolean> {
+  const pr = getProfile();
+  const t0 = performance.now();
+  let raw = '';
+  const end = await O.ask({
+    question: question.slice(0, 4000),
+    history: history.slice(-O.HISTORY_TURNS).map((x) => ({ role: x.role, text: x.text.slice(0, 4000) })),
+    mode,
+    short,
+    lang: getLang(),
+    ...(pr.name ? { name: pr.name.trim() } : {}),
+    ...(pr.study ? { study: pr.study } : {}),
+  }, (piece) => {
+    raw += piece;
+    if (!reply.firstMs && raw.trim()) reply.firstMs = Math.round(performance.now() - t0);
+    reply.text = raw;
+    paint(reply);
+  });
+  flush();
+  O.record(end);
+  reply.text = raw.trim();
+  if (end.kind === 'done' && reply.text) { reply.ms = Math.round(performance.now() - t0); reply.src = 'online'; return true; }
+  if (end.kind === 'stopped' || stopRequested) {
+    if (reply.text) reply.src = 'online'; else { reply.text = t('stopped'); reply.failed = true; }
+    reply.firstMs = undefined;
+    return true;
+  }
+  // Limit, error, no first word in time or the connection dropped: answer on the device, from the start.
+  reply.text = ''; reply.firstMs = undefined;
+  return false;
+}
+
+async function answerOffline(reply: E.Turn, history: E.Turn[]) {
+  const t0 = performance.now();
+  try {
+    reply.text = await E.generate(system(), history, (txt) => {
+      if (!reply.firstMs && txt.trim()) reply.firstMs = Math.round(performance.now() - t0);
+      reply.text = txt;
+      paint(reply);
+    });
+    flush();
+    reply.ms = Math.round(performance.now() - t0);
+    reply.src = 'offline';
+    if (!reply.text) { reply.text = t('stopped'); reply.ms = undefined; reply.src = undefined; reply.failed = true; }
+  } catch (e: any) {
+    flush();
+    reply.text = t('errorAnswer', { err: String(e?.message || e) });
+    reply.failed = true;
+  }
+}
+
+let stopRequested = false;
 async function send(text: string) {
   if (busy) return;
+  const history = historyOf(turns);
   turns.push({ role: 'user', text });
-  if (!E.isLoaded()) { renderMain(); return; } // status card explains what's needed; never fake an answer
+  const online = O.ready();
+  if (!E.isLoaded() && !online) { renderMain(); return; } // status card explains what's needed; never fake an answer
   busy = true;
+  stopRequested = false;
   const reply: E.Turn = { role: 'model', text: '' };
   turns.push(reply);
   shell();
-  const t0 = performance.now();
-  let frame = 0;
-  try {
-    reply.text = await E.generate(system(), turns.slice(0, -1), (txt) => {
-      if (!reply.firstMs && txt.trim()) reply.firstMs = Math.round(performance.now() - t0);
-      reply.text = txt;
-      if (!frame) frame = requestAnimationFrame(() => {
-        frame = 0;
-        const m = $('#main');
-        const stick = m.scrollHeight - m.scrollTop - m.clientHeight < 120; // follow only if user is at the bottom
-        const last = document.getElementById('last');
-        if (last) last.innerHTML = md(reply.text); else renderMain();
-        if (stick) m.scrollTop = m.scrollHeight;
-      });
-    });
-    if (frame) { cancelAnimationFrame(frame); frame = 0; }
-    reply.ms = Math.round(performance.now() - t0);
-    if (!reply.text) { reply.text = t('stopped'); reply.ms = undefined; }
-  } catch (e: any) {
-    reply.text = t('errorAnswer', { err: String(e?.message || e) });
+  let final = false;
+  if (online) final = await answerOnline(reply, text, history);
+  if (!final) {
+    if (E.isLoaded()) { paint(reply); await answerOffline(reply, [...history, { role: 'user', text }]); }
+    else { reply.text = t('onlineBusy'); reply.failed = true; }
   }
   busy = false;
   persist();
   shell();
 }
 
-function sheet(html: string) {
+function sheet(html: string, withClose = true) {
   const s = $('#sheet');
-  s.innerHTML = `<div class="scrim"></div><div class="panel">${html}<button class="ghost" id="close">${t('close')}</button></div>`;
+  s.innerHTML = `<div class="scrim"></div><div class="panel">${html}${withClose ? `<button class="ghost" id="close">${t('close')}</button>` : ''}</div>`;
   const close = () => (s.innerHTML = '');
   s.querySelector<HTMLElement>('.scrim')!.onclick = close;
-  $('#close').onclick = close;
+  if (withClose) $('#close').onclick = close;
+}
+
+/** Online answers on/off. Turning on asks once that the user is 18 or older. */
+function toggleOnline() {
+  if (O.isOn()) { O.setOn(false); shell(); return; }
+  if (O.age18()) { O.setOn(true); shell(); return; }
+  sheet(`<h3>${t('onlineAnswers')}</h3><p>${t('age18Text')}</p><button class="primary" id="a18">${t('age18Yes')}</button><button class="ghost" id="a18no">${t('notNow')}</button>`, false);
+  $('#a18').onclick = () => { O.confirmAge18(); shell(); };
+  $('#a18no').onclick = () => { $('#sheet').innerHTML = ''; };
 }
 
 function modeSheet() {
@@ -333,7 +414,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.3.5';
+const APP_VERSION = '0.3.6';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
@@ -350,6 +431,7 @@ function menuSheet() {
     <div class="sec"></div>
     <button class="row" id="m-me"><b>${t('menuMe')}</b><span>${esc(getProfile().name) || t('menuMeHint')}</span></button>
     <button class="row" id="m-models"><b>${t('menuModels')}</b><span>${t(E.MODEL_NAME_KEY as keyof Strings)} · ${SIZE}</span></button>
+    <button class="row" id="m-online"><b>${t('onlineAnswers')}</b><span><em class="${O.isOn() ? 'on' : ''}">${t('on')}</em> · <em class="${O.isOn() ? '' : 'on'}">${t('off')}</em> — ${t('onlineHow')}</span></button>
     <button class="row" id="m-lang"><b>${t('menuLanguage')}</b><span>English · हिन्दी</span></button>
     <button class="row" id="m-priv"><b>${t('menuPrivacy')}</b></button>
     <button class="row" id="m-about"><b>${t('menuAbout')}</b></button>
@@ -372,6 +454,7 @@ function menuSheet() {
       shell();
     };
   };
+  $('#m-online').onclick = toggleOnline;
   $('#m-lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
   $('#m-priv').onclick = () => sheet(`<h3>${t('menuPrivacy')}</h3><p>${t('privacyBody')}</p>${LEGAL_LINKS()}`);
   $('#m-about').onclick = () => sheet(`<h3>${t('menuAbout')}</h3><p>${t('aboutBody')}</p>${LEGAL_LINKS()}`);

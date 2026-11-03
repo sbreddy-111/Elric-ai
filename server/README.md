@@ -37,7 +37,9 @@ undo an auto fact: `update ai_facts set active=false where id=…;`
 - "Run checker now": `ai-autofix` also accepts `Authorization: Bearer <owner JWT>` (verified via `/auth/v1/user`),
   CORS for https://elricai.sbs only. The secret never reaches the browser.
 
-## Online answers (`functions/ai-chat`, Android 0.3.6+)
+## Online answers (`functions/ai-chat`, Android 0.3.6+, web 0.3.6+)
+- Optional, 18+ only, off by default in both apps (Android 0.3.9+: stored flag `age18`; web: localStorage `elric.age18`/`elric.online`).
+- CORS: https://elricai.sbs and https://www.elricai.sbs only (OPTIONS preflight + headers on every response).
 - Public (verify_jwt off; checks `apikey` = project publishable/anon key). POST JSON
   `{device, question, history[≤12], image?{mime,data b64}, mode, short, lang, talk, name?, study?, memory?}` →
   SSE `data: {"t":…}` … `{"done":true,"m":"a|b"}` or `{"error":"failed|blocked|limit"}`.

@@ -11,6 +11,8 @@
 //   400 {status:'bad_request'} · 401 {status:'unauthorized'} · 413 {status:'too_large'}
 //   429 {status:'limit', scope:'device'|'ip'|'provider', retry_after} · 503 {status:'unavailable'}
 //
+// CORS: https://elricai.sbs and https://www.elricai.sbs (website online mode).
+//
 // Privacy: no question, answer, photo or memory text is stored or logged. Only a salted
 // SHA-256 of the device id and of the IP, with hourly counters (table ai_usage).
 // Models: gemini-3.5-flash-lite, then gemini-3.1-flash-lite on 429/5xx (free tier).
@@ -342,7 +344,30 @@ function relay(res: Response, model: number): ReadableStream<Uint8Array> {
 
 // ---------------------------------------------------------------- handler
 
+// CORS: only the Elric AI website may call this from a browser (the app doesn't need CORS).
+const CORS_ORIGINS = new Set(["https://elricai.sbs", "https://www.elricai.sbs"]);
+function corsHeaders(origin: string | null): Record<string, string> {
+  if (!origin || !CORS_ORIGINS.has(origin)) return {};
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "apikey, authorization, content-type, x-client-info",
+    "Access-Control-Max-Age": "86400",
+    "Vary": "Origin",
+  };
+}
+
 Deno.serve(async (req) => {
+  const cors = corsHeaders(req.headers.get("origin"));
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...cors, "Vary": "Origin" } });
+  const res = await handle(req);
+  if (!Object.keys(cors).length) return res;
+  const h = new Headers(res.headers);
+  for (const [k, v] of Object.entries(cors)) h.set(k, v);
+  return new Response(res.body, { status: res.status, headers: h });
+});
+
+async function handle(req: Request): Promise<Response> {
   if (req.method !== "POST") return json(405, { status: "method" });
   const apikey = req.headers.get("apikey") ?? (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
   if (!PUBLIC_KEYS.has(apikey)) return json(401, { status: "unauthorized" });
@@ -411,4 +436,4 @@ Deno.serve(async (req) => {
       "X-Accel-Buffering": "no",
     },
   });
-});
+}
