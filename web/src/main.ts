@@ -333,7 +333,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.3.4';
+const APP_VERSION = '0.3.5';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
@@ -366,10 +366,9 @@ function menuSheet() {
     const pr = getProfile();
     sheet(`<h3>${t('menuMe')}</h3><p>${t('meIntro')}</p>
       <label class="fl">${t('meName')}<input id="pn" maxlength="40" value="${esc(pr.name)}"></label>
-      <label class="fl">${t('meStudy')}<input id="ps" maxlength="60" placeholder="${t('meStudyHint')}" value="${esc(pr.study)}"></label>
       <button class="primary" id="psave">${t('save')}</button>`);
     $('#psave').onclick = () => {
-      localStorage.setItem('elric.profile', JSON.stringify({ name: $<HTMLInputElement>('#pn').value.trim(), study: $<HTMLInputElement>('#ps').value.trim() }));
+      localStorage.setItem('elric.profile', JSON.stringify({ name: $<HTMLInputElement>('#pn').value.trim(), study: '' }));
       shell();
     };
   };
