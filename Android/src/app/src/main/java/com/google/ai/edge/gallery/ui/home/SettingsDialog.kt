@@ -85,7 +85,6 @@ import com.google.ai.edge.gallery.BuildConfig
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.proto.Theme
 import com.google.ai.edge.gallery.services.asr.AsrEngineType
-import com.google.ai.edge.gallery.ui.common.ClickableLink
 import com.google.ai.edge.gallery.ui.common.tos.AppTosDialog
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.checkAsrEngineSupport
@@ -410,18 +409,6 @@ fun SettingsDialog(
             OutlinedButton(onClick = { showTos = true }) {
               Text(stringResource(R.string.settings_dialog_view_app_terms_of_service))
             }
-            ClickableLink(
-              url = "https://ai.google.dev/gemma/terms",
-              linkText = stringResource(R.string.tos_dialog_title_gemma),
-              textAlign = TextAlign.Start,
-              modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            )
-            ClickableLink(
-              url = "https://ai.google.dev/gemma/prohibited_use_policy",
-              linkText = stringResource(R.string.settings_dialog_gemma_prohibited_use_policy),
-              textAlign = TextAlign.Start,
-              modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
           }
         }
 

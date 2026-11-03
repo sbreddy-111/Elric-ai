@@ -77,3 +77,13 @@ fun elricModelPreference(modelName: String): Int =
     "Elric Embedding" -> 6
     else -> 8
   }
+
+/**
+ * True for models under the custom Gemma Terms of Use (Gemma 1-3n, EmbeddingGemma and similar).
+ * Elric ships only Gemma 4 (Apache-2.0), so these are hidden from the app.
+ */
+fun isElricExcludedModel(modelName: String): Boolean {
+  val n = modelName.lowercase()
+  if (!n.contains("gemma")) return false
+  return !Regex("gemma[-_ ]?4").containsMatchIn(n)
+}

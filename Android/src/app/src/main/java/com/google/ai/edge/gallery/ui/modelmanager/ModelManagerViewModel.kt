@@ -2189,6 +2189,11 @@ constructor(
             continue
           }
 
+          // Elric: only ship Apache-2.0 Gemma 4 models; skip older Gemma models (custom Google terms).
+          if (com.google.ai.edge.gallery.ui.elric.isElricExcludedModel(allowedModel.name)) {
+            continue
+          }
+
           // Hide models whose device-requirement set doesn't include this device.
           val requiredSet = allowedModel.requiredDeviceRequirementSet
           if (requiredSet != null && !deviceRequirements.isSatisfied(requiredSet, device)) {
