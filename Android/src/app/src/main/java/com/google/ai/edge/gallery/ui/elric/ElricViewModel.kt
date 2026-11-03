@@ -126,6 +126,69 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
   /** What Elric remembers about the user, newest first. Only on this phone. */
   val memories = mutableStateListOf<ElricMemory>().apply { addAll(store.loadMemories()) }
 
+  /** The central facts list, cached on the phone (downloaded when online, at most once a day). */
+  private val facts = ElricFacts(context)
+
+  /** Opt-in error reports (crash and stuck). Off by default. */
+  var reportsOn by mutableStateOf(ElricReports.isOn(context))
+    private set
+
+  /** True when the one-time "Send error reports?" card should show (after a first good answer). */
+  var askReports by mutableStateOf(false)
+    private set
+
+  fun updateReportsOn(on: Boolean) {
+    reportsOn = on
+    askReports = false
+    ElricReports.setOn(context, on)
+  }
+
+  fun dismissReportsAsk() {
+    askReports = false
+    ElricReports.markAsked(context)
+  }
+
+  /**
+   * Sends feedback on the answer at [index] when the user taps Send. The question and answer are
+   * included only when [include] is true. [onDone] gets true when it was stored.
+   */
+  fun sendFeedback(index: Int, kind: String, note: String, include: Boolean, onDone: (Boolean) -> Unit) {
+    val answer = turns.getOrNull(index)
+    val question = turns.take(index.coerceAtLeast(0)).lastOrNull { it.isUser }
+    val modelName = loadedModel?.name ?: activeModelName.ifEmpty { null }
+    val row =
+      ElricCloud.baseRow(
+        kind = kind,
+        backend = modelName?.let { store.backendFor(it).ifEmpty { null } },
+        model = modelName?.let { elricModelDisplayName(it) ?: it },
+        mode = mode.id,
+      ) +
+        mapOf(
+          "note" to note.trim().take(4000).ifEmpty { null },
+          "question" to if (include) question?.text?.take(4000) else null,
+          "answer" to if (include) answer?.text?.take(4000) else null,
+        )
+    viewModelScope.launch {
+      val ok = ElricCloud.sendFeedback(row)
+      onDone(ok)
+    }
+  }
+
+  private fun reportStuck(model: Model, reason: String) {
+    val backend = if (model.currentAccelerator == Accelerator.GPU) "gpu" else "cpu"
+    val m = elricModelDisplayName(model.name) ?: model.name
+    val md = mode.id
+    viewModelScope.launch {
+      try {
+        ElricReports.sendStuck(context, backend, m, md, reason)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (t: Throwable) {
+        Log.w(TAG, "stuck report failed", t)
+      }
+    }
+  }
+
   /** True when the question being answered added a memory. */
   private var replySavedMemory = false
 
@@ -315,7 +378,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
 
   // ---------------------------------------------------------------- answering
 
-  fun systemPrompt(): String {
+  fun systemPrompt(question: String = ""): String {
     val today = SimpleDateFormat("d MMMM yyyy", Locale.ENGLISH).format(Date())
     val sb = StringBuilder()
     sb.append(
@@ -328,9 +391,24 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         "Write maths in plain text (like 17 × 24 = 408), never LaTeX. Keep " +
         "answers clear and not too long."
     )
+    val cached = facts.facts
+    if (cached.isEmpty()) {
+      // Offline fallback until the facts list has been downloaded once.
     sb.append(
       " Facts: Elric AI is an offline-first study and shopping assistant for India, founded by Brahma Reddy Suravarapu (elricai.sbs, \"AI you can rely on.\"). Elric Watches is an official Titan watch store founded and owned by Brahma Reddy Suravarapu (elricwatches.in, Instagram @elricwatches). Brahma Reddy Suravarapu is the founder of the Elric brands: Elric Watches, Elric AI and Elric Next (give no details about Elric Next). Being built: Student OS, Elric Fit (a fitness and diet tracker) and Elric AI Watch; say they are being built and do not describe features. If asked who made, built or founded you, say Elric AI was founded by Brahma Reddy Suravarapu; never say Google, Gemma, Gemini or Qwen made you. Use these facts exactly when relevant. For any other small or local business or person, say you are not sure rather than guess."
     )
+    } else {
+      sb.append(
+        " If asked who made, built or founded you, say Elric AI was founded by Brahma Reddy " +
+          "Suravarapu; never say Google, Gemma, Gemini or Qwen made you. For any small or local " +
+          "business or person you have no facts about, say you are not sure rather than guess. " +
+          "Never invent details or features of Elric products beyond the facts given."
+      )
+      val rel = ElricFacts.pick(cached, question)
+      if (rel.isNotEmpty()) {
+        sb.append(" Facts (use exactly when relevant): ").append(rel.joinToString(" "))
+      }
+    }
     when (mode) {
       ElricMode.STUDY -> sb.append(" Mode: Study. Be a patient tutor for Indian students.")
       ElricMode.SHOPPING ->
@@ -435,6 +513,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         }
         val msg = err ?: "timed out after ${LOAD_TIMEOUT_MS / 1000} s"
         engine = ElricEngineState.Failed(msg)
+        reportStuck(model, if (err == null) "load timeout ${LOAD_TIMEOUT_MS / 1000} s" else "load failed: $msg")
         return msg
       }
 
@@ -473,6 +552,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
       val msg = error ?: "timed out after ${LOAD_TIMEOUT_MS / 1000} s"
       Log.e(TAG, "Failed to start model: $msg")
       engine = ElricEngineState.Failed(msg)
+      reportStuck(model, if (error == null) "load timeout ${LOAD_TIMEOUT_MS / 1000} s" else "load failed: $msg")
       return msg
     } catch (e: CancellationException) {
       engine = ElricEngineState.Idle
@@ -481,6 +561,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
       Log.e(TAG, "Failed to start model", t)
       val msg = t.message ?: t.javaClass.simpleName
       engine = ElricEngineState.Failed(msg)
+      reportStuck(model, "load failed: ${t.javaClass.simpleName}")
       return msg
     }
   }
@@ -497,6 +578,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
 
   /** Sets the backend and a context size that suits it before a start. */
   private fun configure(model: Model, accelerator: Accelerator, lowRam: Boolean) {
+    store.saveLastRun(elricModelDisplayName(model.name) ?: model.name, if (accelerator == Accelerator.GPU) "gpu" else "cpu")
     val current =
       model.getIntConfigValue(key = ConfigKeys.MAX_TOKENS, defaultValue = DEFAULT_MAX_TOKEN)
     val cap = if (accelerator == Accelerator.CPU && lowRam) CPU_LOW_RAM_MAX_TOKENS else MAX_TOKENS_CAP
@@ -602,7 +684,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     stopRequested = false
     turns.add(ElricTurn(role = "model", text = "", memSaved = if (replySavedMemory) true else null))
     val replyIndex = turns.size - 1
-    val system = systemPrompt()
+    val system = systemPrompt(q)
 
     viewModelScope.launch {
       val loadError =
@@ -739,6 +821,9 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     if (index in turns.indices) {
       turns[index] = if (replySavedMemory) turn.copy(memSaved = true) else turn
     }
+    if (turn.failed != true && turn.ms != null && !reportsOn && !ElricReports.asked(context)) {
+      askReports = true
+    }
     replySavedMemory = false
     busy = false
     streamTick++
@@ -772,6 +857,19 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
           engine = ElricEngineState.Idle
         }
         onDone()
+      }
+    }
+  }
+
+  init {
+    viewModelScope.launch {
+      try {
+        if (facts.syncIfDue()) syncedKey = null
+        ElricReports.sendPending(context)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (t: Throwable) {
+        Log.w(TAG, "startup sync failed", t)
       }
     }
   }

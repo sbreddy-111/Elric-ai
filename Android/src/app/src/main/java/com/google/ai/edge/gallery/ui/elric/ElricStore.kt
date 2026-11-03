@@ -80,6 +80,11 @@ class ElricStore(context: Context) {
     prefs.edit().putString("backend_$modelName", backend).apply()
   }
 
+  /** Model and backend of the latest start attempt, for error reports (no chat text). */
+  fun saveLastRun(model: String, backend: String) {
+    prefs.edit().putString("last_model", model).putString("last_backend", backend).apply()
+  }
+
   var onboarded: Boolean
     get() = prefs.getBoolean("onboarded", false)
     set(v) = prefs.edit().putBoolean("onboarded", v).apply()

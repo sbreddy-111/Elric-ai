@@ -20,6 +20,7 @@ import android.app.Application
 import com.google.ai.edge.gallery.data.DataStoreRepository
 import com.google.ai.edge.gallery.notifications.NotificationScheduleManager
 import com.google.ai.edge.gallery.services.tts.TtsMemoryTrimCallbacks
+import com.google.ai.edge.gallery.ui.elric.ElricReports
 import com.google.ai.edge.gallery.ui.theme.ThemeSettings
 import com.google.firebase.FirebaseApp
 import dagger.hilt.android.HiltAndroidApp
@@ -34,6 +35,8 @@ class GalleryApplication : Application() {
 
   override fun onCreate() {
     super.onCreate()
+    // Opt-in error reports: saves a crash report only when the user turned reports on.
+    ElricReports.install(this)
     registerComponentCallbacks(ttsMemoryTrimCallbacks)
     // Initialize the notification schedule manager to load the scheduled notifications from the
     // disk.

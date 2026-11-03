@@ -73,6 +73,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -139,6 +141,7 @@ private enum class Overlay {
   DRAWER,
   CAMERA,
   ABOUT_APP,
+  FEEDBACK,
 }
 
 private val LITE_NAME = Regex("(?i)^gemma[-_ ]?4[-_ ]?e2b[-_ ]?it$")
@@ -191,6 +194,13 @@ fun ElricApp(
   var toastSeq by remember { mutableStateOf(0) }
   var showTos by remember { mutableStateOf(!tosViewModel.getIsTosAccepted()) }
   val offline = !rememberOnline()
+
+  // Feedback sheet (opened by 👎). Nothing is sent until the user taps Send.
+  var fbIndex by remember { mutableStateOf(-1) }
+  var fbKind by remember { mutableStateOf("wrong_answer") }
+  var fbNote by remember { mutableStateOf("") }
+  var fbInclude by remember { mutableStateOf(false) }
+  var fbSending by remember { mutableStateOf(false) }
 
   fun showToast(msg: String) {
     toast = msg
@@ -400,7 +410,17 @@ fun ElricApp(
                     showToast(T.readingAloud.get(vm.lang))
                   },
                   onRegenerate = { vm.regenerate(currentModel) },
-                  onRate = { i, v -> vm.rate(i, v) },
+                  onRate = { i, v ->
+                    val was = vm.turns.getOrNull(i)?.rating
+                    vm.rate(i, v)
+                    if (v == -1 && was != -1) {
+                      fbIndex = i
+                      fbKind = "wrong_answer"
+                      fbNote = ""
+                      fbInclude = false
+                      overlay = Overlay.FEEDBACK
+                    }
+                  },
                   onFollow = { ask(it) },
                   onOpenModels = { openFromMenu(Screen.MODELS) },
                   modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -418,6 +438,12 @@ fun ElricApp(
                     }
                   },
                   modifier = Modifier.weight(1f),
+                )
+              }
+              if (isChat && vm.askReports && !vm.busy) {
+                ReportsAskCard(
+                  onYes = { vm.updateReportsOn(true) },
+                  onNo = { vm.dismissReportsAsk() },
                 )
               }
               Composer(
@@ -453,7 +479,12 @@ fun ElricApp(
               },
               onUse = { m -> vm.updateActiveModel(m.name) },
             )
-          Screen.PRIVACY -> PrivacyScreen(onBack = { go(returnTo) })
+          Screen.PRIVACY ->
+            PrivacyScreen(
+              reportsOn = vm.reportsOn,
+              onReports = { vm.updateReportsOn(it) },
+              onBack = { go(returnTo) },
+            )
           Screen.MEMORY ->
             MemoryScreen(
               memories = vm.memories,
@@ -494,6 +525,59 @@ fun ElricApp(
           tr(T.photoSoon),
           modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         )
+      }
+
+      // Feedback sheet (👎).
+      BottomSheetOverlay(visible = overlay == Overlay.FEEDBACK, onDismiss = { overlay = Overlay.NONE }) {
+        EText(tr(T.fbTitle), size = 18.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 4.dp))
+        SheetOption("✕", tr(T.fbWrong), null, fbKind == "wrong_answer") { fbKind = "wrong_answer" }
+        SheetOption("◌", tr(T.fbNotHelpful), null, fbKind == "thumbs_down") { fbKind = "thumbs_down" }
+        FeedbackNote(value = fbNote, onValueChange = { fbNote = it.take(1000) })
+        Row(
+          modifier =
+            Modifier.fillMaxWidth()
+              .clip(RoundedCornerShape(12.dp))
+              .clickable { fbInclude = !fbInclude }
+              .padding(vertical = 4.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Checkbox(
+            checked = fbInclude,
+            onCheckedChange = { fbInclude = it },
+            colors =
+              CheckboxDefaults.colors(
+                checkedColor = pal().gold,
+                uncheckedColor = pal().muted,
+                checkmarkColor = pal().onGold,
+              ),
+          )
+          EText(tr(T.fbInclude), size = 14.sp)
+        }
+        TinyText(tr(T.fbOnlySend), modifier = Modifier.padding(horizontal = 4.dp))
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+          horizontalArrangement = Arrangement.End,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          TextBtn(tr(T.cancel), onClick = { overlay = Overlay.NONE })
+          GoldButton(
+            tr(T.send),
+            enabled = !fbSending,
+            small = true,
+            onClick = {
+              fbSending = true
+              vm.sendFeedback(fbIndex, fbKind, fbNote, fbInclude) { ok ->
+                fbSending = false
+                if (ok) {
+                  overlay = Overlay.NONE
+                  showToast(T.fbThanks.get(vm.lang))
+                } else {
+                  showToast(T.fbFailed.get(vm.lang))
+                }
+              }
+            },
+          )
+        }
       }
 
       // About app sheet.
@@ -1063,6 +1147,57 @@ private fun rememberTts(): ElricTts {
             }
           }
       }
+    }
+  }
+}
+
+/** Optional note in the feedback sheet. */
+@Composable
+private fun FeedbackNote(value: String, onValueChange: (String) -> Unit) {
+  val p = pal()
+  Box(
+    modifier =
+      Modifier.fillMaxWidth()
+        .heightIn(min = 72.dp)
+        .clip(RoundedCornerShape(16.dp))
+        .background(p.surface2)
+        .border(1.dp, p.line, RoundedCornerShape(16.dp))
+        .padding(horizontal = 14.dp, vertical = 12.dp)
+  ) {
+    if (value.isEmpty()) EText(tr(T.fbNote), size = 14.sp, color = p.muted)
+    BasicTextField(
+      value = value,
+      onValueChange = onValueChange,
+      textStyle = TextStyle(color = p.text, fontSize = 14.sp),
+      cursorBrush = SolidColor(p.gold),
+      modifier = Modifier.fillMaxWidth(),
+    )
+  }
+}
+
+/** One-time inline card asking whether to send error reports (after the first good answer). */
+@Composable
+private fun ReportsAskCard(onYes: () -> Unit, onNo: () -> Unit) {
+  val p = pal()
+  Column(
+    modifier =
+      Modifier.fillMaxWidth()
+        .padding(bottom = 8.dp)
+        .clip(RoundedCornerShape(16.dp))
+        .background(p.surface)
+        .border(1.dp, p.line, RoundedCornerShape(16.dp))
+        .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp),
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    EText(tr(T.reportsAskTitle), size = 14.sp, weight = FontWeight.SemiBold)
+    TinyText(tr(T.reportsAskBody))
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.End,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      TextBtn(tr(T.noThanks), onClick = onNo)
+      TextBtn(tr(T.yesSend), onClick = onYes, color = p.goldInk)
     }
   }
 }

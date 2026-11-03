@@ -242,12 +242,55 @@ object T {
   // Privacy
   val privacyTitle = Str("Your chats stay on this phone", "आपकी चैट इसी फ़ोन पर रहती हैं")
   val privacy1 = Str("Study answers work offline", "पढ़ाई के जवाब ऑफ़लाइन मिलते हैं")
-  val privacy2 = Str("Nothing you type is sent anywhere", "आप जो लिखते हैं वह कहीं नहीं भेजा जाता")
+  val privacy2 =
+    Str(
+      "Nothing you type is sent anywhere, unless you choose to send feedback",
+      "आप जो लिखते हैं वह कहीं नहीं भेजा जाता, जब तक आप खुद फ़ीडबैक न भेजें",
+    )
   val privacy3 =
     Str(
-      "Live prices are coming soon. Today everything runs on your phone.",
-      "लाइव कीमतें जल्द आ रही हैं। अभी सब कुछ आपके फ़ोन पर ही चलता है।",
+      "Live prices are coming soon. Today answers run on your phone.",
+      "लाइव कीमतें जल्द आ रही हैं। अभी जवाब आपके फ़ोन पर ही बनते हैं।",
     )
+  val privacy4 =
+    Str(
+      "Feedback and error reports are optional and off by default. They are stored on our server (Supabase), which may be outside India.",
+      "फ़ीडबैक और एरर रिपोर्ट आपकी मर्ज़ी पर हैं और शुरू में बंद रहती हैं। ये हमारे सर्वर (Supabase) पर रखी जाती हैं, जो भारत से बाहर हो सकता है।",
+    )
+  val privacy5 =
+    Str(
+      "When online, Elric downloads a short list of facts (at most once a day) to answer more reliably. Nothing about you is sent.",
+      "इंटरनेट होने पर Elric तथ्यों की एक छोटी सूची (दिन में ज़्यादा से ज़्यादा एक बार) डाउनलोड करता है, ताकि जवाब और भरोसेमंद हों। आपके बारे में कुछ नहीं भेजा जाता।",
+    )
+  val reportsSwitch = Str("Send error reports", "एरर रिपोर्ट भेजें")
+  val reportsHow =
+    Str(
+      "If Elric crashes or gets stuck loading, send the app version, phone model, Android version and model name. Never your chats.",
+      "अगर Elric क्रैश हो या लोड होते हुए अटक जाए, तो ऐप वर्ज़न, फ़ोन मॉडल, Android वर्ज़न और मॉडल का नाम भेजें। आपकी चैट कभी नहीं।",
+    )
+  val reportsAskTitle = Str("Help make Elric more reliable?", "Elric को और भरोसेमंद बनाने में मदद करें?")
+  val reportsAskBody =
+    Str(
+      "Send error reports when Elric crashes or gets stuck. Only app and phone details, never your chats. You can change this in Privacy.",
+      "Elric क्रैश हो या अटके तो एरर रिपोर्ट भेजें। सिर्फ़ ऐप और फ़ोन की जानकारी, आपकी चैट कभी नहीं। इसे आप प्राइवेसी में बदल सकते हैं।",
+    )
+  val yesSend = Str("Yes, send", "हाँ, भेजें")
+  val noThanks = Str("No thanks", "नहीं, धन्यवाद")
+
+  // Feedback sheet
+  val fbTitle = Str("What went wrong?", "क्या गड़बड़ थी?")
+  val fbWrong = Str("Wrong answer", "गलत जवाब")
+  val fbNotHelpful = Str("Not helpful", "मददगार नहीं")
+  val fbNote = Str("Add a note (optional)", "कुछ लिखें (वैकल्पिक)")
+  val fbInclude = Str("Include this question and answer", "यह सवाल और जवाब भी भेजें")
+  val fbOnlySend =
+    Str(
+      "Sent only when you tap Send. Your other chats stay on this phone.",
+      "सिर्फ़ भेजें दबाने पर जाता है। आपकी बाकी चैट इसी फ़ोन पर रहती हैं।",
+    )
+  val fbThanks = Str("Thanks — this helps Elric improve.", "धन्यवाद — इससे Elric बेहतर होता है।")
+  val fbFailed =
+    Str("Couldn't send. Check your internet and try again.", "भेज नहीं पाए। इंटरनेट देखकर फिर से कोशिश करें।")
 
   // Voice / misc
   val voiceUnavailable = Str("Voice input isn't available on this phone", "इस फ़ोन पर बोलकर पूछना उपलब्ध नहीं है")

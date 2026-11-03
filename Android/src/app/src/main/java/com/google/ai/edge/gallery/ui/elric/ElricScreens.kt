@@ -581,7 +581,7 @@ fun ModelsScreen(
 // ------------------------------------------------------------------ 10 privacy
 
 @Composable
-fun PrivacyScreen(onBack: () -> Unit) {
+fun PrivacyScreen(reportsOn: Boolean, onReports: (Boolean) -> Unit, onBack: () -> Unit) {
   val p = pal()
   Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
     BackBar(onBack, tr(T.privacy))
@@ -613,7 +613,7 @@ fun PrivacyScreen(onBack: () -> Unit) {
         textAlign = TextAlign.Center,
       )
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (point in listOf(T.privacy1, T.privacy2, T.privacy3)) {
+        for (point in listOf(T.privacy1, T.privacy2, T.privacy3, T.privacy4, T.privacy5)) {
           Row(
             modifier =
               Modifier.fillMaxWidth()
@@ -628,6 +628,31 @@ fun PrivacyScreen(onBack: () -> Unit) {
           }
         }
       }
+      Row(
+        modifier =
+          Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(p.surface)
+            .border(1.dp, p.line, RoundedCornerShape(16.dp))
+            .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        EText(tr(T.reportsSwitch), size = 14.sp, modifier = Modifier.weight(1f))
+        Switch(
+          checked = reportsOn,
+          onCheckedChange = onReports,
+          colors =
+            SwitchDefaults.colors(
+              checkedThumbColor = p.onGold,
+              checkedTrackColor = p.gold,
+              uncheckedThumbColor = p.muted,
+              uncheckedTrackColor = p.surface2,
+              uncheckedBorderColor = p.line,
+            ),
+        )
+      }
+      TinyText(tr(T.reportsHow), modifier = Modifier.padding(horizontal = 4.dp))
     }
   }
 }
