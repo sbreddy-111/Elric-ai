@@ -414,15 +414,16 @@ function toggleOnline() {
 function modeSheet() {
   const ms: Mode[] = ['study', 'shopping', 'general'];
   const desc: Record<Mode, keyof Strings> = { study: 'modeStudyDesc', shopping: 'modeShoppingDesc', general: 'modeGeneralDesc' };
-  sheet(ms.map((m) => `<button class="row ${m === mode ? 'sel' : ''}" data-m="${m}"><b>${t(modeKey[m])}</b><span>${t(desc[m])}</span></button>`).join('')
-    + `<div class="sec">${t('lenTitle')}</div>`
-    + `<button class="row ${short ? 'sel' : ''}" data-l="short"><b>${t('lenShort')}</b><span>${t('lenShortDesc')}</span></button>`
-    + `<button class="row ${!short ? 'sel' : ''}" data-l="long"><b>${t('lenLong')}</b><span>${t('lenLongDesc')}</span></button>`);
+  const chk = '<i class="ck">✓</i>';
+  sheet(`<div class="shd">${t('modeTitle')}</div><div class="grp">`
+    + ms.map((m) => `<button class="it ${m === mode ? 'sel' : ''}" data-m="${m}"><span class="tl"><b>${t(modeKey[m])}</b><small>${t(desc[m])}</small></span>${m === mode ? chk : ''}</button>`).join('')
+    + `</div><div class="shd">${t('lenTitle')}</div><div class="seg"><button class="${short ? 'on' : ''}" data-l="short">${t('lenShort')}</button><button class="${!short ? 'on' : ''}" data-l="long">${t('lenLong')}</button></div>`
+    + `<p class="foot">${t(short ? 'lenShortDesc' : 'lenLongDesc')}</p>`);
   document.querySelectorAll<HTMLButtonElement>('[data-l]').forEach((b) => (b.onclick = () => { short = b.dataset.l === 'short'; localStorage.setItem('elric.length', short ? 'short' : 'long'); shell(); }));
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.3.9';
+const APP_VERSION = '0.4.0';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
@@ -433,18 +434,24 @@ const LICENSES = [
 ];
 
 function menuSheet() {
+  const nav = (id: string, title: string, val = '') => `<button class="it" id="${id}"><span class="tl"><b>${title}</b></span>${val ? `<span class="val">${val}</span>` : ''}<i class="chev">›</i></button>`;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
   sheet(`<div class="brand"><img src="icons/mark.png" alt=""><div><b>Elric AI</b><span>AI you can rely on</span></div></div>
-    <div class="sec">${t('menuChats')}</div>
-    ${(() => { const cs = loadChats(); return cs.length ? cs.slice(0, 20).map((c) => `<div class="chatrow ${c.id === chatId ? 'sel' : ''}"><button class="ct" data-c="${c.id}">${esc(c.title || '…')}</button><button class="cx" data-d="${c.id}" aria-label="${t('deleteChat')}">×</button></div>`).join('') : `<p class="tip pad">${t('noChats')}</p>`; })()}
-    <div class="sec"></div>
-    <button class="row" id="m-me"><b>${t('menuMe')}</b><span>${esc(getProfile().name) || t('menuMeHint')}</span></button>
-    <button class="row" id="m-models"><b>${t('menuModels')}</b><span>${t(E.MODEL_NAME_KEY as keyof Strings)} · ${SIZE}</span></button>
-    <button class="row trow" id="m-online" role="switch" aria-checked="${O.isOn()}"><span class="tl"><b>${t('onlineAnswers')}</b><span>${t('onlineHow')}</span></span><i class="sw ${O.isOn() ? 'on' : ''}"></i></button>
-    <button class="row" id="m-lang"><b>${t('menuLanguage')}</b><span>English · हिन्दी</span></button>
-    <button class="row" id="m-priv"><b>${t('menuPrivacy')}</b></button>
-    <button class="row" id="m-about"><b>${t('menuAbout')}</b></button>
-    <button class="row" id="m-lic"><b>${t('menuLicenses')}</b></button>
-    <p class="tip">${t(/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent)) ? 'installTip' : 'installTipPc')}</p><p class="tip pad">Version ${APP_VERSION}</p>`);
+    <div class="shd">${t('menuChats')}</div>
+    ${(() => { const cs = loadChats(); return cs.length ? `<div class="grp">${cs.slice(0, 8).map((c) => `<div class="chatrow ${c.id === chatId ? 'sel' : ''}"><button class="ct" data-c="${c.id}">${esc(c.title || '…')}</button><button class="cx" data-d="${c.id}" aria-label="${t('deleteChat')}">×</button></div>`).join('')}</div>` : `<p class="foot">${t('noChats')}</p>`; })()}
+    <div class="shd">${t('menuSettings')}</div>
+    <div class="grp">
+    ${nav('m-me', t('menuMe'), esc(getProfile().name) || t('menuMeHint'))}
+    ${nav('m-models', t('menuModels'), t(E.MODEL_NAME_KEY as keyof Strings))}
+    <button class="it" id="m-online" role="switch" aria-checked="${O.isOn()}"><span class="tl"><b>${t('onlineAnswers')}</b><small>${t('onlineHow')}</small></span><i class="sw ${O.isOn() ? 'on' : ''}"></i></button>
+    ${nav('m-lang', t('menuLanguage'), getLang() === 'hi' ? 'हिन्दी' : 'English')}
+    </div>
+    <div class="grp">
+    ${nav('m-priv', t('menuPrivacy'))}
+    ${nav('m-about', t('menuAbout'))}
+    ${nav('m-lic', t('menuLicenses'))}
+    </div>
+    <p class="foot c">${t(ios ? 'installTip' : 'installTipPc')}<br>Version ${APP_VERSION}</p>`);
   $('#m-models').onclick = () => sheet(`<h3>${t('menuModels')}</h3><div class="status-slot"></div><div class="box"><div class="mh"><b>${t('modelStandard')}</b><span>${t('comingSoon')}</span></div><p class="d">${t('modelStandardDesc')}</p></div>`) ; 
   $('#m-models').addEventListener('click', () => renderStatus());
   document.querySelectorAll<HTMLButtonElement>('[data-c]').forEach((b) => (b.onclick = () => openChat(loadChats().find((c) => c.id === b.dataset.c))));
