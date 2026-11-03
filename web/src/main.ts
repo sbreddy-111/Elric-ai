@@ -235,6 +235,7 @@ function modeSheet() {
 
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
+  ['Elric Basic model weights (Gemma 3 1B, iPhone)', 'Gemma Terms of Use', 'https://ai.google.dev/gemma/terms'],
   ['MediaPipe / LiteRT web runtime', 'Apache License 2.0', 'https://github.com/google-ai-edge/mediapipe/blob/master/LICENSE'],
   ['Elric AI (this app)', 'Apache License 2.0', 'https://github.com/sbreddy-111/Elric-ai/blob/main/LICENSE'],
   ['Vite (build tool)', 'MIT License', 'https://github.com/vitejs/vite/blob/main/LICENSE'],

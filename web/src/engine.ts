@@ -15,11 +15,12 @@ const FULL = {
 
 // iPhone web pages get too little memory for the 2 GB model, so iPhone/iPad use a smaller open model (Apache-2.0).
 const BASIC = {
-  id: 'elric-basic-2',
-  chat: 'chatml' as 'gemma' | 'chatml',
-  url: 'https://huggingface.co/litert-community/MiniCPM5-1B/resolve/main/minicpm_wi4b32_wi8_afp32_gpu_opt.litertlm',
-  fileName: 'elric-basic-v2.litertlm',
-  sizeBytes: 793029040,
+  id: 'elric-basic-3',
+  chat: 'gemma3' as 'gemma' | 'chatml' | 'gemma3',
+  // Official web build (same SHA-256 as litert-community/Gemma3-1B-IT, which is login-gated). Gemma Terms of Use.
+  url: 'https://huggingface.co/nuuco/gemma-3-1b-it-int4-web/resolve/main/gemma3-1b-it-int4-web.task',
+  fileName: 'elric-basic-v3.task',
+  sizeBytes: 700383232,
 };
 
 
@@ -64,7 +65,7 @@ const LOADING_FLAG = 'elric.loadingSince';
     await caches.delete('elric-model-pieces');
     await caches.delete('elric-models');
     const root = await navigator.storage.getDirectory();
-    for (const n of ['elric-lite-v1.task', 'elric-lite-v1.task.part', 'elric-basic-v1.litertlm', 'elric-basic-v1.litertlm.part', 'elric-basic-v2.litertlm', 'elric-basic-v2.litertlm.part']) {
+    for (const n of ['elric-lite-v1.task', 'elric-lite-v1.task.part', 'elric-basic-v1.litertlm', 'elric-basic-v1.litertlm.part', 'elric-basic-v2.litertlm', 'elric-basic-v2.litertlm.part', 'elric-basic-v3.task', 'elric-basic-v3.task.part']) {
       try { await root.removeEntry(n); } catch { /* none */ }
     }
   } catch { /* best effort */ }
@@ -499,6 +500,14 @@ export interface Turn {
 }
 
 function render(system: string, turns: Turn[]): string {
+  if ((LITE as any).chat === 'gemma3') {
+    let g = '';
+    turns.forEach((t, i) => {
+      const txt = i === 0 && t.role === 'user' ? `${system}\n\n${t.text}` : t.text;
+      g += `<start_of_turn>${t.role === 'model' ? 'model' : 'user'}\n${txt}<end_of_turn>\n`;
+    });
+    return g + '<start_of_turn>model\n';
+  }
   if (LITE.chat === 'chatml') {
     let c = `<|im_start|>system\n${system}<|im_end|>\n`;
     for (const t of turns) c += `<|im_start|>${t.role === 'model' ? 'assistant' : 'user'}\n${t.text}<|im_end|>\n`;
@@ -529,7 +538,8 @@ function clean(text: string): string {
     .replace(/<\|?turn\|?>/g, '')
     .replace(/<\|channel>[\s\S]*$/, '')
     .replace(/<think>[\s\S]*?<\/think>/g, '')
-    .replace(/<\|im_(start|end)\|>/g, '');
+    .replace(/<\|im_(start|end)\|>/g, '')
+    .replace(/<(start|end)_of_turn>(model|user)?/g, '');
 }
 
 export async function generate(system: string, turns: Turn[], onText: (text: string) => void): Promise<string> {
