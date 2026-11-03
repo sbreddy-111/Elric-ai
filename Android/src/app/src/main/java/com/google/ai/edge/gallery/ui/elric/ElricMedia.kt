@@ -283,9 +283,11 @@ fun elricSpeakable(text: String): String =
     .trim()
 
 /**
- * Reads answers aloud with the phone's own text-to-speech (works offline when the phone has the
- * voice data), in Hindi or English to match the answer. [speak]'s callback runs on the main thread
- * when reading ends, is stopped, or can't start (false).
+ * Reads answers aloud with the phone's own text-to-speech, offline when the phone has the voice
+ * data, in Hindi or English to match each sentence. It picks the best installed offline voice for
+ * each language. Text can be added sentence by sentence while the answer is still being written
+ * ([begin], [add], [end]), so speaking starts after the first sentence. Callbacks run on the main
+ * thread.
  */
 class ElricSpeaker(context: Context) {
   private val app = context.applicationContext
@@ -293,35 +295,65 @@ class ElricSpeaker(context: Context) {
   private var tts: TextToSpeech? = null
   private var ready = false
   private var failed = false
-  private var pending: Pair<String, (Boolean) -> Unit>? = null
-  private var current: ((Boolean) -> Unit)? = null
+  private var session = 0
+  private var open = false
+  private var allOk = true
+  private var outstanding = 0
+  private var onAllDone: ((Boolean) -> Unit)? = null
+  private val waiting = mutableListOf<String>()
+  private val ids = mutableSetOf<String>()
   private var seq = 0
+  private var currentLang = ""
+  private val bestVoice = mutableMapOf<String, android.speech.tts.Voice?>()
 
+  /** Reads [text] in one go; [onDone] gets false when it couldn't be read aloud. */
   fun speak(text: String, onDone: (Boolean) -> Unit) {
+    begin(onDone)
+    add(text)
+    end()
+  }
+
+  /** Starts a new answer; stops anything still being read. */
+  fun begin(onDone: (Boolean) -> Unit) {
     stop()
+    open = true
+    allOk = true
+    onAllDone = onDone
+    if (tts == null && !failed) init()
+  }
+
+  /** Adds the next part of the answer. */
+  fun add(text: String) {
+    if (!open) return
     val plain = elricSpeakable(text)
-    if (plain.isEmpty()) {
-      main.post { onDone(true) }
-      return
-    }
+    if (plain.isEmpty()) return
     if (failed) {
-      main.post { onDone(false) }
+      allOk = false
       return
     }
     val t = tts
     if (t == null || !ready) {
-      pending = plain to onDone
-      if (t == null) init()
+      waiting.add(plain)
       return
     }
-    say(t, plain, onDone)
+    say(t, plain)
   }
 
-  /** Stops reading. The callback of the stopped text is not called. */
+  /** No more text for this answer; the callback runs once everything has been read. */
+  fun end() {
+    if (!open) return
+    open = false
+    checkDone()
+  }
+
+  /** Stops reading. The callback of the stopped answer is not called. */
   fun stop() {
-    pending = null
-    current = null
-    currentId = null
+    session++
+    open = false
+    onAllDone = null
+    waiting.clear()
+    ids.clear()
+    outstanding = 0
     try {
       tts?.stop()
     } catch (e: Exception) {
@@ -330,13 +362,20 @@ class ElricSpeaker(context: Context) {
   }
 
   fun shutdown() {
-    pending = null
-    current = null
+    stop()
     try {
       tts?.shutdown()
     } catch (e: Exception) {}
     tts = null
     ready = false
+  }
+
+  private fun checkDone() {
+    if (open || outstanding > 0 || waiting.isNotEmpty() && !failed) return
+    val cb = onAllDone ?: return
+    onAllDone = null
+    val ok = allOk && !failed
+    main.post { cb(ok) }
   }
 
   private fun init() {
@@ -350,64 +389,99 @@ class ElricSpeaker(context: Context) {
                 override fun onStart(utteranceId: String?) {}
 
                 override fun onDone(utteranceId: String?) {
-                  main.post { finish(utteranceId, true) }
+                  main.post { finished(utteranceId, true) }
                 }
 
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
-                  main.post { finish(utteranceId, false) }
+                  main.post { finished(utteranceId, false) }
                 }
 
                 override fun onError(utteranceId: String?, errorCode: Int) {
-                  main.post { finish(utteranceId, false) }
+                  main.post { finished(utteranceId, false) }
                 }
               }
             )
-            val p = pending
-            pending = null
             val t = tts
-            if (p != null && t != null) say(t, p.first, p.second)
+            val list = waiting.toList()
+            waiting.clear()
+            if (t != null) for (w in list) say(t, w)
+            checkDone()
           } else {
             failed = true
             tts = null
-            val p = pending
-            pending = null
-            p?.second?.invoke(false)
+            waiting.clear()
+            allOk = false
+            checkDone()
           }
         }
       }
   }
 
-  private fun say(t: TextToSpeech, plain: String, onDone: (Boolean) -> Unit) {
-    val locale = if (elricIsHindi(plain)) Locale("hi", "IN") else Locale("en", "IN")
-    try {
-      val r = t.setLanguage(locale)
-      if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-        if (locale.language == "en") t.setLanguage(Locale.US)
+  /** The best installed voice for [lang] that works offline, preferring Indian voices. */
+  private fun voiceFor(t: TextToSpeech, lang: String): android.speech.tts.Voice? {
+    if (bestVoice.containsKey(lang)) return bestVoice[lang]
+    val v =
+      try {
+        t.voices
+          ?.filter { v ->
+            v.locale.language == lang &&
+              !v.isNetworkConnectionRequired &&
+              !v.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)
+          }
+          ?.sortedWith(
+            compareByDescending<android.speech.tts.Voice> { it.locale.country == "IN" }
+              .thenByDescending { it.quality }
+              .thenBy { it.latency }
+          )
+          ?.firstOrNull()
+      } catch (e: Exception) {
+        null
       }
-    } catch (e: Exception) {
-      Log.w(TAG, "tts language failed", e)
+    bestVoice[lang] = v
+    return v
+  }
+
+  private fun say(t: TextToSpeech, plain: String) {
+    val lang = if (elricIsHindi(plain)) "hi" else "en"
+    if (lang != currentLang) {
+      currentLang = lang
+      try {
+        val v = voiceFor(t, lang)
+        if (v != null) {
+          t.voice = v
+        } else {
+          val r = t.setLanguage(if (lang == "hi") Locale("hi", "IN") else Locale("en", "IN"))
+          if ((r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) && lang == "en") {
+            t.setLanguage(Locale.US)
+          }
+        }
+      } catch (e: Exception) {
+        Log.w(TAG, "tts voice failed", e)
+      }
     }
-    val max = try { TextToSpeech.getMaxSpeechInputLength() } catch (e: Exception) { 3900 }
-    val id = "elric-" + (++seq)
-    current = onDone
-    currentId = id
+    val max =
+      try {
+        TextToSpeech.getMaxSpeechInputLength()
+      } catch (e: Exception) {
+        3900
+      }
+    val id = "elric-$session-" + (++seq)
+    ids.add(id)
+    outstanding++
     val res =
       try {
-        t.speak(plain.take(max - 1), TextToSpeech.QUEUE_FLUSH, null, id)
+        t.speak(plain.take(max - 1), TextToSpeech.QUEUE_ADD, null, id)
       } catch (e: Exception) {
         TextToSpeech.ERROR
       }
-    if (res != TextToSpeech.SUCCESS) finish(id, false)
+    if (res != TextToSpeech.SUCCESS) finished(id, false)
   }
 
-  private var currentId: String? = null
-
-  private fun finish(id: String?, ok: Boolean) {
-    if (id != currentId) return
-    val cb = current ?: return
-    current = null
-    currentId = null
-    cb(ok)
+  private fun finished(id: String?, ok: Boolean) {
+    if (id == null || !ids.remove(id)) return
+    outstanding = (outstanding - 1).coerceAtLeast(0)
+    if (!ok) allOk = false
+    checkDone()
   }
 }

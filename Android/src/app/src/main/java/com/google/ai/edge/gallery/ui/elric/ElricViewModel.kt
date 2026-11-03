@@ -761,7 +761,10 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
   fun tapTalk() {
     when (talkState) {
       ElricTalkState.SPEAKING -> {
+        // Interrupt: stop reading and writing; what was written stays in the chat.
         speaker.stop()
+        talkReplyIndex = -1
+        if (busy) stop()
         listenTalk()
       }
       ElricTalkState.LISTENING -> endListening(talkSession)
@@ -851,6 +854,8 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         talkState = ElricTalkState.PAUSED
         return@launch
       }
+      talkSpokenTo = 0
+      talkStarted = false
       talkReplyIndex = turns.size - 1
     }
   }
@@ -867,20 +872,64 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     }
   }
 
+  /** Characters of the answer already given to the speaker, and whether speaking has begun. */
+  private var talkSpokenTo = 0
+  private var talkStarted = false
+
+  /**
+   * Gives the speaker each finished sentence of the answer as it is written, so Elric starts
+   * speaking after the first sentence. With [final] the rest is given and the speaker is closed.
+   */
+  private fun talkFeed(rawText: String, final: Boolean) {
+    val text = rawText.trimStart()
+    if (talkSpokenTo > text.length) talkSpokenTo = text.length
+    var end = text.length
+    if (!final) {
+      end = -1
+      for (i in text.length - 1 downTo talkSpokenTo) {
+        val c = text[i]
+        if (c == '.' || c == '!' || c == '?' || c == '\u0964' || c == '\n') {
+          // A full stop inside a number (3.14) is not the end of a sentence.
+          if (c == '.' && i + 1 < text.length && text[i + 1].isDigit()) continue
+          if (c == '.' && i + 1 >= text.length) continue
+          end = i + 1
+          break
+        }
+      }
+      if (end < 0 || end - talkSpokenTo < 12) return
+    }
+    val chunk = text.substring(talkSpokenTo, end)
+    talkSpokenTo = end
+    if (chunk.isNotBlank()) {
+      if (!talkStarted) {
+        talkStarted = true
+        val session = talkSession
+        talkState = ElricTalkState.SPEAKING
+        speaker.begin { ok ->
+          if (session != talkSession || talkState != ElricTalkState.SPEAKING) return@begin
+          if (!ok) talkCaption = T.talkNoVoice.get(lang)
+          listenTalk()
+        }
+      }
+      speaker.add(chunk)
+    }
+    if (final) speaker.end()
+  }
+
   private fun onTalkAnswer(turn: ElricTurn) {
     talkReplyIndex = -1
-    if (turn.failed == true) {
+    if (turn.failed == true && !talkStarted) {
       talkCaption = turn.text
       talkState = ElricTalkState.PAUSED
       return
     }
-    val session = talkSession
-    talkState = ElricTalkState.SPEAKING
-    speaker.speak(turn.text) { ok ->
-      if (session != talkSession || talkState != ElricTalkState.SPEAKING) return@speak
-      if (!ok) talkCaption = T.talkNoVoice.get(lang)
-      listenTalk()
+    if (turn.failed == true) {
+      speaker.end()
+      return
     }
+    talkFeed(turn.text, final = true)
+    // Nothing to read aloud (an empty answer): listen again.
+    if (!talkStarted) listenTalk()
   }
 
   // ---------------------------------------------------------------- answering
@@ -1422,8 +1471,10 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         {
           posted.set(false)
           if (finished.get() || replyIndex !in turns.indices) return@postDelayed
-          turns[replyIndex] = turns[replyIndex].copy(text = cleanModelText(current()))
+          val partial = cleanModelText(current())
+          turns[replyIndex] = turns[replyIndex].copy(text = partial)
           streamTick++
+          if (talkState != ElricTalkState.OFF && replyIndex == talkReplyIndex) talkFeed(partial, final = false)
         },
         40,
       )
@@ -1503,7 +1554,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     busy = false
     streamTick++
     persist()
-    if (talkState == ElricTalkState.THINKING && index == talkReplyIndex) onTalkAnswer(turns[index])
+    if (talkState != ElricTalkState.OFF && index == talkReplyIndex) onTalkAnswer(turns[index])
   }
 
   fun stop() {
