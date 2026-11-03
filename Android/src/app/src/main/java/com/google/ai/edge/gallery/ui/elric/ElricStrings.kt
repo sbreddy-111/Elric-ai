@@ -328,6 +328,31 @@ object T {
   val voiceFailed =
     Str("Couldn't turn your voice into text. Try again.", "आपकी आवाज़ को टेक्स्ट में नहीं बदल पाए। फिर से कोशिश करें।")
   val photo = Str("Photo", "फ़ोटो")
+
+  // Talk (hands-free conversation)
+  val talk = Str("Talk", "बातचीत")
+  val talkListening = Str("Listening…", "सुन रहा है…")
+  val talkPreparing =
+    Str("Getting voice ready… The first time can take a minute.", "आवाज़ तैयार हो रही है… पहली बार में एक मिनट लग सकता है।")
+  val talkThinking = Str("Thinking…", "सोच रहा है…")
+  val talkSpeaking = Str("Speaking · tap to interrupt", "बोल रहा है · रोकने के लिए दबाएँ")
+  val talkPaused = Str("Tap the circle to speak", "बोलने के लिए गोले को दबाएँ")
+  val talkMutedLabel = Str("Microphone off", "माइक बंद है")
+  val talkMute = Str("Mute", "म्यूट")
+  val talkUnmute = Str("Unmute", "अनम्यूट")
+  val talkEnd = Str("End", "बंद करें")
+  val talkWait = Str("Wait for the answer to finish", "जवाब पूरा होने दें")
+  val talkFailed = Str("Couldn't answer that. Tap to try again.", "इसका जवाब नहीं दे पाए। फिर से कोशिश करने के लिए दबाएँ।")
+  val talkNoVoice =
+    Str(
+      "This phone can't read answers aloud. Answers are in the chat.",
+      "यह फ़ोन जवाब पढ़कर नहीं सुना सकता। जवाब चैट में हैं।",
+    )
+  val talkHint =
+    Str(
+      "Speak in Hindi or English. Everything runs on your phone.",
+      "हिन्दी या English में बोलें। सब कुछ आपके फ़ोन पर चलता है।",
+    )
   val cancelVoice = Str("Cancel", "रद्द करें")
   val micNeeded = Str("Allow the microphone to ask by voice", "बोलकर पूछने के लिए माइक की अनुमति दें")
   val back = Str("Back", "वापस")

@@ -67,6 +67,7 @@ import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Mic
@@ -235,6 +236,7 @@ fun Composer(
   onMic: () -> Unit,
   onFinishVoice: () -> Unit,
   onCancelVoice: () -> Unit,
+  onTalk: () -> Unit,
   onSend: () -> Unit,
   onStop: () -> Unit,
   modifier: Modifier = Modifier,
@@ -330,18 +332,28 @@ fun Composer(
           }
           RoundIcon(Icons.Rounded.Mic, tr(T.voice), onMic, size = 44)
           val live = busy || value.isNotBlank() || attachment != null
+          // With nothing typed, the send button starts Talk (hands-free conversation).
+          val talk = !live
           val bg by animateColorAsState(if (live) p.gold else p.surface2, tween(250), label = "send")
           Box(
             modifier =
               Modifier.size(44.dp).clip(CircleShape).background(bg).clickable {
-                if (busy) onStop() else onSend()
+                when {
+                  busy -> onStop()
+                  talk -> onTalk()
+                  else -> onSend()
+                }
               },
             contentAlignment = Alignment.Center,
           ) {
             Icon(
-              if (busy) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
-              contentDescription = tr(if (busy) T.stop else T.send),
-              tint = if (live) p.onGold else p.muted,
+              when {
+                busy -> Icons.Rounded.Stop
+                talk -> Icons.Rounded.GraphicEq
+                else -> Icons.Rounded.ArrowUpward
+              },
+              contentDescription = tr(if (busy) T.stop else if (talk) T.talk else T.send),
+              tint = if (live) p.onGold else p.goldInk,
               modifier = Modifier.size(20.dp),
             )
           }

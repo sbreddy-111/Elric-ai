@@ -105,6 +105,52 @@ private const val TRANSCRIBE_PROMPT =
 private const val VOICE_MIN_MS = 600L
 private const val VOICE_MIN_PEAK = 600
 
+/** What the Talk view shows. */
+enum class ElricTalkState {
+  OFF,
+  LISTENING,
+  /** Starting the model with voice support. */
+  PREPARING,
+  /** Turning speech into text, then answering. */
+  THINKING,
+  SPEAKING,
+  /** Waiting for a tap (nothing was heard, or something went wrong). */
+  PAUSED,
+  MUTED,
+}
+
+/** Finds the end of what the user says from microphone levels (simple, on-device, no model). */
+private class ElricTalkVad(private val start: Long) {
+  private var ambientSum = 0L
+  private var ambientN = 0
+  private var threshold = 1200
+  private var speechStart = 0L
+  private var lastLoud = 0L
+  var heard = false
+    private set
+
+  /** Returns true when the user has spoken and then been quiet for a moment. */
+  fun feed(level: Int, now: Long): Boolean {
+    if (now - start < 300) {
+      ambientSum += level
+      ambientN++
+      threshold = maxOf(1200, (ambientSum / ambientN * 2.5).toInt())
+      return false
+    }
+    if (level >= threshold) {
+      if (speechStart == 0L) speechStart = now
+      lastLoud = now
+      if (now - speechStart > 300) heard = true
+    } else if (!heard && speechStart != 0L && now - lastLoud > 600) {
+      // A short noise, not speech.
+      speechStart = 0L
+    }
+    return heard && now - lastLoud > 1300
+  }
+
+  fun silentTooLong(now: Long): Boolean = !heard && now - start > 12_000
+}
+
 /** What the voice control in the composer shows. */
 enum class ElricVoiceState {
   IDLE,
@@ -547,52 +593,68 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     voiceState = ElricVoiceState.PREPARING
     viewModelScope.launch {
       try {
-        val err =
-          try {
-            ensureLoaded(model, systemPrompt(), media = true)
-          } catch (e: CancellationException) {
-            throw e
-          } catch (t: Throwable) {
-            t.message ?: "start failed"
+        val (text, err) =
+          speechToText(model, pcm, cancelled = { voiceCancelled }) {
+            voiceState = ElricVoiceState.TRANSCRIBING
           }
         if (voiceCancelled) return@launch
-        if (err != null) {
-          onError(if (err == MEDIA_UNSUPPORTED) T.voiceUnsupported else T.voiceFailed)
-          return@launch
-        }
-        voiceState = ElricVoiceState.TRANSCRIBING
-        withContext(Dispatchers.Default) {
-          LlmChatModelHelper.resetConversation(
-            model = model,
-            supportImage = false,
-            supportAudio = true,
-            systemInstruction = null,
-            tools = listOf(),
-            enableConversationConstrainedDecoding = false,
-            initialMessages = listOf(),
-            enableResponseFormat = false,
-          )
-        }
-        // The chat's own conversation is rebuilt before the next answer.
-        syncedKey = null
-        val raw = withTimeoutOrNull(TRANSCRIBE_TIMEOUT_MS) { transcribe(model, elricWav(pcm)) }
-        if (raw == null) {
-          try {
-            LlmChatModelHelper.stopResponse(model)
-          } catch (e: Exception) {
-            Log.w(TAG, "stop failed", e)
-          }
-        }
-        if (voiceCancelled) return@launch
-        val text = cleanTranscript(raw?.getOrNull() ?: "")
-        when {
-          raw == null || raw.isFailure -> onError(T.voiceFailed)
-          text.isEmpty() -> onError(T.voiceNothing)
-          else -> onText(text)
-        }
+        if (text != null) onText(text) else if (err != null) onError(err)
       } finally {
         voiceState = ElricVoiceState.IDLE
       }
+    }
+  }
+
+  /**
+   * Turns recorded speech into text on the phone: starts the engine with voice support if needed,
+   * then runs one transcription turn on a fresh conversation. Returns the text, or a message to
+   * show. [onTranscribing] runs when the model is ready and transcription begins.
+   */
+  private suspend fun speechToText(
+    model: Model,
+    pcm: ByteArray,
+    cancelled: () -> Boolean,
+    onTranscribing: () -> Unit,
+  ): Pair<String?, Str?> {
+    val err =
+      try {
+        ensureLoaded(model, systemPrompt(), media = true)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (t: Throwable) {
+        t.message ?: "start failed"
+      }
+    if (cancelled()) return null to null
+    if (err != null) return null to (if (err == MEDIA_UNSUPPORTED) T.voiceUnsupported else T.voiceFailed)
+    onTranscribing()
+    withContext(Dispatchers.Default) {
+      LlmChatModelHelper.resetConversation(
+        model = model,
+        supportImage = false,
+        supportAudio = true,
+        systemInstruction = null,
+        tools = listOf(),
+        enableConversationConstrainedDecoding = false,
+        initialMessages = listOf(),
+        enableResponseFormat = false,
+      )
+    }
+    // The chat's own conversation is rebuilt before the next answer.
+    syncedKey = null
+    val raw = withTimeoutOrNull(TRANSCRIBE_TIMEOUT_MS) { transcribe(model, elricWav(pcm)) }
+    if (raw == null) {
+      try {
+        LlmChatModelHelper.stopResponse(model)
+      } catch (e: Exception) {
+        Log.w(TAG, "stop failed", e)
+      }
+    }
+    if (cancelled()) return null to null
+    val text = cleanTranscript(raw?.getOrNull() ?: "")
+    return when {
+      raw == null || raw.isFailure -> null to T.voiceFailed
+      text.isEmpty() -> null to T.voiceNothing
+      else -> text to null
     }
   }
 
@@ -633,6 +695,193 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         end(Result.failure(e))
       }
     }
+
+  // ---------------------------------------------------------------- talk
+
+  /** Hands-free conversation: listen, answer, read the answer aloud, listen again. */
+  var talkState by mutableStateOf(ElricTalkState.OFF)
+    private set
+
+  var talkMuted by mutableStateOf(false)
+    private set
+
+  /** Microphone level (0..1) while listening, for the animated circle. */
+  var talkLevel by mutableStateOf(0f)
+    private set
+
+  /** What Elric last heard, or a short message, shown under the circle. */
+  var talkCaption by mutableStateOf("")
+    private set
+
+  private val speaker = ElricSpeaker(context)
+  private var talkModel: Model? = null
+  private var talkReplyIndex = -1
+  private var talkSession = 0
+  private var talkMisses = 0
+
+  /** Opens Talk. Returns a message to show instead when it can't start. */
+  fun startTalk(model: Model?): Str? {
+    if (busy || voiceState != ElricVoiceState.IDLE) return T.talkWait
+    if (model == null || (model.instance == null && !modelFileComplete(model))) return T.voiceNeedModel
+    if (!model.supportAudio || model.name in mediaFailed) return T.voiceUnsupported
+    talkModel = model
+    talkMuted = false
+    talkMisses = 0
+    talkCaption = ""
+    talkState = ElricTalkState.PAUSED
+    listenTalk()
+    return null
+  }
+
+  fun stopTalk() {
+    if (talkState == ElricTalkState.OFF) return
+    val wasTranscribing =
+      !busy && (talkState == ElricTalkState.THINKING || talkState == ElricTalkState.PREPARING)
+    talkSession++
+    talkState = ElricTalkState.OFF
+    talkReplyIndex = -1
+    recorder.cancel()
+    speaker.stop()
+    // An answer being written keeps going into the chat; a transcription is stopped.
+    if (wasTranscribing) stop()
+  }
+
+  fun toggleTalkMute() {
+    talkMuted = !talkMuted
+    if (talkMuted && talkState == ElricTalkState.LISTENING) {
+      talkSession++
+      recorder.cancel()
+      talkState = ElricTalkState.MUTED
+    } else if (!talkMuted && (talkState == ElricTalkState.MUTED || talkState == ElricTalkState.PAUSED)) {
+      listenTalk()
+    }
+  }
+
+  /** Tap on the circle: interrupt reading, send now, or listen again. */
+  fun tapTalk() {
+    when (talkState) {
+      ElricTalkState.SPEAKING -> {
+        speaker.stop()
+        listenTalk()
+      }
+      ElricTalkState.LISTENING -> endListening(talkSession)
+      ElricTalkState.PAUSED -> {
+        talkMisses = 0
+        listenTalk()
+      }
+      ElricTalkState.MUTED -> toggleTalkMute()
+      else -> {}
+    }
+  }
+
+  private fun listenTalk() {
+    if (talkState == ElricTalkState.OFF) return
+    val session = ++talkSession
+    if (talkMuted) {
+      talkState = ElricTalkState.MUTED
+      return
+    }
+    talkLevel = 0f
+    val vad = ElricTalkVad(SystemClock.elapsedRealtime())
+    val ended = AtomicBoolean(false)
+    val ok =
+      recorder.start(
+        onTick = {},
+        onMax = { main.post { endListening(session) } },
+        onLevel = { level ->
+          val now = SystemClock.elapsedRealtime()
+          val done = vad.feed(level, now)
+          val silent = vad.silentTooLong(now)
+          main.post { if (session == talkSession) talkLevel = (level / 12000f).coerceIn(0f, 1f) }
+          if ((done || silent) && ended.compareAndSet(false, true)) {
+            main.post {
+              if (done) {
+                endListening(session)
+              } else if (session == talkSession && talkState == ElricTalkState.LISTENING) {
+                recorder.cancel()
+                talkCaption = T.talkPaused.get(lang)
+                talkState = ElricTalkState.PAUSED
+              }
+            }
+          }
+        },
+      )
+    if (!ok) {
+      talkCaption = T.voiceUnavailable.get(lang)
+      talkState = ElricTalkState.PAUSED
+      return
+    }
+    talkState = ElricTalkState.LISTENING
+  }
+
+  private fun endListening(session: Int) {
+    if (session != talkSession || talkState != ElricTalkState.LISTENING) return
+    val pcm = recorder.stop()
+    talkLevel = 0f
+    val model = talkModel
+    if (model == null) {
+      stopTalk()
+      return
+    }
+    if (elricPcmMs(pcm) < VOICE_MIN_MS || recorder.lastPeak < VOICE_MIN_PEAK) {
+      talkMiss(session)
+      return
+    }
+    talkState = if (hasMedia(model)) ElricTalkState.THINKING else ElricTalkState.PREPARING
+    stopRequested = false
+    viewModelScope.launch {
+      val (text, err) =
+        speechToText(model, pcm, cancelled = { session != talkSession }) {
+          if (session == talkSession) talkState = ElricTalkState.THINKING
+        }
+      if (session != talkSession || talkState == ElricTalkState.OFF) return@launch
+      if (text == null) {
+        if (err == null || err === T.voiceNothing) {
+          talkMiss(session)
+        } else {
+          talkCaption = err.get(lang)
+          talkState = ElricTalkState.PAUSED
+        }
+        return@launch
+      }
+      talkMisses = 0
+      talkCaption = text
+      if (!ask(text, model, null) || !busy) {
+        talkCaption = T.talkFailed.get(lang)
+        talkState = ElricTalkState.PAUSED
+        return@launch
+      }
+      talkReplyIndex = turns.size - 1
+    }
+  }
+
+  /** Nothing clear was heard: listen once more, then wait for a tap (never loops). */
+  private fun talkMiss(session: Int) {
+    if (session != talkSession) return
+    talkMisses++
+    if (talkMisses >= 2) {
+      talkCaption = T.talkPaused.get(lang)
+      talkState = ElricTalkState.PAUSED
+    } else {
+      listenTalk()
+    }
+  }
+
+  private fun onTalkAnswer(turn: ElricTurn) {
+    talkReplyIndex = -1
+    if (turn.failed == true) {
+      talkCaption = turn.text
+      talkState = ElricTalkState.PAUSED
+      return
+    }
+    val session = talkSession
+    talkState = ElricTalkState.SPEAKING
+    speaker.speak(turn.text) { ok ->
+      if (session != talkSession || talkState != ElricTalkState.SPEAKING) return@speak
+      if (!ok) talkCaption = T.talkNoVoice.get(lang)
+      listenTalk()
+    }
+  }
 
   // ---------------------------------------------------------------- answering
 
@@ -684,8 +933,15 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     if (study.isNotBlank() && !has("study")) {
       sb.append(" The user studies: $study. Match explanations to this level.")
     }
+    val talking = talkState != ElricTalkState.OFF
+    if (talking) {
+      sb.append(
+        " This is a spoken conversation: reply in plain spoken sentences, with no markdown, " +
+          "lists, tables, symbols or emojis, in the language the user spoke."
+      )
+    }
     sb.append(
-      if (short) {
+      if (short || talking) {
         " ANSWER LENGTH: SHORT. Reply in at most 4 short sentences or 5 bullet points (under 80 " +
           "words). Give the key answer first. No greetings, no repeating the question. If the " +
           "user sends several questions, answer each in one or two lines."
@@ -1203,8 +1459,11 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     }
 
     val extra =
-      if (short) mapOf(EXTRA_CONTEXT_MAX_OUTPUT_TOKENS to SHORT_MAX_OUTPUT_TOKENS.toString())
-      else emptyMap()
+      if (short || talkState != ElricTalkState.OFF) {
+        mapOf(EXTRA_CONTEXT_MAX_OUTPUT_TOKENS to SHORT_MAX_OUTPUT_TOKENS.toString())
+      } else {
+        emptyMap()
+      }
     try {
       LlmChatModelHelper.runInference(
         model = model,
@@ -1244,6 +1503,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     busy = false
     streamTick++
     persist()
+    if (talkState == ElricTalkState.THINKING && index == talkReplyIndex) onTalkAnswer(turns[index])
   }
 
   fun stop() {
@@ -1293,6 +1553,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
   override fun onCleared() {
     super.onCleared()
     recorder.cancel()
+    speaker.shutdown()
     val m = loadedModel ?: return
     try {
       LlmChatModelHelper.cleanUp(m) {}

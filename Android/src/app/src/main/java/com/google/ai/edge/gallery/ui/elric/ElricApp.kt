@@ -212,6 +212,7 @@ fun ElricApp(
   fun go(s: Screen) {
     overlay = Overlay.NONE
     if (vm.voiceState == ElricVoiceState.RECORDING) vm.cancelVoice()
+    vm.stopTalk()
     screen = s
   }
 
@@ -278,10 +279,31 @@ fun ElricApp(
   fun beginRecording() {
     if (!vm.startRecording(onMax = { finishVoice() })) showToast(T.voiceUnavailable.get(vm.lang))
   }
+  var micForTalk by remember { mutableStateOf(false) }
+  fun beginTalk() {
+    val err = vm.startTalk(currentModel)
+    if (err != null) {
+      showToast(err.get(vm.lang))
+    } else if (screen != Screen.CHAT) {
+      // Talk turns are saved in the chat, which shows when Talk ends.
+      screen = Screen.CHAT
+    }
+  }
   val micLauncher =
     rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-      if (granted) beginRecording() else showToast(T.micNeeded.get(vm.lang))
+      if (!granted) showToast(T.micNeeded.get(vm.lang)) else if (micForTalk) beginTalk() else beginRecording()
     }
+  fun startTalk() {
+    overlay = Overlay.NONE
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+        PackageManager.PERMISSION_GRANTED
+    ) {
+      beginTalk()
+    } else {
+      micForTalk = true
+      micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+  }
   fun startMic() {
     overlay = Overlay.NONE
     if (vm.busy) return
@@ -290,6 +312,7 @@ fun ElricApp(
     ) {
       beginRecording()
     } else {
+      micForTalk = false
       micLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
   }
@@ -334,8 +357,10 @@ fun ElricApp(
   val tts = rememberTts()
 
   // Back handling.
-  val voiceActive = vm.voiceState != ElricVoiceState.IDLE
-  BackHandler(enabled = voiceActive) { vm.cancelVoice() }
+  val voiceActive = vm.voiceState != ElricVoiceState.IDLE || vm.talkState != ElricTalkState.OFF
+  BackHandler(enabled = voiceActive) {
+    if (vm.talkState != ElricTalkState.OFF) vm.stopTalk() else vm.cancelVoice()
+  }
   BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
   BackHandler(enabled = overlay == Overlay.NONE && !voiceActive && screen in setOf(Screen.CHAT, Screen.MODELS, Screen.PRIVACY, Screen.MEMORY, Screen.DOWNLOAD) ||
     (overlay == Overlay.NONE && !voiceActive && screen == Screen.ABOUT && vm.onboarded)) {
@@ -490,6 +515,7 @@ fun ElricApp(
                 onMic = { startMic() },
                 onFinishVoice = { finishVoice() },
                 onCancelVoice = { vm.cancelVoice() },
+                onTalk = { startTalk() },
                 onSend = { ask(input) },
                 onStop = { vm.stop() },
               )
@@ -654,6 +680,21 @@ fun ElricApp(
             modelManagerViewModel.saveThemeOverride(t)
           },
         )
+      }
+
+      // Talk: full screen over everything while it is on.
+      if (vm.talkState != ElricTalkState.OFF) {
+        Box(modifier = Modifier.fillMaxSize().background(palette.bg)) {
+          TalkView(
+            state = vm.talkState,
+            muted = vm.talkMuted,
+            level = vm.talkLevel,
+            caption = vm.talkCaption,
+            onTap = { vm.tapTalk() },
+            onMute = { vm.toggleTalkMute() },
+            onEnd = { vm.stopTalk() },
+          )
+        }
       }
     }
 

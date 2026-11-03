@@ -24,7 +24,11 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
@@ -39,6 +43,7 @@ import com.google.ai.edge.gallery.ui.common.chat.ChatSide
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 
 private const val TAG = "ElricMedia"
 
@@ -68,7 +73,7 @@ class ElricRecorder {
    * the RECORD_AUDIO permission first.
    */
   @SuppressLint("MissingPermission")
-  fun start(onTick: (Long) -> Unit, onMax: () -> Unit): Boolean {
+  fun start(onTick: (Long) -> Unit, onMax: () -> Unit, onLevel: (Int) -> Unit = {}): Boolean {
     release()
     val minBuf =
       AudioRecord.getMinBufferSize(
@@ -123,6 +128,7 @@ class ElricRecorder {
             if (n > 0 && recorder === r) {
               val p = calculatePeakAmplitude(buffer = buf, bytesRead = n)
               if (p > peak) peak = p
+              onLevel(p)
               synchronized(lock) { buffer.write(buf, 0, n) }
             }
             val elapsed = SystemClock.elapsedRealtime() - t0
@@ -254,5 +260,154 @@ object ElricImages {
       (bmp.height * s).toInt().coerceAtLeast(1),
       true,
     )
+  }
+}
+
+/** True when [text] is mostly Hindi (Devanagari) rather than English. */
+fun elricIsHindi(text: String): Boolean {
+  var dev = 0
+  var latin = 0
+  for (c in text) {
+    if (c in '\u0900'..'\u097F') dev++ else if (c in 'a'..'z' || c in 'A'..'Z') latin++
+  }
+  return dev > latin
+}
+
+/** Turns an answer into plain sentences for reading aloud (no markdown symbols). */
+fun elricSpeakable(text: String): String =
+  displayAnswer(text)
+    .replace(Regex("```[\\s\\S]*?```"), " ")
+    .replace(Regex("[*#`|_>~]"), " ")
+    .replace(Regex("\\[([^\\]]*)\\]\\([^)]*\\)"), "$1")
+    .replace(Regex("\\s+"), " ")
+    .trim()
+
+/**
+ * Reads answers aloud with the phone's own text-to-speech (works offline when the phone has the
+ * voice data), in Hindi or English to match the answer. [speak]'s callback runs on the main thread
+ * when reading ends, is stopped, or can't start (false).
+ */
+class ElricSpeaker(context: Context) {
+  private val app = context.applicationContext
+  private val main = Handler(Looper.getMainLooper())
+  private var tts: TextToSpeech? = null
+  private var ready = false
+  private var failed = false
+  private var pending: Pair<String, (Boolean) -> Unit>? = null
+  private var current: ((Boolean) -> Unit)? = null
+  private var seq = 0
+
+  fun speak(text: String, onDone: (Boolean) -> Unit) {
+    stop()
+    val plain = elricSpeakable(text)
+    if (plain.isEmpty()) {
+      main.post { onDone(true) }
+      return
+    }
+    if (failed) {
+      main.post { onDone(false) }
+      return
+    }
+    val t = tts
+    if (t == null || !ready) {
+      pending = plain to onDone
+      if (t == null) init()
+      return
+    }
+    say(t, plain, onDone)
+  }
+
+  /** Stops reading. The callback of the stopped text is not called. */
+  fun stop() {
+    pending = null
+    current = null
+    currentId = null
+    try {
+      tts?.stop()
+    } catch (e: Exception) {
+      Log.w(TAG, "tts stop failed", e)
+    }
+  }
+
+  fun shutdown() {
+    pending = null
+    current = null
+    try {
+      tts?.shutdown()
+    } catch (e: Exception) {}
+    tts = null
+    ready = false
+  }
+
+  private fun init() {
+    tts =
+      TextToSpeech(app) { status ->
+        main.post {
+          if (status == TextToSpeech.SUCCESS) {
+            ready = true
+            tts?.setOnUtteranceProgressListener(
+              object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+
+                override fun onDone(utteranceId: String?) {
+                  main.post { finish(utteranceId, true) }
+                }
+
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                  main.post { finish(utteranceId, false) }
+                }
+
+                override fun onError(utteranceId: String?, errorCode: Int) {
+                  main.post { finish(utteranceId, false) }
+                }
+              }
+            )
+            val p = pending
+            pending = null
+            val t = tts
+            if (p != null && t != null) say(t, p.first, p.second)
+          } else {
+            failed = true
+            tts = null
+            val p = pending
+            pending = null
+            p?.second?.invoke(false)
+          }
+        }
+      }
+  }
+
+  private fun say(t: TextToSpeech, plain: String, onDone: (Boolean) -> Unit) {
+    val locale = if (elricIsHindi(plain)) Locale("hi", "IN") else Locale("en", "IN")
+    try {
+      val r = t.setLanguage(locale)
+      if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+        if (locale.language == "en") t.setLanguage(Locale.US)
+      }
+    } catch (e: Exception) {
+      Log.w(TAG, "tts language failed", e)
+    }
+    val max = try { TextToSpeech.getMaxSpeechInputLength() } catch (e: Exception) { 3900 }
+    val id = "elric-" + (++seq)
+    current = onDone
+    currentId = id
+    val res =
+      try {
+        t.speak(plain.take(max - 1), TextToSpeech.QUEUE_FLUSH, null, id)
+      } catch (e: Exception) {
+        TextToSpeech.ERROR
+      }
+    if (res != TextToSpeech.SUCCESS) finish(id, false)
+  }
+
+  private var currentId: String? = null
+
+  private fun finish(id: String?, ok: Boolean) {
+    if (id != currentId) return
+    val cb = current ?: return
+    current = null
+    currentId = null
+    cb(ok)
   }
 }
