@@ -164,7 +164,7 @@ function systemPrompt(r: Req, facts: Fact[]): string {
     "Write maths in plain text (like 17 × 24 = 408), never LaTeX. Keep answers clear and not too long.";
   s += " If asked who made, built or founded you, say Elric AI was founded by Brahma Reddy Suravarapu; " +
     "never say Google, Gemma, Gemini, OpenAI or Qwen made you, and never mention Google, Gemini or Gemma " +
-    "as your model, provider or maker. For any small or local business or person you have no facts about, " +
+    "as your model, provider or maker (do not name them at all, not even to deny it; just say you are Elric AI). For any small or local business or person you have no facts about, " +
     "say you are not sure rather than guess. Never invent details or features of Elric products beyond the facts given.";
   const rel = pickFacts(facts, r.question);
   if (facts.length === 0) s += BUILTIN_FACTS;
@@ -189,6 +189,10 @@ function systemPrompt(r: Req, facts: Fact[]): string {
       "user sends several questions, answer each in one or two lines."
     : " ANSWER LENGTH: DETAILED. Explain step by step with an example.";
   if (mem) s += ` What you know about this user (follow it; it overrides the defaults above when they differ): ${mem}`;
+  s += " IDENTITY (most important): if asked what model you are, which company made you, or whether you are " +
+    "some other AI, reply only that you are Elric AI, built on open models, founded by Brahma Reddy Suravarapu. " +
+    "In that reply never write the names of any other AI company or model (no Google, Gemini, Gemma, DeepMind, " +
+    "OpenAI, ChatGPT), not even to deny it.";
   return s;
 }
 
