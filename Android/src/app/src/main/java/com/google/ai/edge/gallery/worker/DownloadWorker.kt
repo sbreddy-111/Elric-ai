@@ -806,7 +806,9 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
     // Create a notification for the foreground service
     var title = "Downloading model"
     if (modelName != null) {
-      title = "Downloading \"$modelName\""
+      val shownName =
+        com.google.ai.edge.gallery.ui.elric.elricModelDisplayName(modelName) ?: modelName
+      title = "Downloading \"$shownName\""
     }
     val content = "Downloading in progress: $progress%"
 

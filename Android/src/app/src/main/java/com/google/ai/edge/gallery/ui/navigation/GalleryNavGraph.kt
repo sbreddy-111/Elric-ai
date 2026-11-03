@@ -83,9 +83,7 @@ import com.google.ai.edge.gallery.ui.common.ModelPageAppBar
 import com.google.ai.edge.gallery.ui.common.OnAppBackgroundedEffect
 import com.google.ai.edge.gallery.ui.common.chat.ModelDownloadStatusInfoPanel
 import com.google.ai.edge.gallery.ui.common.tos.TosViewModel
-import com.google.ai.edge.gallery.ui.elric.ElricHomeScreen
-import com.google.ai.edge.gallery.ui.elric.ElricPendingPrompt
-import com.google.ai.edge.gallery.ui.elric.elricModelPreference
+import com.google.ai.edge.gallery.ui.elric.ElricApp
 import com.google.ai.edge.gallery.ui.home.HomeScreen
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.MODEL_ALLOWLIST_TEST_FILE_PATH
@@ -198,32 +196,6 @@ fun GalleryNavHost(
   // Don't keep playing a voice preview after the app leaves the foreground.
   OnAppBackgroundedEffect { modelManagerViewModel.stopActiveVoicePreview() }
 
-  // Opens an existing task screen from the Elric home. Uses a downloaded model when there is one
-  // (preferring Elric Standard, then Elric Lite); otherwise opens the task's model list so the user
-  // can download one. An optional prompt is handed to the chat screen in memory.
-  fun openElricTask(taskId: String, prompt: String?) {
-    val task = modelManagerViewModel.getTaskById(id = taskId)
-    if (task == null) {
-      Toast.makeText(context, context.getString(R.string.elric_loading), Toast.LENGTH_SHORT).show()
-      return
-    }
-    if (prompt != null) ElricPendingPrompt.set(taskId, prompt) else ElricPendingPrompt.clear()
-    val downloaded =
-      task.models.filter { model ->
-        modelManagerViewModel.uiState.value.modelDownloadStatus[model.name]?.status ==
-          ModelDownloadStatusType.SUCCEEDED
-      }
-    val model = downloaded.minByOrNull { elricModelPreference(it.name) }
-    if (model != null) {
-      modelManagerViewModel.selectModel(model)
-      navController.navigate("$ROUTE_MODEL/${task.id}/${model.name}")
-    } else {
-      pickedTask = task
-      enableModelListAnimation = true
-      navController.navigate(ROUTE_MODEL_LIST)
-    }
-  }
-
   NavHost(
     navController = navController,
     startDestination = ROUTE_ELRIC_HOME,
@@ -232,12 +204,9 @@ fun GalleryNavHost(
   ) {
     // Elric home screen (start destination).
     composable(route = ROUTE_ELRIC_HOME) {
-      ElricHomeScreen(
+      ElricApp(
         modelManagerViewModel = modelManagerViewModel,
         tosViewModel = tosViewModel,
-        onOpenTask = { taskId, prompt -> openElricTask(taskId, prompt) },
-        onAllToolsClicked = { navController.navigate(ROUTE_HOMESCREEN) },
-        onModelsClicked = { navController.navigate(ROUTE_MODEL_MANAGER) },
         modifier = modifier,
       )
     }

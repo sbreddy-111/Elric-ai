@@ -36,8 +36,8 @@ android {
     applicationId = "in.elricai.app"
     minSdk = 31
     targetSdk = 37
-    versionCode = 3
-    versionName = "0.2.1"
+    versionCode = 4
+    versionName = "0.3.0"
 
     // Needed for HuggingFace auth workflows.
     // Use the scheme of the "Redirect URLs" in HuggingFace app.

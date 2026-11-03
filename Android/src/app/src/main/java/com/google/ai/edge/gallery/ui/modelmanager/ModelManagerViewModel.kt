@@ -2152,7 +2152,9 @@ constructor(
 
         if (modelAllowlist == null) {
           // Load from github.
-          var version = BuildConfig.VERSION_NAME.replace(".", "_")
+          // Elric's own version numbers don't match the upstream model list files, so the list
+          // version is pinned to the newest one this app was built against.
+          val version = ELRIC_MODEL_ALLOWLIST_VERSION
           val url = getAllowlistUrl(version)
           Log.d(TAG, "Loading model allowlist from internet. Url: $url")
           val data = getJsonResponse<ModelAllowlist>(url = url)
@@ -2598,6 +2600,9 @@ constructor(
 
   fun isModelDownloaded(model: Model): Boolean = storageManager.isModelDownloaded(model)
 }
+
+/** Upstream model list file used by Elric AI (model_allowlists/<version>.json). */
+private const val ELRIC_MODEL_ALLOWLIST_VERSION = "1_0_22"
 
 private fun getAllowlistUrl(version: String): String {
   return "$ALLOWLIST_BASE_URL/${version}.json"
