@@ -6,6 +6,7 @@
       branches: [ "main" ]
       paths:
         - 'Android/**'
+        - '.github/workflows/build_android.yaml'
     pull_request:
       branches: [ "main" ]
       paths:
@@ -14,6 +15,8 @@
   jobs:
     build_apk:
       name: Build Android APK
+      permissions:
+        contents: write
       runs-on: ubuntu-latest
       defaults:
         run:
@@ -36,3 +39,19 @@
           with:
             name: elric-ai-apk
             path: Android/src/app/build/outputs/apk/release/*.apk
+
+        - name: Rename APK for testers
+          if: github.event_name != 'pull_request'
+          working-directory: .
+          run: cp Android/src/app/build/outputs/apk/release/*.apk Elric-AI.apk
+
+        - name: Publish test APK (public download, no login)
+          if: github.event_name != 'pull_request'
+          uses: softprops/action-gh-release@v2
+          with:
+            tag_name: android-test
+            name: Elric AI Android (test build)
+            prerelease: true
+            make_latest: false
+            body: "Test build of Elric AI for Android. Download Elric-AI.apk below and open it to install."
+            files: Elric-AI.apk
