@@ -135,7 +135,7 @@ object T {
   val sugTimetable = Str("Make a study timetable", "पढ़ाई का टाइमटेबल बनाएँ")
   val sugWatch = Str("Compare watches under ₹5,000", "₹5,000 से कम की घड़ियों की तुलना करें")
   val askAnything = Str("Ask anything…", "कुछ भी पूछें…")
-  val listening = Str("Listening… Hindi or English", "सुन रहा है… हिन्दी या English")
+  val listening = Str("Listening… {t} / 0:30", "सुन रहा है… {t} / 0:30")
   val tapToStop = Str("Tap to stop", "रोकने के लिए दबाएँ")
 
   // Chat
@@ -185,7 +185,26 @@ object T {
   // Camera sheet
   val takePhoto = Str("Take photo", "फ़ोटो लें")
   val chooseGallery = Str("Choose from gallery", "गैलरी से चुनें")
-  val photoSoon = Str("Photo help coming soon", "फ़ोटो से मदद जल्द आ रही है")
+  val photoPrivate =
+    Str(
+      "Photos and voice are read on your phone. Nothing is uploaded.",
+      "फ़ोटो और आवाज़ आपके फ़ोन पर ही पढ़ी जाती हैं। कुछ भी अपलोड नहीं होता।",
+    )
+  val photoDefault = Str("Explain this photo.", "इस फ़ोटो को समझाइए।")
+  val removePhoto = Str("Remove photo", "फ़ोटो हटाएँ")
+  val photoFailed =
+    Str("Couldn't open this photo. Try another one.", "यह फ़ोटो खुल नहीं पाई। कोई दूसरी फ़ोटो आज़माएँ।")
+  val photoUnsupported =
+    Str(
+      "Photos can't run on this phone yet. Text questions still work.",
+      "इस फ़ोन पर अभी फ़ोटो नहीं चल सकतीं। लिखकर सवाल पूछना चलता रहेगा।",
+    )
+  val cameraNeeded = Str("Allow the camera to take a photo", "फ़ोटो लेने के लिए कैमरे की अनुमति दें")
+  val mediaFirstHint =
+    Str(
+      "Getting photo and voice ready. The first time can take a minute or two.",
+      "फ़ोटो और आवाज़ तैयार हो रही है। पहली बार में एक-दो मिनट लग सकते हैं।",
+    )
 
   // Drawer
   val searchChats = Str("Search chats", "चैट खोजें")
@@ -293,7 +312,23 @@ object T {
     Str("Couldn't send. Check your internet and try again.", "भेज नहीं पाए। इंटरनेट देखकर फिर से कोशिश करें।")
 
   // Voice / misc
-  val voiceUnavailable = Str("Voice input isn't available on this phone", "इस फ़ोन पर बोलकर पूछना उपलब्ध नहीं है")
+  val voiceUnavailable = Str("Couldn't use the microphone. Try again.", "माइक इस्तेमाल नहीं हो पाया। फिर से कोशिश करें।")
+  val voicePreparing = Str("Getting voice ready… {s} s", "आवाज़ तैयार हो रही है… {s} s")
+  val voiceWorking = Str("Turning speech into text…", "आवाज़ को टेक्स्ट में बदल रहे हैं…")
+  val voiceCheck = Str("Check the text, then tap send", "टेक्स्ट देख लें, फिर भेजें दबाएँ")
+  val voiceNothing =
+    Str("Didn't catch that. Speak a little louder and try again.", "सुनाई नहीं दिया। थोड़ा ज़ोर से बोलकर फिर कोशिश करें।")
+  val voiceNeedModel =
+    Str("Download Elric Lite first to ask by voice", "बोलकर पूछने के लिए पहले Elric Lite डाउनलोड करें")
+  val voiceUnsupported =
+    Str(
+      "Voice can't run on this phone yet. Typing still works.",
+      "इस फ़ोन पर अभी आवाज़ से पूछना नहीं चल सकता। लिखकर पूछना चलता रहेगा।",
+    )
+  val voiceFailed =
+    Str("Couldn't turn your voice into text. Try again.", "आपकी आवाज़ को टेक्स्ट में नहीं बदल पाए। फिर से कोशिश करें।")
+  val photo = Str("Photo", "फ़ोटो")
+  val cancelVoice = Str("Cancel", "रद्द करें")
   val micNeeded = Str("Allow the microphone to ask by voice", "बोलकर पूछने के लिए माइक की अनुमति दें")
   val back = Str("Back", "वापस")
   val menu = Str("Menu", "मेन्यू")

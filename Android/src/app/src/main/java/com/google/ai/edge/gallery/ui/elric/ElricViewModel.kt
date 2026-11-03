@@ -17,6 +17,8 @@
 package com.google.ai.edge.gallery.ui.elric
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -77,6 +79,41 @@ private const val CPU_LOW_RAM_MAX_TOKENS = 2048
 
 /** Rough characters per token, kept low so Hindi text is not under-counted. */
 private const val CHARS_PER_TOKEN = 2.5
+
+/** Returned by [ElricViewModel.ensureLoaded] when photo and voice can't start on this phone. */
+private const val MEDIA_UNSUPPORTED = "media_unsupported"
+
+/** Time a photo/voice start that uses the GPU gets before the next option is tried. */
+private const val MEDIA_GPU_TIMEOUT_MS = 60_000L
+
+/** Tokens a photo takes in the context window (kept free when trimming history). */
+private const val PHOTO_TOKENS = 300
+
+/** Cap on generated tokens when turning speech into text. */
+private const val TRANSCRIBE_MAX_TOKENS = 300
+
+/** Longest a transcription may take before it is stopped. */
+private const val TRANSCRIBE_TIMEOUT_MS = 120_000L
+
+/** Asks the model for the spoken words only (same idea as upstream Audio Scribe). */
+private const val TRANSCRIBE_PROMPT =
+  "Transcribe this audio exactly as spoken. If the speech is in Hindi, write it in Hindi " +
+    "(Devanagari script). If it is in English, write it in English. Output only the spoken " +
+    "words, with no notes, labels or translation."
+
+/** Recordings shorter than this, or quieter than [VOICE_MIN_PEAK], are treated as no speech. */
+private const val VOICE_MIN_MS = 600L
+private const val VOICE_MIN_PEAK = 600
+
+/** What the voice control in the composer shows. */
+enum class ElricVoiceState {
+  IDLE,
+  RECORDING,
+  /** Starting the model with voice support (first use in a session). */
+  PREPARING,
+  /** Turning the recording into text. */
+  TRANSCRIBING,
+}
 
 sealed interface ElricEngineState {
   data object Idle : ElricEngineState
@@ -216,6 +253,33 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
   var needsModel by mutableStateOf(false)
     private set
 
+  /** Private path of the photo waiting to be sent with the next question, if any. */
+  var attachment by mutableStateOf<String?>(null)
+    private set
+
+  /** What the voice control shows: recording, getting ready, or turning speech into text. */
+  var voiceState by mutableStateOf(ElricVoiceState.IDLE)
+    private set
+
+  /** Length of the recording so far, in ms. */
+  var voiceMs by mutableStateOf(0L)
+    private set
+
+  /** True while the engine is starting with photo and voice support. */
+  var mediaLoading by mutableStateOf(false)
+    private set
+
+  private val recorder = ElricRecorder()
+
+  /** Set when the user cancels voice while the model is still getting ready. */
+  @Volatile private var voiceCancelled = false
+
+  /** The engine instance that was started with photo and voice support, if any. */
+  private var mediaInstance: Any? = null
+
+  /** Models whose photo/voice start failed on this phone in this session; never retried in a loop. */
+  private val mediaFailed = mutableSetOf<String>()
+
   /** Bumped whenever an answer streams more text, so the chat can follow it. */
   var streamTick by mutableStateOf(0)
     private set
@@ -326,10 +390,18 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
   }
 
   fun deleteChat(id: String) {
+    val images = chats.firstOrNull { it.id == id }?.turns?.mapNotNull { it.image }.orEmpty()
     chats.removeAll { it.id == id }
     store.saveChats(chats.toList())
     if (chatId == id) newChat()
+    ElricImages.delete(context, images.filter { !isUsed(it) })
   }
+
+  /** True when a photo is still shown in a chat or waiting in the composer. */
+  private fun isUsed(path: String): Boolean =
+    attachment == path ||
+      turns.any { it.image == path } ||
+      chats.any { c -> c.turns.any { it.image == path } }
 
   private fun persist() {
     val done = turns.filter { it.text.isNotBlank() }
@@ -342,8 +414,12 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
       ElricChat(id = id, title = title, mode = mode.id, turns = done, at = System.currentTimeMillis())
     chats.removeAll { it.id == id }
     chats.add(0, updated)
-    while (chats.size > ELRIC_MAX_CHATS) chats.removeAt(chats.size - 1)
+    val dropped = mutableListOf<String>()
+    while (chats.size > ELRIC_MAX_CHATS) {
+      dropped.addAll(chats.removeAt(chats.size - 1).turns.mapNotNull { it.image })
+    }
     store.saveChats(chats.toList())
+    if (dropped.isNotEmpty()) ElricImages.delete(context, dropped.filter { !isUsed(it) })
   }
 
   /**
@@ -353,10 +429,19 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
   fun editQuestion(index: Int): String? {
     if (busy || index !in turns.indices || !turns[index].isUser) return null
     val text = turns[index].text
+    val img = turns[index].image
+    val dropped = turns.subList(index, turns.size).mapNotNull { it.image }.filter { it != img }
     while (turns.size > index) turns.removeAt(turns.size - 1)
     needsModel = false
     persist()
-    return text
+    // The photo goes back into the composer with the question.
+    if (img != null) {
+      val old = attachment
+      attachment = img
+      if (old != null && old != img && !isUsed(old)) ElricImages.delete(context, listOf(old))
+    }
+    ElricImages.delete(context, dropped.filter { !isUsed(it) })
+    return if (img != null && text == T.photoDefault.get(lang)) "" else text
   }
 
   fun rate(index: Int, value: Int) {
@@ -372,9 +457,182 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     val lastUser = turns.indexOfLast { it.isUser }
     if (lastUser < 0) return
     val q = turns[lastUser].text
+    val img = turns[lastUser].image
     while (turns.size > lastUser) turns.removeAt(turns.size - 1)
-    send(q, model)
+    ask(q, model, img)
   }
+
+  // ---------------------------------------------------------------- photo
+
+  /** Attaches a picked or captured photo to the next question. [onFail] runs when it can't be read. */
+  fun attachPhoto(uri: Uri, onFail: () -> Unit) {
+    viewModelScope.launch {
+      val path = withContext(Dispatchers.IO) { ElricImages.importPhoto(context, uri) }
+      if (path == null) {
+        onFail()
+        return@launch
+      }
+      val old = attachment
+      attachment = path
+      if (old != null && !isUsed(old)) ElricImages.delete(context, listOf(old))
+    }
+  }
+
+  fun removeAttachment() {
+    val a = attachment ?: return
+    attachment = null
+    if (!isUsed(a)) ElricImages.delete(context, listOf(a))
+  }
+
+  // ---------------------------------------------------------------- voice
+
+  /**
+   * Starts recording a voice question (at most 30 s). [onMax] runs on the main thread when the
+   * limit is reached. Returns false when the microphone can't be used. The caller checks the
+   * RECORD_AUDIO permission first.
+   */
+  fun startRecording(onMax: () -> Unit): Boolean {
+    if (voiceState != ElricVoiceState.IDLE || busy) return false
+    voiceMs = 0L
+    val ok =
+      recorder.start(
+        onTick = { ms -> main.post { if (voiceState == ElricVoiceState.RECORDING) voiceMs = ms } },
+        onMax = { main.post { if (voiceState == ElricVoiceState.RECORDING) onMax() } },
+      )
+    if (ok) voiceState = ElricVoiceState.RECORDING
+    return ok
+  }
+
+  /** Cancels recording, or stops turning speech into text. Nothing is kept. */
+  fun cancelVoice() {
+    when (voiceState) {
+      ElricVoiceState.RECORDING -> {
+        recorder.cancel()
+        voiceState = ElricVoiceState.IDLE
+      }
+      ElricVoiceState.PREPARING,
+      ElricVoiceState.TRANSCRIBING -> {
+        voiceCancelled = true
+        stop()
+      }
+      ElricVoiceState.IDLE -> {}
+    }
+  }
+
+  /**
+   * Stops recording and turns the speech into text on the phone with [model] (Hindi or English),
+   * the way upstream Audio Scribe does. [onText] gets the words to put in the composer; [onError]
+   * gets a message to show.
+   */
+  fun finishRecording(model: Model?, onText: (String) -> Unit, onError: (Str) -> Unit) {
+    if (voiceState != ElricVoiceState.RECORDING) return
+    val pcm = recorder.stop()
+    val peak = recorder.lastPeak
+    voiceState = ElricVoiceState.IDLE
+    if (elricPcmMs(pcm) < VOICE_MIN_MS || peak < VOICE_MIN_PEAK) {
+      onError(T.voiceNothing)
+      return
+    }
+    if (model == null || (model.instance == null && !modelFileComplete(model))) {
+      onError(T.voiceNeedModel)
+      return
+    }
+    if (!model.supportAudio) {
+      onError(T.voiceUnsupported)
+      return
+    }
+    if (busy) return
+    voiceCancelled = false
+    stopRequested = false
+    voiceState = ElricVoiceState.PREPARING
+    viewModelScope.launch {
+      try {
+        val err =
+          try {
+            ensureLoaded(model, systemPrompt(), media = true)
+          } catch (e: CancellationException) {
+            throw e
+          } catch (t: Throwable) {
+            t.message ?: "start failed"
+          }
+        if (voiceCancelled) return@launch
+        if (err != null) {
+          onError(if (err == MEDIA_UNSUPPORTED) T.voiceUnsupported else T.voiceFailed)
+          return@launch
+        }
+        voiceState = ElricVoiceState.TRANSCRIBING
+        withContext(Dispatchers.Default) {
+          LlmChatModelHelper.resetConversation(
+            model = model,
+            supportImage = false,
+            supportAudio = true,
+            systemInstruction = null,
+            tools = listOf(),
+            enableConversationConstrainedDecoding = false,
+            initialMessages = listOf(),
+            enableResponseFormat = false,
+          )
+        }
+        // The chat's own conversation is rebuilt before the next answer.
+        syncedKey = null
+        val raw = withTimeoutOrNull(TRANSCRIBE_TIMEOUT_MS) { transcribe(model, elricWav(pcm)) }
+        if (raw == null) {
+          try {
+            LlmChatModelHelper.stopResponse(model)
+          } catch (e: Exception) {
+            Log.w(TAG, "stop failed", e)
+          }
+        }
+        if (voiceCancelled) return@launch
+        val text = cleanTranscript(raw?.getOrNull() ?: "")
+        when {
+          raw == null || raw.isFailure -> onError(T.voiceFailed)
+          text.isEmpty() -> onError(T.voiceNothing)
+          else -> onText(text)
+        }
+      } finally {
+        voiceState = ElricVoiceState.IDLE
+      }
+    }
+  }
+
+  /** Runs one transcription turn. The result fails when the engine reports an error. */
+  private suspend fun transcribe(model: Model, wav: ByteArray): Result<String> =
+    suspendCancellableCoroutine { cont ->
+      val raw = StringBuilder()
+      val done = AtomicBoolean(false)
+      fun end(r: Result<String>) {
+        if (!done.compareAndSet(false, true)) return
+        main.post {
+          if (runningModel === model) runningModel = null
+          if (cont.isActive) cont.resume(r)
+        }
+      }
+      runningModel = model
+      try {
+        LlmChatModelHelper.runInference(
+          model = model,
+          input = TRANSCRIBE_PROMPT,
+          resultListener = { partial, finished, _ ->
+            if (partial.isNotEmpty()) synchronized(raw) { raw.append(partial) }
+            if (finished) end(Result.success(synchronized(raw) { raw.toString() }))
+          },
+          cleanUpListener = {},
+          onError = { msg ->
+            Log.w(TAG, "transcribe failed: $msg")
+            end(Result.failure(RuntimeException(msg)))
+          },
+          images = listOf(),
+          audioClips = listOf(wav),
+          coroutineScope = viewModelScope,
+          extraContext = mapOf(EXTRA_CONTEXT_MAX_OUTPUT_TOKENS to TRANSCRIBE_MAX_TOKENS.toString()),
+          responseJsonSchema = null,
+        )
+      } catch (e: Exception) {
+        Log.e(TAG, "transcribe failed", e)
+        end(Result.failure(e))
+      }
+    }
 
   // ---------------------------------------------------------------- answering
 
@@ -439,9 +697,13 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     return sb.toString()
   }
 
+  /** A turn as the model sees it when the chat is replayed (older photos are not sent again). */
+  private fun seedText(t: ElricTurn): String =
+    if (t.isUser && t.image != null) "[Photo] ${t.text}" else t.text
+
   private fun keyOf(system: String, history: List<ElricTurn>): String {
     val h = StringBuilder()
-    for (t in history) h.append(t.role).append('\u0001').append(t.text).append('\u0002')
+    for (t in history) h.append(t.role).append('\u0001').append(seedText(t)).append('\u0002')
     return "${loadedModel?.name}|${system.hashCode()}|${h.length}|${h.toString().hashCode()}"
   }
 
@@ -451,11 +713,12 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     system: String,
     question: String,
     history: List<ElricTurn>,
+    extraTokens: Int = 0,
   ): List<ElricTurn> {
     val maxTokens =
       model.getIntConfigValue(key = ConfigKeys.MAX_TOKENS, defaultValue = DEFAULT_MAX_TOKEN)
     val budgetChars =
-      ((maxTokens - ANSWER_RESERVE_TOKENS).coerceAtLeast(800) * CHARS_PER_TOKEN).toInt()
+      ((maxTokens - ANSWER_RESERVE_TOKENS - extraTokens).coerceAtLeast(600) * CHARS_PER_TOKEN).toInt()
     var start = 0
     fun size(): Int =
       system.length + question.length + history.subList(start, history.size).sumOf { it.text.length }
@@ -471,23 +734,51 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
    * Loads [model] for answering. Returns null when ready, or an error. Never waits forever: the
    * GPU gets [GPU_INIT_TIMEOUT_MS], and the whole load [LOAD_TIMEOUT_MS], after which it ends in
    * [ElricEngineState.Failed].
+   *
+   * With [media] the engine is started with photo and voice support (the same LiteRT-LM options the
+   * upstream Ask Image and Audio Scribe screens use). It tries the GPU for the photo encoder first
+   * where that is safe, then the CPU, and returns [MEDIA_UNSUPPORTED] when no option starts on this
+   * phone. Text chat keeps working either way.
    */
-  private suspend fun ensureLoaded(model: Model, system: String): String? {
-    if (loadedModel === model && model.instance != null) return null
+  private suspend fun ensureLoaded(model: Model, system: String, media: Boolean = false): String? {
+    if (loadedModel === model && model.instance != null && (!media || hasMedia(model))) return null
+    if (media && model.name in mediaFailed) return MEDIA_UNSUPPORTED
     loadStartedAt = SystemClock.elapsedRealtime()
-    firstStart = store.backendFor(model.name).isEmpty()
+    firstStart =
+      if (media) store.mediaBackendFor(model.name).isEmpty() else store.backendFor(model.name).isEmpty()
+    mediaLoading = media
     engine = ElricEngineState.Loading
     try {
-      val previous = loadedModel
-      if (previous != null && previous !== model && previous.instance != null) {
-        withTimeoutOrNull(15_000L) {
-          withContext(Dispatchers.Default) {
-            suspendCancellableCoroutine { cont ->
-              LlmChatModelHelper.cleanUp(previous) { if (cont.isActive) cont.resume(Unit) }
-              if (previous.instance == null && cont.isActive) cont.resume(Unit)
-            }
+      // A start from an earlier attempt is still running (it timed out but was kept): use it when
+      // it fits, otherwise wait for it, so two copies are never loaded into memory at once.
+      val pending = pendingStart
+      if (pending != null && !pending.result.isCompleted) {
+        if (pending.model === model && (pending.media || !media)) {
+          val err = initialize(model, system, LOAD_TIMEOUT_MS, abandonOnTimeout = false, media = pending.media)
+          if (err == null && model.instance != null) {
+            val backend = if (model.currentAccelerator == Accelerator.GPU) "gpu" else "cpu"
+            if (pending.media) startedMedia(model, system, backend) else started(model, system, backend)
+            // It was started with an older system prompt.
+            syncedKey = null
+            return null
           }
+          val msg = err ?: "timed out after ${LOAD_TIMEOUT_MS / 1000} s"
+          engine = ElricEngineState.Failed(msg)
+          reportStuck(model, if (err == null) "load timeout ${LOAD_TIMEOUT_MS / 1000} s" else "load failed: $msg")
+          return msg
         }
+        val finished = withTimeoutOrNull(LOAD_TIMEOUT_MS) { pending.result.await() }
+        if (finished == null) {
+          val msg = "an earlier start is still running"
+          engine = ElricEngineState.Failed(msg)
+          return msg
+        }
+        if (pendingStart === pending) pendingStart = null
+      }
+
+      // Free engines that don't fit this request: another model, or this one without photo/voice.
+      for (m in listOfNotNull(loadedModel, pending?.model, model).distinct()) {
+        if (m.instance != null && (m !== model || (media && !hasMedia(m)))) release(m)
       }
       loadedModel = null
       syncedKey = null
@@ -496,64 +787,10 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         // after a timeout); its conversation is unknown.
         loadedModel = model
         engine = ElricEngineState.Ready
+        mediaLoading = false
         return null
       }
-
-      // A start from an earlier attempt is still running (it timed out but was kept): wait for it
-      // instead of loading a second copy into memory.
-      val pending = pendingStart
-      if (pending != null && pending.first === model && !pending.second.isCompleted) {
-        val err = initialize(model, system, LOAD_TIMEOUT_MS, abandonOnTimeout = false)
-        if (err == null && model.instance != null) {
-          val backend = if (model.currentAccelerator == Accelerator.GPU) "gpu" else "cpu"
-          started(model, system, backend)
-          // It was started with an older system prompt.
-          syncedKey = null
-          return null
-        }
-        val msg = err ?: "timed out after ${LOAD_TIMEOUT_MS / 1000} s"
-        engine = ElricEngineState.Failed(msg)
-        reportStuck(model, if (err == null) "load timeout ${LOAD_TIMEOUT_MS / 1000} s" else "load failed: $msg")
-        return msg
-      }
-
-      val deadline = loadStartedAt + LOAD_TIMEOUT_MS
-      val saved = store.backendFor(model.name)
-      val lowRam = ElricDevice.isLowRam(context)
-      val startOnGpu =
-        when (saved) {
-          "cpu" -> false
-          "gpu" -> true
-          else -> !ElricDevice.preferCpu(context)
-        }
-      Log.i(
-        TAG,
-        "Starting ${model.name}: saved=$saved lowRam=$lowRam ${ElricDevice.describe(context)} " +
-          "gpuFirst=$startOnGpu",
-      )
-
-      var error: String? = null
-      if (startOnGpu) {
-        configure(model, Accelerator.GPU, lowRam)
-        // A timed-out GPU start is abandoned: its engine is closed if it ever finishes.
-        error = initialize(model, system, GPU_INIT_TIMEOUT_MS, abandonOnTimeout = true)
-        if (error == null && model.instance != null) {
-          return started(model, system, "gpu")
-        }
-        Log.w(TAG, "GPU start failed or timed out (${error ?: "timeout"}); trying CPU")
-      }
-      configure(model, Accelerator.CPU, lowRam)
-      val left = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(MIN_CPU_TIMEOUT_MS)
-      // The last attempt is not abandoned: a Retry waits for it instead of starting a second copy.
-      error = initialize(model, system, left, abandonOnTimeout = false)
-      if (error == null && model.instance != null) {
-        return started(model, system, "cpu")
-      }
-      val msg = error ?: "timed out after ${LOAD_TIMEOUT_MS / 1000} s"
-      Log.e(TAG, "Failed to start model: $msg")
-      engine = ElricEngineState.Failed(msg)
-      reportStuck(model, if (error == null) "load timeout ${LOAD_TIMEOUT_MS / 1000} s" else "load failed: $msg")
-      return msg
+      return if (media) startMedia(model, system) else startText(model, system)
     } catch (e: CancellationException) {
       engine = ElricEngineState.Idle
       throw e
@@ -563,7 +800,138 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
       engine = ElricEngineState.Failed(msg)
       reportStuck(model, "load failed: ${t.javaClass.simpleName}")
       return msg
+    } finally {
+      mediaLoading = false
     }
+  }
+
+  /** True when [model]'s engine was started with photo and voice support. */
+  private fun hasMedia(model: Model): Boolean = model.instance != null && model.instance === mediaInstance
+
+  /** Closes [m]'s engine and waits (at most 15 s) for it to be freed. */
+  private suspend fun release(m: Model) {
+    withTimeoutOrNull(15_000L) {
+      withContext(Dispatchers.Default) {
+        suspendCancellableCoroutine { cont ->
+          LlmChatModelHelper.cleanUp(m) { if (cont.isActive) cont.resume(Unit) }
+          if (m.instance == null && cont.isActive) cont.resume(Unit)
+        }
+      }
+    }
+    if (loadedModel === m) loadedModel = null
+    syncedKey = null
+  }
+
+  /** Text-only start: GPU first where it is safe, then the CPU. */
+  private suspend fun startText(model: Model, system: String): String? {
+    val deadline = loadStartedAt + LOAD_TIMEOUT_MS
+    val saved = store.backendFor(model.name)
+    val lowRam = ElricDevice.isLowRam(context)
+    val startOnGpu =
+      when (saved) {
+        "cpu" -> false
+        "gpu" -> true
+        else -> !ElricDevice.preferCpu(context)
+      }
+    Log.i(
+      TAG,
+      "Starting ${model.name}: saved=$saved lowRam=$lowRam ${ElricDevice.describe(context)} " +
+        "gpuFirst=$startOnGpu",
+    )
+
+    var error: String? = null
+    if (startOnGpu) {
+      configure(model, Accelerator.GPU, lowRam)
+      // A timed-out GPU start is abandoned: its engine is closed if it ever finishes.
+      error = initialize(model, system, GPU_INIT_TIMEOUT_MS, abandonOnTimeout = true, media = false)
+      if (error == null && model.instance != null) {
+        return started(model, system, "gpu")
+      }
+      Log.w(TAG, "GPU start failed or timed out (${error ?: "timeout"}); trying CPU")
+    }
+    configure(model, Accelerator.CPU, lowRam)
+    val left = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(MIN_CPU_TIMEOUT_MS)
+    // The last attempt is not abandoned: a Retry waits for it instead of starting a second copy.
+    error = initialize(model, system, left, abandonOnTimeout = false, media = false)
+    if (error == null && model.instance != null) {
+      return started(model, system, "cpu")
+    }
+    val msg = error ?: "timed out after ${LOAD_TIMEOUT_MS / 1000} s"
+    Log.e(TAG, "Failed to start model: $msg")
+    engine = ElricEngineState.Failed(msg)
+    reportStuck(model, if (error == null) "load timeout ${LOAD_TIMEOUT_MS / 1000} s" else "load failed: $msg")
+    return msg
+  }
+
+  /**
+   * Photo and voice start. Options (main/vision backend) are tried in order: the one that worked
+   * last time, GPU/GPU where the GPU is safe, CPU/CPU, then CPU/GPU. The voice encoder always runs
+   * on the CPU. When every option fails with an error the model is marked unsupported for this
+   * session (no retry loop); a timeout is reported as a normal failure so Retry can wait for it.
+   */
+  private suspend fun startMedia(model: Model, system: String): String? {
+    val deadline = loadStartedAt + LOAD_TIMEOUT_MS
+    val lowRam = ElricDevice.isLowRam(context)
+    val savedMain = store.backendFor(model.name)
+    val gpuOk =
+      when (savedMain) {
+        "cpu" -> false
+        "gpu" -> true
+        else -> !ElricDevice.preferCpu(context)
+      }
+    val options = mutableListOf<Pair<Accelerator, Accelerator>>()
+    parseMediaBackend(store.mediaBackendFor(model.name))?.let { options.add(it) }
+    if (gpuOk) options.add(Accelerator.GPU to Accelerator.GPU)
+    options.add(Accelerator.CPU to Accelerator.CPU)
+    options.add(Accelerator.CPU to Accelerator.GPU)
+    val tries = options.distinct()
+    Log.i(TAG, "Starting ${model.name} with photo+voice: options=$tries ${ElricDevice.describe(context)}")
+
+    var timedOut = false
+    var lastError: String? = null
+    for ((i, opt) in tries.withIndex()) {
+      val (mainAcc, vision) = opt
+      val last = i == tries.size - 1
+      configure(model, mainAcc, lowRam, vision)
+      val usesGpu = mainAcc == Accelerator.GPU || vision == Accelerator.GPU
+      val left = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(MIN_CPU_TIMEOUT_MS)
+      val timeout = if (usesGpu && !last) minOf(MEDIA_GPU_TIMEOUT_MS, left) else left
+      val err = initialize(model, system, timeout, abandonOnTimeout = !last, media = true)
+      if (err == null && model.instance != null) {
+        store.saveMediaBackend(model.name, "${mainAcc.label.lowercase()}/${vision.label.lowercase()}")
+        return startedMedia(model, system, if (mainAcc == Accelerator.GPU) "gpu" else "cpu")
+      }
+      if (err == null || err.startsWith("timed out")) timedOut = true
+      lastError = err ?: "timed out"
+      Log.w(TAG, "Photo+voice start ${mainAcc.label}/${vision.label} failed: $lastError")
+      if (SystemClock.elapsedRealtime() > deadline && !last) {
+        timedOut = true
+        break
+      }
+    }
+    if (!timedOut) {
+      mediaFailed.add(model.name)
+      engine = ElricEngineState.Idle
+      return MEDIA_UNSUPPORTED
+    }
+    val msg = lastError ?: "timed out"
+    engine = ElricEngineState.Failed(msg)
+    reportStuck(model, "photo/voice load timeout")
+    return msg
+  }
+
+  private fun parseMediaBackend(s: String): Pair<Accelerator, Accelerator>? {
+    val parts = s.split('/')
+    if (parts.size != 2) return null
+    fun acc(x: String) =
+      when (x) {
+        "gpu" -> Accelerator.GPU
+        "cpu" -> Accelerator.CPU
+        else -> null
+      }
+    val first = acc(parts[0]) ?: return null
+    val vision = acc(parts[1]) ?: return null
+    return first to vision
   }
 
   private fun started(model: Model, system: String, backend: String): String? {
@@ -576,8 +944,26 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     return null
   }
 
+  private fun startedMedia(model: Model, system: String, backend: String): String? {
+    loadedModel = model
+    mediaInstance = model.instance
+    syncedKey = keyOf(system, emptyList())
+    engine = ElricEngineState.Ready
+    Log.i(
+      TAG,
+      "Started ${model.name} with photo+voice on $backend in " +
+        "${SystemClock.elapsedRealtime() - loadStartedAt} ms",
+    )
+    return null
+  }
+
   /** Sets the backend and a context size that suits it before a start. */
-  private fun configure(model: Model, accelerator: Accelerator, lowRam: Boolean) {
+  private fun configure(
+    model: Model,
+    accelerator: Accelerator,
+    lowRam: Boolean,
+    vision: Accelerator? = null,
+  ) {
     store.saveLastRun(elricModelDisplayName(model.name) ?: model.name, if (accelerator == Accelerator.GPU) "gpu" else "cpu")
     val current =
       model.getIntConfigValue(key = ConfigKeys.MAX_TOKENS, defaultValue = DEFAULT_MAX_TOKEN)
@@ -587,29 +973,37 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
       model.configValues.toMutableMap().apply {
         put(ConfigKeys.ACCELERATOR.label, accelerator.label)
         put(ConfigKeys.MAX_TOKENS.label, tokens.toString())
+        if (vision != null) put(ConfigKeys.VISION_ACCELERATOR.label, vision.label)
       }
   }
 
-  /** The start still running from an earlier attempt that was not abandoned, if any. */
-  private var pendingStart: Pair<Model, CompletableDeferred<String>>? = null
+  /** A start still running from an earlier attempt that was not abandoned. */
+  private class PendingStart(
+    val model: Model,
+    val result: CompletableDeferred<String>,
+    val media: Boolean,
+  )
+
+  private var pendingStart: PendingStart? = null
 
   /**
    * Starts the engine on its own thread (the native start blocks and cannot be interrupted) and
    * waits at most [timeoutMs]. Returns null when started, the error text, or null with no
-   * instance on a timeout.
+   * instance on a timeout. With [media] the engine gets photo and voice support.
    */
   private suspend fun initialize(
     model: Model,
     system: String,
     timeoutMs: Long,
     abandonOnTimeout: Boolean,
+    media: Boolean,
   ): String? {
     val pending = pendingStart
     val result: CompletableDeferred<String>
     val abandoned = AtomicBoolean(false)
-    if (pending != null && pending.first === model && !pending.second.isCompleted) {
+    if (pending != null && pending.model === model && !pending.result.isCompleted) {
       Log.i(TAG, "Waiting for the start that is still running")
-      result = pending.second
+      result = pending.result
     } else {
       result = CompletableDeferred()
       val r = result
@@ -620,8 +1014,8 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
                 context = context,
                 model = model,
                 taskId = BuiltInTaskId.LLM_CHAT,
-                supportImage = false,
-                supportAudio = false,
+                supportImage = media && model.supportImage,
+                supportAudio = media && model.supportAudio,
                 onDone = { err -> r.complete(err) },
                 systemInstruction = Contents.of(system),
                 tools = listOf(),
@@ -638,7 +1032,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
           "elric-engine-start",
         )
         .start()
-      if (!abandonOnTimeout) pendingStart = model to result
+      if (!abandonOnTimeout) pendingStart = PendingStart(model, result, media)
     }
     val err = withTimeoutOrNull(timeoutMs) { result.await() }
     if (err == null) {
@@ -648,7 +1042,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
       // It may have finished just before giving up.
       return if (model.instance != null) null else "timed out after ${timeoutMs / 1000} s"
     }
-    if (pendingStart?.second === result) pendingStart = null
+    if (pendingStart?.result === result) pendingStart = null
     return err.ifEmpty { null }
   }
 
@@ -665,19 +1059,28 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     }
   }
 
-  /** Asks [text] in the open chat. [model] is the downloaded model to answer with, if any. */
+  /**
+   * Asks [text] in the open chat, with the attached photo if there is one. [model] is the
+   * downloaded model to answer with, if any.
+   */
   fun send(text: String, model: Model?) {
-    val q = text.trim()
-    if (q.isEmpty() || busy) return
+    val image = attachment
+    if (ask(text, model, image) && image != null) attachment = null
+  }
+
+  /** Returns true when the question was added to the chat. */
+  private fun ask(text: String, model: Model?, image: String?): Boolean {
+    val q = text.trim().ifEmpty { if (image != null) T.photoDefault.get(lang) else "" }
+    if (q.isEmpty() || busy || voiceState != ElricVoiceState.IDLE) return false
     val history = turns.filter { it.failed != true && it.text.isNotBlank() }.toList()
-    turns.add(ElricTurn(role = "user", text = q))
+    turns.add(ElricTurn(role = "user", text = q, image = image))
     replySavedMemory = rememberFrom(q)
     if (model == null || (model.instance == null && !modelFileComplete(model))) {
       // Never fake an answer: the chat shows that a (complete) model is needed.
       if (model != null) Log.w(TAG, "Model file for ${model.name} is incomplete")
       needsModel = true
       persist()
-      return
+      return true
     }
     needsModel = false
     busy = true
@@ -685,25 +1088,35 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     turns.add(ElricTurn(role = "model", text = "", memSaved = if (replySavedMemory) true else null))
     val replyIndex = turns.size - 1
     val system = systemPrompt(q)
+    if (image != null && !model.supportImage) {
+      finishReply(replyIndex, ElricTurn(role = "model", text = T.photoUnsupported.get(lang), failed = true))
+      return true
+    }
 
     viewModelScope.launch {
       val loadError =
         try {
-          ensureLoaded(model, system)
+          ensureLoaded(model, system, media = image != null)
         } catch (e: CancellationException) {
           throw e
         } catch (t: Throwable) {
           t.message ?: "start failed"
         }
       if (loadError != null) {
-        finishReply(replyIndex, ElricTurn(role = "model", text = T.startFailed.get(lang), failed = true))
+        val msg = if (loadError == MEDIA_UNSUPPORTED) T.photoUnsupported else T.startFailed
+        finishReply(replyIndex, ElricTurn(role = "model", text = msg.get(lang), failed = true))
+        return@launch
+      }
+      val bitmap: Bitmap? = image?.let { withContext(Dispatchers.IO) { ElricImages.read(it) } }
+      if (image != null && bitmap == null) {
+        finishReply(replyIndex, ElricTurn(role = "model", text = T.photoFailed.get(lang), failed = true))
         return@launch
       }
       if (stopRequested) {
         finishReply(replyIndex, ElricTurn(role = "model", text = T.stopped.get(lang), failed = true))
         return@launch
       }
-      val seed = trimmedHistory(model, system, q, history)
+      val seed = trimmedHistory(model, system, q, history, if (image != null) PHOTO_TOKENS else 0)
       val key = keyOf(system, seed)
       if (key != syncedKey) {
         withContext(Dispatchers.Default) {
@@ -716,7 +1129,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
             enableConversationConstrainedDecoding = false,
             initialMessages =
               seed.map {
-                if (it.isUser) Message.user(Contents.of(it.text))
+                if (it.isUser) Message.user(Contents.of(seedText(it)))
                 else Message.model(Contents.of(it.text))
               },
             enableResponseFormat = false,
@@ -724,8 +1137,9 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         }
         syncedKey = key
       }
-      runAnswer(model, system, seed, q, replyIndex)
+      runAnswer(model, system, seed, q, image, bitmap, replyIndex)
     }
+    return true
   }
 
   private fun runAnswer(
@@ -733,6 +1147,8 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     system: String,
     seed: List<ElricTurn>,
     q: String,
+    image: String?,
+    bitmap: Bitmap?,
     replyIndex: Int,
   ) {
     runningModel = model
@@ -778,7 +1194,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         // Only a fully finished answer leaves the engine's conversation in a known state.
         syncedKey =
           if (error == null && !stopRequested && text.isNotEmpty()) {
-            keyOf(system, seed + ElricTurn("user", q) + ElricTurn("model", text))
+            keyOf(system, seed + ElricTurn("user", q, image = image) + ElricTurn("model", text))
           } else {
             null
           }
@@ -805,7 +1221,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         },
         cleanUpListener = {},
         onError = { msg -> finish(msg) },
-        images = listOf(),
+        images = listOfNotNull(bitmap),
         audioClips = listOf(),
         coroutineScope = viewModelScope,
         extraContext = extra,
@@ -876,6 +1292,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
 
   override fun onCleared() {
     super.onCleared()
+    recorder.cancel()
     val m = loadedModel ?: return
     try {
       LlmChatModelHelper.cleanUp(m) {}
@@ -935,4 +1352,14 @@ fun displayAnswer(text: String): String {
   var s = Regex("\\$\\$([\\s\\S]*?)\\$\\$").replace(text) { r -> "\n`" + plainMaths(r.groupValues[1]).trim() + "`\n" }
   s = Regex("\\$([^$\\n]+?)\\$").replace(s) { r -> plainMaths(r.groupValues[1]) }
   return s
+}
+
+private val TRANSCRIPT_LABEL = Regex("(?i)^\\s*(transcription|transcript|text)\\s*:\\s*")
+
+/** Tidies a transcription: no control tokens, labels or wrapping quotes. */
+fun cleanTranscript(text: String): String {
+  var t = cleanModelText(text).trim()
+  t = t.replace(TRANSCRIPT_LABEL, "").trim()
+  t = t.trim('"', '\u201C', '\u201D', '\'', '`').trim()
+  return t.take(1000)
 }

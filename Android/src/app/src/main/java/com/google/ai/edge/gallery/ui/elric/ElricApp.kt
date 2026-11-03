@@ -26,14 +26,11 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
-import android.os.Bundle
 import android.os.StatFs
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -189,7 +186,6 @@ fun ElricApp(
   var returnTo by rememberSaveable { mutableStateOf(Screen.HOME) }
   var overlay by rememberSaveable { mutableStateOf(Overlay.NONE) }
   var input by rememberSaveable { mutableStateOf("") }
-  var listening by remember { mutableStateOf(false) }
   var toast by remember { mutableStateOf<String?>(null) }
   var toastSeq by remember { mutableStateOf(0) }
   var showTos by remember { mutableStateOf(!tosViewModel.getIsTosAccepted()) }
@@ -215,7 +211,7 @@ fun ElricApp(
 
   fun go(s: Screen) {
     overlay = Overlay.NONE
-    listening = false
+    if (vm.voiceState == ElricVoiceState.RECORDING) vm.cancelVoice()
     screen = s
   }
 
@@ -226,7 +222,7 @@ fun ElricApp(
 
   fun ask(text: String) {
     val q = text.trim()
-    if (q.isEmpty() || vm.busy) return
+    if ((q.isEmpty() && vm.attachment == null) || vm.busy || vm.voiceState != ElricVoiceState.IDLE) return
     vm.send(q, currentModel)
     input = ""
     if (screen != Screen.CHAT) go(Screen.CHAT)
@@ -268,46 +264,81 @@ fun ElricApp(
     }
   }
 
-  // Voice input and read aloud.
-  val voice = rememberVoiceInput(
-    lang = vm.lang,
-    onText = { input = it },
-    onEnd = { listening = false },
-    onError = { msg ->
-      listening = false
-      if (msg != null) showToast(msg.get(vm.lang))
-    },
-  )
+  // Voice: recorded on the phone (at most 30 s) and turned into text by the on-device model.
+  fun finishVoice() {
+    vm.finishRecording(
+      model = currentModel,
+      onText = { text ->
+        input = if (input.isBlank()) text else input.trimEnd() + " " + text
+        showToast(T.voiceCheck.get(vm.lang))
+      },
+      onError = { msg -> showToast(msg.get(vm.lang)) },
+    )
+  }
+  fun beginRecording() {
+    if (!vm.startRecording(onMax = { finishVoice() })) showToast(T.voiceUnavailable.get(vm.lang))
+  }
   val micLauncher =
     rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-      if (granted) {
-        listening = voice.start()
-        if (!listening) showToast(T.voiceUnavailable.get(vm.lang))
-      } else {
-        showToast(T.micNeeded.get(vm.lang))
-      }
+      if (granted) beginRecording() else showToast(T.micNeeded.get(vm.lang))
     }
   fun startMic() {
     overlay = Overlay.NONE
+    if (vm.busy) return
     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
         PackageManager.PERMISSION_GRANTED
     ) {
-      listening = voice.start()
-      if (!listening) showToast(T.voiceUnavailable.get(vm.lang))
+      beginRecording()
     } else {
       micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+  }
+
+  // Photo: from the camera or the gallery, read on the phone by the on-device model.
+  val photoFailed = { showToast(T.photoFailed.get(vm.lang)) }
+  val galleryLauncher =
+    rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+      if (uri != null) vm.attachPhoto(uri, photoFailed)
+    }
+  val cameraUri = remember { ElricImages.cameraUri(context) }
+  val cameraLauncher =
+    rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+      if (ok) vm.attachPhoto(cameraUri, photoFailed)
+    }
+  val cameraPermLauncher =
+    rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+      if (granted) cameraLauncher.launch(cameraUri) else showToast(T.cameraNeeded.get(vm.lang))
+    }
+  fun takePhoto() {
+    overlay = Overlay.NONE
+    try {
+      if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+          PackageManager.PERMISSION_GRANTED
+      ) {
+        cameraLauncher.launch(cameraUri)
+      } else {
+        cameraPermLauncher.launch(Manifest.permission.CAMERA)
+      }
+    } catch (e: Exception) {
+      showToast(T.photoFailed.get(vm.lang))
+    }
+  }
+  fun pickPhoto() {
+    overlay = Overlay.NONE
+    try {
+      galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    } catch (e: Exception) {
+      showToast(T.photoFailed.get(vm.lang))
     }
   }
   val tts = rememberTts()
 
   // Back handling.
-  BackHandler(enabled = listening) {
-    voice.stop()
-    listening = false
-  }
+  val voiceActive = vm.voiceState != ElricVoiceState.IDLE
+  BackHandler(enabled = voiceActive) { vm.cancelVoice() }
   BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
-  BackHandler(enabled = overlay == Overlay.NONE && !listening && screen in setOf(Screen.CHAT, Screen.MODELS, Screen.PRIVACY, Screen.MEMORY, Screen.DOWNLOAD) ||
-    (overlay == Overlay.NONE && !listening && screen == Screen.ABOUT && vm.onboarded)) {
+  BackHandler(enabled = overlay == Overlay.NONE && !voiceActive && screen in setOf(Screen.CHAT, Screen.MODELS, Screen.PRIVACY, Screen.MEMORY, Screen.DOWNLOAD) ||
+    (overlay == Overlay.NONE && !voiceActive && screen == Screen.ABOUT && vm.onboarded)) {
     when (screen) {
       Screen.CHAT -> newChat()
       Screen.DOWNLOAD -> go(Screen.ABOUT)
@@ -397,6 +428,7 @@ fun ElricApp(
                   engine = vm.engine,
                   loadStartedAt = vm.loadStartedAt,
                   firstStart = vm.firstStart,
+                  mediaLoading = vm.mediaLoading,
                   needsModel = vm.needsModel,
                   streamTick = vm.streamTick,
                   onEdit = { i -> vm.editQuestion(i)?.let { input = it } },
@@ -450,13 +482,14 @@ fun ElricApp(
                 value = input,
                 onValueChange = { input = it },
                 busy = vm.busy,
-                listening = listening,
-                onCamera = { overlay = Overlay.CAMERA },
+                attachment = vm.attachment,
+                voiceState = vm.voiceState,
+                voiceMs = vm.voiceMs,
+                onPhoto = { overlay = Overlay.CAMERA },
+                onRemovePhoto = { vm.removeAttachment() },
                 onMic = { startMic() },
-                onStopListening = {
-                  voice.stop()
-                  listening = false
-                },
+                onFinishVoice = { finishVoice() },
+                onCancelVoice = { vm.cancelVoice() },
                 onSend = { ask(input) },
                 onStop = { vm.stop() },
               )
@@ -513,16 +546,10 @@ fun ElricApp(
 
       // 11 camera sheet.
       BottomSheetOverlay(visible = overlay == Overlay.CAMERA, onDismiss = { overlay = Overlay.NONE }) {
-        SheetOption("◉", tr(T.takePhoto), null, false) {
-          overlay = Overlay.NONE
-          showToast(T.photoSoon.get(vm.lang))
-        }
-        SheetOption("▣", tr(T.chooseGallery), null, false) {
-          overlay = Overlay.NONE
-          showToast(T.photoSoon.get(vm.lang))
-        }
+        SheetOption("◉", tr(T.takePhoto), null, false) { takePhoto() }
+        SheetOption("▣", tr(T.chooseGallery), null, false) { pickPhoto() }
         TinyText(
-          tr(T.photoSoon),
+          tr(T.photoPrivate),
           modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         )
       }
@@ -993,127 +1020,6 @@ private fun rememberOnline(): Boolean {
   return online
 }
 
-class ElricVoice(private val startFn: () -> Boolean, private val stopFn: () -> Unit) {
-  fun start(): Boolean = startFn()
-
-  fun stop() = stopFn()
-}
-
-/**
- * Speech to text in Hindi or English. Uses the phone's on-device recognizer when it has one.
- */
-@Composable
-private fun rememberVoiceInput(
-  lang: ElricLang,
-  onText: (String) -> Unit,
-  onEnd: () -> Unit,
-  onError: (Str?) -> Unit,
-): ElricVoice {
-  val context = LocalContext.current
-  val holder = remember { arrayOfNulls<SpeechRecognizer>(1) }
-  val callbacks = remember { arrayOfNulls<Any>(3) }
-  callbacks[0] = onText
-  callbacks[1] = onEnd
-  callbacks[2] = onError
-
-  @Suppress("UNCHECKED_CAST")
-  fun cbText(s: String) = (callbacks[0] as (String) -> Unit)(s)
-
-  @Suppress("UNCHECKED_CAST")
-  fun cbEnd() = (callbacks[1] as () -> Unit)()
-
-  @Suppress("UNCHECKED_CAST")
-  fun cbError(s: Str?) = (callbacks[2] as (Str?) -> Unit)(s)
-
-  DisposableEffect(Unit) {
-    onDispose {
-      holder[0]?.destroy()
-      holder[0] = null
-    }
-  }
-  val langTag = if (lang == ElricLang.HI) "hi-IN" else "en-IN"
-  return remember(langTag) {
-    ElricVoice(
-      startFn = {
-        holder[0]?.destroy()
-        holder[0] = null
-        val onDevice =
-          Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
-        if (!onDevice && !SpeechRecognizer.isRecognitionAvailable(context)) {
-          false
-        } else {
-          try {
-            val r =
-              if (onDevice) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-              else SpeechRecognizer.createSpeechRecognizer(context)
-            r.setRecognitionListener(
-              object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {}
-
-                override fun onBeginningOfSpeech() {}
-
-                override fun onRmsChanged(rmsdB: Float) {}
-
-                override fun onBufferReceived(buffer: ByteArray?) {}
-
-                override fun onEndOfSpeech() {}
-
-                override fun onError(error: Int) {
-                  cbError(
-                    if (
-                      error == SpeechRecognizer.ERROR_NO_MATCH ||
-                        error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
-                        error == SpeechRecognizer.ERROR_CLIENT
-                    )
-                      null
-                    else T.voiceUnavailable
-                  )
-                }
-
-                override fun onResults(results: Bundle?) {
-                  results
-                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()
-                    ?.let { cbText(it) }
-                  cbEnd()
-                }
-
-                override fun onPartialResults(partialResults: Bundle?) {
-                  partialResults
-                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let { cbText(it) }
-                }
-
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-              }
-            )
-            val intent =
-              Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, langTag)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-              }
-            r.startListening(intent)
-            holder[0] = r
-            true
-          } catch (e: Exception) {
-            false
-          }
-        }
-      },
-      stopFn = {
-        try {
-          holder[0]?.stopListening()
-        } catch (e: Exception) {}
-      },
-    )
-  }
-}
-
 class ElricTts(private val speakFn: (String, ElricLang) -> Unit) {
   fun speak(text: String, lang: ElricLang) = speakFn(text, lang)
 }
@@ -1123,6 +1029,8 @@ private fun rememberTts(): ElricTts {
   val context = LocalContext.current
   val holder = remember { arrayOfNulls<TextToSpeech>(1) }
   val ready = remember { booleanArrayOf(false) }
+  val pending = remember { arrayOfNulls<String>(1) }
+  val pendingLocale = remember { arrayOfNulls<Locale>(1) }
   DisposableEffect(Unit) {
     onDispose {
       holder[0]?.shutdown()
@@ -1134,16 +1042,26 @@ private fun rememberTts(): ElricTts {
       val plain = text.replace(Regex("[*#`|_>]"), " ")
       val locale = if (lang == ElricLang.HI) Locale("hi", "IN") else Locale("en", "IN")
       val t = holder[0]
+      pending[0] = plain
+      pendingLocale[0] = locale
       if (t != null && ready[0]) {
+        pending[0] = null
         t.language = locale
         t.speak(plain, TextToSpeech.QUEUE_FLUSH, null, "elric")
       } else if (t == null) {
+        // The latest text asked for while the speech engine starts is read once it is ready.
         holder[0] =
           TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
               ready[0] = true
-              holder[0]?.language = locale
-              holder[0]?.speak(plain, TextToSpeech.QUEUE_FLUSH, null, "elric")
+              val text = pending[0]
+              pending[0] = null
+              if (text != null) {
+                pendingLocale[0]?.let { holder[0]?.language = it }
+                holder[0]?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "elric")
+              }
+            } else {
+              holder[0] = null
             }
           }
       }

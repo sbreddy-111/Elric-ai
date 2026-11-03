@@ -25,6 +25,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,6 +43,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -63,6 +65,8 @@ import androidx.compose.material.icons.outlined.ThumbDown
 import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Mic
@@ -76,6 +80,7 @@ import android.os.SystemClock
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -84,9 +89,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -94,7 +102,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.ui.common.MarkdownText
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 fun modeLabel(m: ElricMode): Str =
@@ -217,79 +227,204 @@ fun Composer(
   value: String,
   onValueChange: (String) -> Unit,
   busy: Boolean,
-  listening: Boolean,
-  onCamera: () -> Unit,
+  attachment: String?,
+  voiceState: ElricVoiceState,
+  voiceMs: Long,
+  onPhoto: () -> Unit,
+  onRemovePhoto: () -> Unit,
   onMic: () -> Unit,
-  onStopListening: () -> Unit,
+  onFinishVoice: () -> Unit,
+  onCancelVoice: () -> Unit,
   onSend: () -> Unit,
   onStop: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val p = pal()
+  val lang = LocalElricLang.current
+  val listening = voiceState == ElricVoiceState.RECORDING
+  val voiceBusy = voiceState == ElricVoiceState.PREPARING || voiceState == ElricVoiceState.TRANSCRIBING
   val border by animateColorAsState(if (listening) p.gold else p.line, tween(250), label = "border")
-  Row(
+  val shape = RoundedCornerShape(28.dp)
+  Column(
     modifier =
       modifier
         .padding(bottom = 8.dp)
         .fillMaxWidth()
-        .heightIn(min = 60.dp)
-        .clip(RoundedCornerShape(30.dp))
+        .clip(shape)
         .background(p.surface)
-        .border(1.dp, border, RoundedCornerShape(30.dp))
+        .border(1.dp, border, shape)
         .padding(8.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
-    if (listening) {
-      Row(
-        modifier =
-          Modifier.weight(1f).heightIn(min = 44.dp).clip(CircleShape).clickable(onClick = onStopListening).padding(
-            horizontal = 12.dp
-          ),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-      ) {
-        Wave()
-        EText(tr(T.listening), size = 14.sp, modifier = Modifier.weight(1f), maxLines = 1)
-        TinyText(tr(T.tapToStop))
-      }
-      return@Row
+    if (attachment != null && voiceState == ElricVoiceState.IDLE) {
+      AttachmentThumb(attachment, onRemovePhoto)
     }
-    Box(
-      modifier = Modifier.size(44.dp).clip(CircleShape).background(p.gold).clickable(onClick = onCamera),
-      contentAlignment = Alignment.Center,
+    Row(
+      modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-      Icon(Icons.Rounded.PhotoCamera, contentDescription = tr(T.camera), tint = p.onGold, modifier = Modifier.size(20.dp))
+      when {
+        listening -> {
+          Row(
+            modifier =
+              Modifier.weight(1f).heightIn(min = 44.dp).clip(CircleShape).clickable(onClick = onFinishVoice).padding(
+                horizontal = 12.dp
+              ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+          ) {
+            Wave()
+            EText(
+              T.listening.format(lang, "t" to mmss(voiceMs)),
+              size = 14.sp,
+              modifier = Modifier.weight(1f),
+              maxLines = 1,
+            )
+          }
+          RoundIcon(Icons.Rounded.Close, tr(T.cancelVoice), onCancelVoice, size = 44)
+          GoldRound(Icons.Rounded.Check, tr(T.done), onFinishVoice)
+        }
+        voiceBusy -> {
+          val startedAt = remember(voiceState == ElricVoiceState.PREPARING) { SystemClock.elapsedRealtime() }
+          var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+          LaunchedEffect(voiceState) {
+            while (true) {
+              now = SystemClock.elapsedRealtime()
+              delay(1000)
+            }
+          }
+          Row(
+            modifier = Modifier.weight(1f).heightIn(min = 44.dp).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+          ) {
+            TypingDots()
+            EText(
+              if (voiceState == ElricVoiceState.PREPARING) {
+                T.voicePreparing.format(lang, "s" to ((now - startedAt) / 1000L).coerceAtLeast(0L).toString())
+              } else {
+                T.voiceWorking.get(lang)
+              },
+              size = 14.sp,
+              modifier = Modifier.weight(1f),
+              maxLines = 2,
+            )
+          }
+          RoundIcon(Icons.Rounded.Close, tr(T.cancelVoice), onCancelVoice, size = 44)
+        }
+        else -> {
+          RoundIcon(Icons.Rounded.PhotoCamera, tr(T.photo), onPhoto, size = 44)
+          Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (value.isEmpty()) EText(tr(T.askAnything), color = p.muted, maxLines = 1)
+            BasicTextField(
+              value = value,
+              onValueChange = onValueChange,
+              textStyle = TextStyle(color = p.text, fontSize = 15.sp, lineHeight = 21.sp),
+              cursorBrush = SolidColor(p.gold),
+              maxLines = 5,
+              keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+              keyboardActions = KeyboardActions(onSend = { if (!busy) onSend() }),
+              modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(vertical = 9.dp),
+            )
+          }
+          RoundIcon(Icons.Rounded.Mic, tr(T.voice), onMic, size = 44)
+          val live = busy || value.isNotBlank() || attachment != null
+          val bg by animateColorAsState(if (live) p.gold else p.surface2, tween(250), label = "send")
+          Box(
+            modifier =
+              Modifier.size(44.dp).clip(CircleShape).background(bg).clickable {
+                if (busy) onStop() else onSend()
+              },
+            contentAlignment = Alignment.Center,
+          ) {
+            Icon(
+              if (busy) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
+              contentDescription = tr(if (busy) T.stop else T.send),
+              tint = if (live) p.onGold else p.muted,
+              modifier = Modifier.size(20.dp),
+            )
+          }
+        }
+      }
     }
-    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-      if (value.isEmpty()) EText(tr(T.askAnything), color = p.muted, maxLines = 1)
-      BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        textStyle = TextStyle(color = p.text, fontSize = 15.sp, lineHeight = 21.sp),
-        cursorBrush = SolidColor(p.gold),
-        maxLines = 5,
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-        keyboardActions = KeyboardActions(onSend = { if (!busy) onSend() }),
-        modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(vertical = 9.dp),
-      )
+  }
+}
+
+private fun mmss(ms: Long): String {
+  val s = (ms / 1000L).coerceIn(0L, 30L)
+  return "0:" + s.toString().padStart(2, '0')
+}
+
+@Composable
+private fun GoldRound(icon: ImageVector, desc: String, onClick: () -> Unit) {
+  val p = pal()
+  Box(
+    modifier = Modifier.size(44.dp).clip(CircleShape).background(p.gold).clickable(onClick = onClick),
+    contentAlignment = Alignment.Center,
+  ) {
+    Icon(icon, contentDescription = desc, tint = p.onGold, modifier = Modifier.size(20.dp))
+  }
+}
+
+/** Reads a saved photo off the main thread for display. */
+@Composable
+private fun rememberPhoto(path: String, maxSide: Int): ImageBitmap? {
+  val bmp by
+    produceState<ImageBitmap?>(initialValue = null, path, maxSide) {
+      value = withContext(Dispatchers.IO) { ElricImages.read(path, maxSide)?.asImageBitmap() }
     }
-    RoundIcon(Icons.Rounded.Mic, tr(T.voice), onMic, size = 44)
-    val live = busy || value.isNotBlank()
-    val bg by animateColorAsState(if (live) p.gold else p.surface2, tween(250), label = "send")
+  return bmp
+}
+
+@Composable
+private fun AttachmentThumb(path: String, onRemove: () -> Unit) {
+  val p = pal()
+  val bmp = rememberPhoto(path, 256)
+  Box(modifier = Modifier.padding(start = 4.dp, top = 4.dp, end = 12.dp).size(72.dp)) {
+    Box(
+      modifier = Modifier.size(64.dp).align(Alignment.BottomStart).clip(RoundedCornerShape(14.dp)).background(p.surface2)
+    ) {
+      if (bmp != null) {
+        Image(bmp, contentDescription = tr(T.photo), contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+      }
+    }
     Box(
       modifier =
-        Modifier.size(44.dp).clip(CircleShape).background(bg).clickable {
-          if (busy) onStop() else onSend()
-        },
+        Modifier.align(Alignment.TopEnd)
+          .offset(x = 8.dp)
+          .size(28.dp)
+          .clip(CircleShape)
+          .background(p.surface2)
+          .border(1.dp, p.line, CircleShape)
+          .clickable(onClick = onRemove),
       contentAlignment = Alignment.Center,
     ) {
-      Icon(
-        if (busy) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
-        contentDescription = tr(if (busy) T.stop else T.send),
-        tint = if (live) p.onGold else p.muted,
-        modifier = Modifier.size(20.dp),
-      )
+      Icon(Icons.Rounded.Close, contentDescription = tr(T.removePhoto), tint = p.text, modifier = Modifier.size(16.dp))
+    }
+  }
+}
+
+/** A photo sent with a question, shown above the question in the chat. */
+@Composable
+private fun ChatPhoto(path: String) {
+  val p = pal()
+  val bmp = rememberPhoto(path, 640)
+  val w = 200.dp
+  if (bmp != null && bmp.width > 0 && bmp.height > 0) {
+    val h = (200f * bmp.height / bmp.width).coerceIn(80f, 280f).dp
+    Image(
+      bmp,
+      contentDescription = tr(T.photo),
+      contentScale = ContentScale.Crop,
+      modifier = Modifier.size(w, h).clip(RoundedCornerShape(16.dp)),
+    )
+  } else {
+    Box(
+      modifier = Modifier.size(w, 120.dp).clip(RoundedCornerShape(16.dp)).background(p.surface2),
+      contentAlignment = Alignment.Center,
+    ) {
+      Icon(Icons.Rounded.PhotoCamera, contentDescription = tr(T.photo), tint = p.muted, modifier = Modifier.size(24.dp))
     }
   }
 }
@@ -336,6 +471,7 @@ fun ChatThread(
   engine: ElricEngineState,
   loadStartedAt: Long,
   firstStart: Boolean,
+  mediaLoading: Boolean,
   needsModel: Boolean,
   streamTick: Int,
   onEdit: (Int) -> Unit,
@@ -378,7 +514,12 @@ fun ChatThread(
       for ((i, t) in turns.withIndex()) {
         item(key = "t$i") {
           if (t.isUser) {
-            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+            Column(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalAlignment = Alignment.End,
+              verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+              t.image?.let { ChatPhoto(it) }
               Box(modifier = Modifier.fillMaxWidth(0.84f), contentAlignment = Alignment.CenterEnd) {
                 Box(
                   modifier =
@@ -409,6 +550,7 @@ fun ChatThread(
               engine = engine,
               loadStartedAt = loadStartedAt,
               firstStart = firstStart,
+              mediaLoading = mediaLoading,
               isLast = i == lastModel,
               onCopy = { onCopy(t.text) },
               onSpeak = { onSpeak(t.text) },
@@ -492,6 +634,7 @@ private fun AnswerBlock(
   engine: ElricEngineState,
   loadStartedAt: Long,
   firstStart: Boolean,
+  mediaLoading: Boolean,
   isLast: Boolean,
   onCopy: () -> Unit,
   onSpeak: () -> Unit,
@@ -503,7 +646,7 @@ private fun AnswerBlock(
   Column(modifier = Modifier.fillMaxWidth(0.94f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
     if (turn.text.isEmpty() && streaming) {
       if (engine == ElricEngineState.Loading) {
-        LoadingProgress(startedAt = loadStartedAt, firstStart = firstStart)
+        LoadingProgress(startedAt = loadStartedAt, firstStart = firstStart, media = mediaLoading)
       } else {
         TypingDots()
       }
@@ -566,7 +709,7 @@ private fun Act(icon: ImageVector, desc: String, on: Boolean, onClick: () -> Uni
 
 /** "Elric is getting ready… 12 s", plus a hint the first time a model starts on this phone. */
 @Composable
-private fun LoadingProgress(startedAt: Long, firstStart: Boolean) {
+private fun LoadingProgress(startedAt: Long, firstStart: Boolean, media: Boolean) {
   val lang = LocalElricLang.current
   var now by remember(startedAt) { mutableStateOf(SystemClock.elapsedRealtime()) }
   LaunchedEffect(startedAt) {
@@ -581,7 +724,7 @@ private fun LoadingProgress(startedAt: Long, firstStart: Boolean) {
       TypingDots()
       TinyText(T.starting.format(lang, "s" to secs.toString()))
     }
-    if (firstStart) TinyText(tr(T.firstStartHint))
+    if (media) TinyText(tr(T.mediaFirstHint)) else if (firstStart) TinyText(tr(T.firstStartHint))
   }
 }
 

@@ -54,6 +54,8 @@ data class ElricTurn(
   val failed: Boolean? = null,
   /** True when the question this answers added a memory (shows "Saved to memory"). */
   val memSaved: Boolean? = null,
+  /** Private path of the photo sent with this question (user turns only), if any. */
+  val image: String? = null,
 ) {
   val isUser: Boolean
     get() = role == "user"
@@ -78,6 +80,13 @@ class ElricStore(context: Context) {
 
   fun saveBackend(modelName: String, backend: String) {
     prefs.edit().putString("backend_$modelName", backend).apply()
+  }
+
+  /** Backends ("gpu/gpu", "cpu/gpu" or "cpu/cpu": main/vision) that last started photo and voice. */
+  fun mediaBackendFor(modelName: String): String = prefs.getString("media_backend_$modelName", "") ?: ""
+
+  fun saveMediaBackend(modelName: String, backend: String) {
+    prefs.edit().putString("media_backend_$modelName", backend).apply()
   }
 
   /** Model and backend of the latest start attempt, for error reports (no chat text). */

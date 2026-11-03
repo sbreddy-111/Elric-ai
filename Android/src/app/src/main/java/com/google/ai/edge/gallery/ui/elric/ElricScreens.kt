@@ -613,7 +613,7 @@ fun PrivacyScreen(reportsOn: Boolean, onReports: (Boolean) -> Unit, onBack: () -
         textAlign = TextAlign.Center,
       )
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (point in listOf(T.privacy1, T.privacy2, T.privacy3, T.privacy4, T.privacy5)) {
+        for (point in listOf(T.privacy1, T.privacy2, T.photoPrivate, T.privacy3, T.privacy4, T.privacy5)) {
           Row(
             modifier =
               Modifier.fillMaxWidth()
