@@ -38,6 +38,8 @@ const en = {
   close: 'Close',
   // Model
   modelLite: 'Elric Lite',
+  modelBasic: 'Elric Basic',
+  modelBasicDesc: 'Light model for iPhone. Good for quick explanations and simple quizzes. Can make mistakes, so double-check important answers.',
   modelStandard: 'Elric Standard',
   modelLiteDesc: 'Small and fast. Runs fully on your device. Text only on the web for now.',
   modelStandardDesc: 'Best answers. Available in the Android app; coming to the web later.',
@@ -126,6 +128,8 @@ const hi: Strings = {
   licensesIntro: 'Elric AI ओपन मॉडल और ओपन-सोर्स सॉफ़्टवेयर पर बना है। इन प्रोजेक्ट्स का धन्यवाद:',
   close: 'बंद करें',
   modelLite: 'Elric Lite',
+  modelBasic: 'Elric Basic',
+  modelBasicDesc: 'iPhone के लिए हल्का मॉडल। छोटे जवाब और आसान क्विज़ के लिए अच्छा। गलती हो सकती है, ज़रूरी जवाब दोबारा जाँचें।',
   modelStandard: 'Elric Standard',
   modelLiteDesc: 'छोटा और तेज़। पूरी तरह आपके डिवाइस पर चलता है। वेब पर अभी सिर्फ़ टेक्स्ट।',
   modelStandardDesc: 'सबसे अच्छे जवाब। Android ऐप में उपलब्ध; वेब पर बाद में आएगा।',

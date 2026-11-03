@@ -100,7 +100,7 @@ function renderStatus() {
   const els = Array.from(document.querySelectorAll<HTMLElement>('#status, .status-slot'));
   if (!els.length) return;
   const el = { set innerHTML(h: string) { els.forEach((e) => (e.innerHTML = h)); } };
-  if (modelState === 'ready') { el.innerHTML = turns.length ? '' : `<div class="ok">● ${t('modelLite')} · ${t('loaded')}</div>`; return; }
+  if (modelState === 'ready') { el.innerHTML = turns.length ? '' : `<div class="ok">● ${t(E.MODEL_NAME_KEY as keyof Strings)} · ${t('loaded')}</div>`; return; }
   if (!device) { el.innerHTML = `<div class="box muted">${t('checking')}</div>`; return; }
   if (!device.ok) { el.innerHTML = `<div class="box warn"><h3>${t('cantRunTitle')}</h3><p>${reasonText(device.hard!)}</p></div>`; return; }
   let body = '';
@@ -117,7 +117,7 @@ function renderStatus() {
   } else if (modelState === 'failed') {
     body = `<h3>${t(failIsDownload ? 'pausedTitle' : 'cantRunTitle')}</h3><p class="w">${esc(failMsg)}</p><button class="primary" id="rt">${partial > 0 ? t('resume') : t('retry')}</button>`;
   }
-  el.innerHTML = `<div class="box"><div class="mh"><b>${t('modelLite')}</b><span>${SIZE}</span></div><p class="d">${t('modelLiteDesc')}</p>${body}</div>`;
+  el.innerHTML = `<div class="box"><div class="mh"><b>${t(E.MODEL_NAME_KEY as keyof Strings)}</b><span>${SIZE}</span></div><p class="d">${t(E.MODEL_DESC_KEY as keyof Strings)}</p>${body}</div>`;
   const on = (id: string, f: () => void) => { document.querySelectorAll<HTMLElement>(`[id="${id}"]`).forEach((b) => (b.onclick = f)); };
   on('dl', startDownload);
   on('cx', () => abort?.abort());
@@ -242,7 +242,7 @@ const LICENSES = [
 
 function menuSheet() {
   sheet(`<div class="brand"><img src="icons/mark.png" alt=""><div><b>Elric AI</b><span>AI you can rely on</span></div></div>
-    <button class="row" id="m-models"><b>${t('menuModels')}</b><span>${t('modelLite')} · ${SIZE}</span></button>
+    <button class="row" id="m-models"><b>${t('menuModels')}</b><span>${t(E.MODEL_NAME_KEY as keyof Strings)} · ${SIZE}</span></button>
     <button class="row" id="m-lang"><b>${t('menuLanguage')}</b><span>English · हिन्दी</span></button>
     <button class="row" id="m-priv"><b>${t('menuPrivacy')}</b></button>
     <button class="row" id="m-about"><b>${t('menuAbout')}</b></button>

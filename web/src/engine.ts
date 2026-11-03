@@ -4,13 +4,24 @@
 // runtime and model files.
 import { FilesetResolver, LlmInference } from '@mediapipe/tasks-genai';
 
-export const LITE = {
+const FULL = {
   id: 'elric-lite',
+  chat: 'gemma' as 'gemma' | 'chatml',
   // Open model, Apache-2.0. Internal file name is never shown in the UI.
   url: 'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task',
   fileName: 'elric-lite-v1.task',
   sizeBytes: 2003697664,
 };
+
+// iPhone web pages get too little memory for the 2 GB model, so iPhone/iPad use a smaller open model (Apache-2.0).
+const BASIC = {
+  id: 'elric-basic',
+  chat: 'chatml' as 'gemma' | 'chatml',
+  url: 'https://huggingface.co/litert-community/Qwen3.5-0.8B/resolve/main/Qwen3.5-0.8B_int8.litertlm',
+  fileName: 'elric-basic-v1.litertlm',
+  sizeBytes: 964566992,
+};
+
 
 export const SYSTEM_PROMPT =
   'You are Elric AI, built on open models. Answer reliably in the user\'s language (English or Hindi). If unsure, say so. If asked which model or company you are, say you are Elric AI, built on open models.';
@@ -32,12 +43,33 @@ export interface DeviceReport {
   quota?: number;
 }
 
-export const isIOS = (() => {
+const _isIOS = (() => {
   const ua = navigator.userAgent;
   return /iPhone|iPad|iPod/.test(ua) || (ua.includes('Macintosh') && navigator.maxTouchPoints > 1);
 })();
+export const isIOS = _isIOS;
+export const LITE = isIOS ? BASIC : FULL;
+export const MODEL_NAME_KEY = isIOS ? 'modelBasic' : 'modelLite';
+export const MODEL_DESC_KEY = isIOS ? 'modelBasicDesc' : 'modelLiteDesc';
 
 const LOADING_FLAG = 'elric.loadingSince';
+
+// If this device holds a different model than the one it should use now (e.g. the 2 GB one on iPhone), free that space.
+(async () => {
+  const prev = localStorage.getItem('elric.modelId');
+  if (prev === LITE.id) return;
+  try {
+    localStorage.removeItem('elric.stored');
+    localStorage.removeItem('elric.hybridAt');
+    await caches.delete('elric-model-pieces');
+    await caches.delete('elric-models');
+    const root = await navigator.storage.getDirectory();
+    for (const n of ['elric-lite-v1.task', 'elric-lite-v1.task.part', 'elric-basic-v1.litertlm', 'elric-basic-v1.litertlm.part']) {
+      try { await root.removeEntry(n); } catch { /* none */ }
+    }
+  } catch { /* best effort */ }
+  localStorage.setItem('elric.modelId', LITE.id);
+})();
 const HYBRID_AT = 'elric.hybridAt'; // bytes kept in the OPFS .part file; the rest lives in the piece store
 const STORED_FLAG = 'elric.stored'; // "opfs" | "cache" once a complete file is saved
 
@@ -467,6 +499,11 @@ export interface Turn {
 }
 
 function render(system: string, turns: Turn[]): string {
+  if (LITE.chat === 'chatml') {
+    let c = `<|im_start|>system\n${system}<|im_end|>\n`;
+    for (const t of turns) c += `<|im_start|>${t.role === 'model' ? 'assistant' : 'user'}\n${t.text}<|im_end|>\n`;
+    return c + '<|im_start|>assistant\n<think>\n\n</think>\n\n';
+  }
   let s = `<|turn>system\n${system}<turn|>\n`;
   for (const t of turns) s += `<|turn>${t.role}\n${t.text}<turn|>\n`;
   return s + '<|turn>model\n';
@@ -490,7 +527,9 @@ function clean(text: string): string {
   return text
     .replace(/<\|channel>[\s\S]*?<channel\|>/g, '')
     .replace(/<\|?turn\|?>/g, '')
-    .replace(/<\|channel>[\s\S]*$/, '');
+    .replace(/<\|channel>[\s\S]*$/, '')
+    .replace(/<think>[\s\S]*?<\/think>/g, '')
+    .replace(/<\|im_(start|end)\|>/g, '');
 }
 
 export async function generate(system: string, turns: Turn[], onText: (text: string) => void): Promise<string> {
