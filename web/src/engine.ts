@@ -274,7 +274,8 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
   }
   const total = LITE.sizeBytes;
   const root = await opfsRoot();
-  const canResume = !!root && typeof (FileSystemFileHandle.prototype as any).createWritable === 'function';
+  // Safari copies the whole file on every OPFS write (2x space, fails near the end), so iPhone uses the piece store.
+  const canResume = !isIOS && !!root && typeof (FileSystemFileHandle.prototype as any).createWritable === 'function';
   const hyb = Number(localStorage.getItem(HYBRID_AT) || 0);
   if (hyb > 0) return downloadPieces(onProgress, signal, hyb / CHUNK);
   if (!canResume) return downloadPieces(onProgress, signal);
