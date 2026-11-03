@@ -38,6 +38,7 @@ export const isIOS = (() => {
 })();
 
 const LOADING_FLAG = 'elric.loadingSince';
+const HYBRID_AT = 'elric.hybridAt'; // bytes kept in the OPFS .part file; the rest lives in the piece store
 const STORED_FLAG = 'elric.stored'; // "opfs" | "cache" once a complete file is saved
 
 export async function checkDevice(): Promise<DeviceReport> {
@@ -105,11 +106,18 @@ async function readStored(): Promise<{ stream: ReadableStream<Uint8Array>; size:
         /* fall through */
       }
     }
-  } else if (where === 'pieces') {
+  } else if (where === 'pieces' || where === 'hybrid') {
     const cache = await caches.open(PIECES);
     const n = Math.ceil(LITE.sizeBytes / CHUNK);
-    let i = 0;
+    const at = where === 'hybrid' ? Number(localStorage.getItem(HYBRID_AT) || 0) : 0;
+    let i = at / CHUNK;
     let cur: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    if (at > 0) {
+      const root = await opfsRoot();
+      const file = await (await root!.getFileHandle(PART_NAME())).getFile();
+      if (file.size < at) { localStorage.removeItem(STORED_FLAG); return null; }
+      cur = file.slice(0, at).stream().getReader();
+    }
     const stream = new ReadableStream<Uint8Array>({
       async pull(ctrl) {
         for (;;) {
@@ -137,6 +145,7 @@ async function readStored(): Promise<{ stream: ReadableStream<Uint8Array>; size:
 
 export async function removeStored(): Promise<void> {
   localStorage.removeItem(STORED_FLAG);
+  localStorage.removeItem(HYBRID_AT);
   const root = await opfsRoot();
   try {
     await root?.removeEntry(LITE.fileName);
@@ -167,12 +176,12 @@ const PIECES = 'elric-model-pieces';
 const pieceKey = (i: number) => `/elric-piece/${LITE.fileName}/${i}`;
 
 /** Bytes saved so far in the Cache API piece store (browsers without OPFS writable files, e.g. older Safari). */
-async function piecesBytes(): Promise<number> {
+async function piecesBytes(start = 0): Promise<number> {
   try {
-    if (!(await caches.has(PIECES))) return 0;
+    if (!(await caches.has(PIECES))) return start * CHUNK;
     const cache = await caches.open(PIECES);
     const n = Math.ceil(LITE.sizeBytes / CHUNK);
-    let i = 0;
+    let i = start;
     while (i < n && (await cache.match(pieceKey(i)))) i++;
     return Math.min(i * CHUNK, LITE.sizeBytes);
   } catch {
@@ -183,6 +192,8 @@ async function piecesBytes(): Promise<number> {
 /** Bytes already saved from an earlier, unfinished download (0 if none). */
 export async function partialBytes(): Promise<number> {
   if (isStored()) return 0;
+  const hyb = Number(localStorage.getItem(HYBRID_AT) || 0);
+  if (hyb > 0) return piecesBytes(hyb / CHUNK);
   const root = await opfsRoot();
   let opfs = 0;
   try {
@@ -264,6 +275,8 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
   const total = LITE.sizeBytes;
   const root = await opfsRoot();
   const canResume = !!root && typeof (FileSystemFileHandle.prototype as any).createWritable === 'function';
+  const hyb = Number(localStorage.getItem(HYBRID_AT) || 0);
+  if (hyb > 0) return downloadPieces(onProgress, signal, hyb / CHUNK);
   if (!canResume) return downloadPieces(onProgress, signal);
 
   let part: FileSystemFileHandle;
@@ -299,6 +312,13 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
           try { await root!.removeEntry(PART_NAME()); } catch { /* none */ }
           return downloadPieces(onProgress, signal);
         }
+        // Safari copies the whole file on every write, so a big file eventually runs out of room.
+        // Keep what's saved and put the rest in the piece store.
+        const kept = (await part.getFile()).size;
+        if (kept % CHUNK === 0) {
+          localStorage.setItem(HYBRID_AT, String(kept));
+          return downloadPieces(onProgress, signal, kept / CHUNK);
+        }
         throw we;
       }
       wroteAny = true;
@@ -320,10 +340,9 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
     try { await root!.removeEntry(LITE.fileName); } catch { /* none */ }
     await (part as any).move(LITE.fileName);
   } else {
-    const fin = await root!.getFileHandle(LITE.fileName, { create: true });
-    const w: FileSystemWritableFileStream = await (fin as any).createWritable();
-    await (await part.getFile()).stream().pipeTo(w);
-    await root!.removeEntry(PART_NAME());
+    // No move(): read the .part file in place instead of copying 2 GB.
+    localStorage.setItem(HYBRID_AT, String(total - (total % CHUNK)));
+    return downloadPieces(onProgress, signal, Math.floor(total / CHUNK));
   }
   const size = (await (await root!.getFileHandle(LITE.fileName)).getFile()).size;
   if (size !== total) throw new Error(`Incomplete download (${size} of ${total} bytes)`);
@@ -332,12 +351,12 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
 }
 
 /** Resumable fallback: each 16 MB piece is its own Cache API entry. */
-async function downloadPieces(onProgress: (p: Progress) => void, signal: AbortSignal): Promise<void> {
+async function downloadPieces(onProgress: (p: Progress) => void, signal: AbortSignal, start = 0): Promise<void> {
   const total = LITE.sizeBytes;
   const n = Math.ceil(total / CHUNK);
   const cache = await caches.open(PIECES);
   let failures = 0;
-  for (let i = 0; i < n; ) {
+  for (let i = start; i < n; ) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
     if (await cache.match(pieceKey(i))) { i++; onProgress({ done: Math.min(i * CHUNK, total), total }); continue; }
     const from = i * CHUNK;
@@ -355,7 +374,7 @@ async function downloadPieces(onProgress: (p: Progress) => void, signal: AbortSi
       await sleep(1500 * failures);
     }
   }
-  localStorage.setItem(STORED_FLAG, 'pieces');
+  localStorage.setItem(STORED_FLAG, start > 0 ? 'hybrid' : 'pieces');
   onProgress({ done: total, total });
 }
 
