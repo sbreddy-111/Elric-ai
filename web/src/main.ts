@@ -40,10 +40,19 @@ function tex(m: string): string {
 /** Light, safe Markdown for model answers (escape first, then format). */
 function md(src: string): string {
   let s = src.replace(/\$\$([\s\S]*?)\$\$/g, (_, m) => `\u0001${tex(m).trim()}\u0002`).replace(/\$([^$\n]+?)\$/g, (_, m) => tex(m));
-  s = esc(s);
-  const out: string[] = []; let list = '';
-  const close = () => { if (list) { out.push(`</${list}>`); list = ''; } };
+  s = esc(s).replace(/(^\s*\|.*\|\s*)\n\s*\n(?=\s*\|)/gm, '$1\n').replace(/(^\s*\|.*\|\s*)\n\s*\n(?=\s*\|)/gm, '$1\n');
+  const out: string[] = []; let list = ''; let head = true;
+  const close = () => { if (list) { out.push(list === 'table' ? '</table></div>' : `</${list}>`); list = ''; } };
+  const fmt = (l: string) => l.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
   for (const raw of s.split('\n')) {
+    if (/^\s*\|.*\|\s*$/.test(raw)) {
+      const cells = raw.trim().slice(1, -1).split('|').map((c) => c.trim());
+      if (cells.every((c) => /^:?-{2,}:?$/.test(c))) continue;
+      if (list !== 'table') { close(); out.push('<div class="tw"><table>'); list = 'table'; head = true; }
+      const tag = head ? 'th' : 'td'; head = false;
+      out.push(`<tr>${cells.map((c) => `<${tag}>${fmt(c)}</${tag}>`).join('')}</tr>`);
+      continue;
+    }
     const line = raw.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, '$1<i>$2</i>').replace(/\u0001(.*?)\u0002/g, '<span class="eq">$1</span>');
     let m;
     if (/^\s*(\*{3,}|-{3,})\s*$/.test(raw)) { close(); out.push('<hr>'); }
