@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Elric AI mark: gold disc with an indigo "E". -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+  <group android:translateX="96" android:translateY="96">
+    <path
+        android:fillColor="#FFD4A64A"
+        android:pathData="M48,0A48,48 0,1 1,48 96A48,48 0,1 1,48 0Z" />
+    <path
+        android:fillColor="#FF0F0F12"
+        android:pathData="M30,24h38v10h-27v9h23v10h-23v9h27v10h-38z" />
+    <path
+        android:fillColor="#FF6C6CF0"
+        android:pathData="M64,43h8v10h-8z" />
+  </group>
+</vector>

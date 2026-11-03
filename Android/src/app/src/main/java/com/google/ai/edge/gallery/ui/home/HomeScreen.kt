@@ -548,8 +548,8 @@ fun HomeScreen(
 
 @Composable
 private fun AppTitle(enableAnimation: Boolean) {
-  val text1 = "Google"
-  val text2 = "AI Edge Gallery"
+  val text1 = stringResource(R.string.app_name_first_part)
+  val text2 = stringResource(R.string.app_name_second_part)
   val annotatedText = buildAnnotatedString {
     withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.onSurface)) { append(text1) }
     append(" ")
@@ -573,8 +573,6 @@ private fun AppTitle(enableAnimation: Boolean) {
 
 @Composable
 private fun IntroText(enableAnimation: Boolean) {
-  val litertUrl = "https://huggingface.co/litert-community"
-
   // Intro text animation:
   //
   // fade in + slide up.
@@ -589,24 +587,7 @@ private fun IntroText(enableAnimation: Boolean) {
       )
     }
 
-  val introText = buildAnnotatedString {
-    val gemma4Url = "https://ai.google.dev/gemma"
-    append("${stringResource(R.string.gemma4_intro_part_1)} ")
-    append(
-      buildTrackableUrlAnnotatedString(
-        url = litertUrl,
-        linkText = stringResource(R.string.litert_community_label),
-      )
-    )
-    append("${stringResource(R.string.gemma4_intro_part_2)} ")
-    append(
-      buildTrackableUrlAnnotatedString(
-        url = gemma4Url,
-        linkText = stringResource(R.string.gemma4_label),
-      )
-    )
-    append(".")
-  }
+  val introText = buildAnnotatedString { append(stringResource(R.string.gemma4_intro_part_1)) }
   Text(
     introText,
     style = MaterialTheme.typography.bodyMedium,

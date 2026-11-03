@@ -36,8 +36,8 @@ android {
     applicationId = "in.elricai.app"
     minSdk = 31
     targetSdk = 37
-    versionCode = 1
-    versionName = "0.1.0"
+    versionCode = 2
+    versionName = "0.2.0"
 
     // Needed for HuggingFace auth workflows.
     // Use the scheme of the "Redirect URLs" in HuggingFace app.
@@ -66,6 +66,8 @@ android {
     compose = true
     buildConfig = true
   }
+  // Only the Elric UI strings are translated to Hindi so far; the rest falls back to English.
+  lint { disable += "MissingTranslation" }
   packaging { jniLibs { pickFirsts.add("**/liblitertlm_jni.so") } }
 }
 

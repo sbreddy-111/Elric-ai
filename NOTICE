@@ -1,0 +1,14 @@
+Elric AI
+Copyright 2026 Elric
+
+This product is derived from Google AI Edge Gallery
+(https://github.com/google-ai-edge/gallery), Copyright 2025 Google LLC,
+licensed under the Apache License, Version 2.0. See LICENSE.
+
+Modifications by Elric include the Elric AI user interface, theme, branding,
+strings and default chat behaviour.
+
+On-device models downloaded by the app are provided under their own licenses
+(for example Apache-2.0 or the Gemma Terms of Use), shown to the user before
+download. Open-source libraries bundled in the app are listed under
+Settings > Open-source licenses.
