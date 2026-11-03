@@ -6,7 +6,8 @@ import * as V from './voice';
 import * as P from './photo';
 
 type Mode = 'study' | 'shopping' | 'general';
-let mode: Mode = 'study';
+const defaultMode = (): Mode => { const m = localStorage.getItem('elric.mode'); return m === 'shopping' || m === 'general' ? m : 'study'; };
+let mode: Mode = defaultMode();
 let short = localStorage.getItem('elric.length') !== 'long';
 /** A chat turn; photo (with its full image) lives only in memory, never in saved chats. */
 type Turn = E.Turn & { photo?: P.Photo };
@@ -119,6 +120,7 @@ const ic = {
 const svg = (p: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 
 function shell() {
+  closeDrawer();
   $('#app').innerHTML = `
   <header class="top">
     <button class="icon" id="menu" aria-label="${t('cdMenu')}">${svg(ic.menu)}</button>
@@ -137,7 +139,7 @@ function shell() {
     <button type="submit" class="send" id="send" aria-label="${busy ? t('cdStop') : t('cdSend')}">${svg(busy ? ic.stop : ic.send)}</button>
   </form>
   <div id="sheet"></div>`;
-  $('#menu').onclick = menuSheet;
+  $('#menu').onclick = openDrawer;
   $('#modebtn').onclick = modeSheet;
   $('#lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
   $('#newc').onclick = () => openChat(undefined);
@@ -150,6 +152,7 @@ function shell() {
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !matchMedia('(pointer:coarse)').matches) { e.preventDefault(); submit(); } };
   $('#form').onsubmit = (e) => { e.preventDefault(); submit(); };
   renderMain();
+  renderProfile();
 }
 
 function renderMain() {
@@ -643,7 +646,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.1';
+const APP_VERSION = '0.4.2';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
@@ -653,50 +656,200 @@ const LICENSES = [
   ['Vite (build tool)', 'MIT License', 'https://github.com/vitejs/vite/blob/main/LICENSE'],
 ];
 
-function menuSheet() {
-  const nav = (id: string, title: string, val = '') => `<button class="it" id="${id}"><span class="tl"><b>${title}</b></span>${val ? `<span class="val">${val}</span>` : ''}<i class="chev">›</i></button>`;
-  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
-  sheet(`<div class="brand"><img src="icons/mark.png" alt=""><div><b>Elric AI</b><span>AI you can rely on</span></div></div>
-    <div class="shd">${t('menuChats')}</div>
-    ${(() => { const cs = loadChats(); return cs.length ? `<div class="grp">${cs.slice(0, 8).map((c) => `<div class="chatrow ${c.id === chatId ? 'sel' : ''}"><button class="ct" data-c="${c.id}">${esc(c.title || '…')}</button><button class="cx" data-d="${c.id}" aria-label="${t('deleteChat')}">×</button></div>`).join('')}</div>` : `<p class="foot">${t('noChats')}</p>`; })()}
-    <div class="shd">${t('menuSettings')}</div>
-    <div class="grp">
-    ${nav('m-me', t('menuMe'), esc(getProfile().name) || t('menuMeHint'))}
-    ${nav('m-models', t('menuModels'), t(E.MODEL_NAME_KEY as keyof Strings))}
-    <button class="it" id="m-online" role="switch" aria-checked="${O.isOn()}"><span class="tl"><b>${t('onlineAnswers')}</b><small>${t('onlineHow')}</small></span><i class="sw ${O.isOn() ? 'on' : ''}"></i></button>
-    ${nav('m-lang', t('menuLanguage'), getLang() === 'hi' ? 'हिन्दी' : 'English')}
-    <button class="it" id="m-talk"><span class="tl"><b>${t('talk')}</b><small>${t('talkDesc')}</small></span><i class="chev">›</i></button>
-    </div>
-    <div class="grp">
-    ${nav('m-priv', t('menuPrivacy'))}
-    ${nav('m-about', t('menuAbout'))}
-    ${nav('m-lic', t('menuLicenses'))}
-    </div>
-    <p class="foot c">${t(ios ? 'installTip' : 'installTipPc')}<br>Version ${APP_VERSION}</p>`);
-  $('#m-models').onclick = () => sheet(`<h3>${t('menuModels')}</h3><div class="status-slot"></div><div class="box"><div class="mh"><b>${t('modelStandard')}</b><span>${t('comingSoon')}</span></div><p class="d">${t('modelStandardDesc')}</p></div>`) ; 
-  $('#m-models').addEventListener('click', () => renderStatus());
-  document.querySelectorAll<HTMLButtonElement>('[data-c]').forEach((b) => (b.onclick = () => openChat(loadChats().find((c) => c.id === b.dataset.c))));
-  document.querySelectorAll<HTMLButtonElement>('[data-d]').forEach((b) => (b.onclick = () => {
-    const id = b.dataset.d!; saveChats(loadChats().filter((c) => c.id !== id));
-    if (id === chatId) openChat(undefined); else menuSheet();
-  }));
-  $('#m-me').onclick = () => {
-    const pr = getProfile();
-    sheet(`<h3>${t('menuMe')}</h3><p>${t('meIntro')}</p>
-      <label class="fl">${t('meName')}<input id="pn" maxlength="40" value="${esc(pr.name)}"></label>
-      <button class="primary" id="psave">${t('save')}</button>`);
-    $('#psave').onclick = () => {
-      localStorage.setItem('elric.profile', JSON.stringify({ name: $<HTMLInputElement>('#pn').value.trim(), study: '' }));
-      shell();
-    };
-  };
-  $('#m-online').onclick = toggleOnline;
-  $('#m-talk').onclick = startTalk;
-  $('#m-lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
-  $('#m-priv').onclick = () => sheet(`<h3>${t('menuPrivacy')}</h3><p>${t('privacyBody')}</p>${LEGAL_LINKS()}`);
-  $('#m-about').onclick = () => sheet(`<h3>${t('menuAbout')}</h3><p>${t('aboutBody')}</p>${LEGAL_LINKS()}`);
-  $('#m-lic').onclick = () => sheet(`<h3>${t('menuLicenses')}</h3><p>${t('licensesIntro')}</p>${LICENSES.map(([n, l, u]) => `<p class="lic"><b>${n}</b><br><a href="${u}" target="_blank" rel="noopener">${l}</a></p>`).join('')}`);
+// ---------------------------------------------------------------- drawer + profile
+
+/** Line icons for the drawer and profile (24px grid, stroke 1.75). */
+const li = {
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  talk: '<path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/>',
+  cam: '<path d="M4 8.5h3l1.8-2.5h6.4L17 8.5h3V19H4z"/><circle cx="12" cy="13.3" r="3.3"/>',
+  user: '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c1.2-3.6 4-5.4 7.5-5.4s6.3 1.8 7.5 5.4"/>',
+  len: '<path d="M4 6h16M4 10h16M4 14h10M4 18h6"/>',
+  globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.6 3.6 5.4 3.6 8.5s-1 5.9-3.6 8.5c-2.6-2.6-3.6-5.4-3.6-8.5s1-5.9 3.6-8.5z"/>',
+  modes: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
+  cloud: '<path d="M7 18h10a4 4 0 0 0 .5-8 6 6 0 0 0-11.4 1.6A3.3 3.3 0 0 0 7 18z"/>',
+  chip: '<rect x="6" y="6" width="12" height="12" rx="2.5"/><path d="M9.5 9.5h5v5h-5zM9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
+  badge: '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.3 4.6-4.8"/>',
+  trash: '<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"/>',
+  shield: '<path d="M12 3.5l7 2.8v5.4c0 4.3-2.9 7.6-7 8.8-4.1-1.2-7-4.5-7-8.8V6.3z"/>',
+  doc: '<path d="M7 3.5h7l4 4V20.5H7z"/><path d="M14 3.5v4h4M9.5 12h6M9.5 15.5h6"/>',
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8v.2"/>',
+  code: '<path d="M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5l-3 14"/>',
+  tag: '<path d="M4 4h7.5l8.5 8.5-7.5 7.5L4 11.5z"/><circle cx="8.5" cy="8.5" r="1.4"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  more: '<path d="M6 12h.01M12 12h.01M18 12h.01"/>',
+};
+const lsvg = (p: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+const initials = (name: string) => name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => Array.from(w)[0]).join('').toUpperCase();
+const avatar = (cls: string) => { const n = initials(getProfile().name); return `<span class="${cls}">${n ? esc(n) : lsvg(li.user)}</span>`; };
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
+
+let drawerQuery = '';
+function closeDrawer() {
+  const d = document.getElementById('drawer');
+  document.body.classList.remove('dw-on');
+  if (!d) return;
+  d.id = ''; d.classList.remove('open');
+  setTimeout(() => d.remove(), 260);
 }
+function openDrawer() {
+  document.getElementById('drawer')?.remove();
+  drawerQuery = '';
+  const d = document.createElement('div');
+  d.id = 'drawer'; d.className = 'dw';
+  d.innerHTML = `<div class="dw-scrim"></div><aside class="dw-p" role="dialog" aria-modal="true" aria-label="Elric AI">
+    <div class="dw-h"><img src="icons/mark.png" alt=""><b>Elric AI</b><button class="dw-ib" id="d-search" aria-label="${t('searchChats')}">${lsvg(li.search)}</button></div>
+    <div class="dw-q" hidden><input id="d-q" type="search" placeholder="${t('searchChats')}" autocomplete="off"></div>
+    <div class="dw-sc">
+      <nav class="dw-nav">
+        <button class="dw-it" id="m-talk">${lsvg(li.talk)}<span>${t('talk')}</span></button>
+        <button class="dw-it" id="d-photo">${lsvg(li.cam)}<span>${t('photoQuestion')}</span></button>
+      </nav>
+      <div class="dw-seg" role="radiogroup" aria-label="${t('modeTitle')}">${(['study', 'shopping', 'general'] as Mode[]).map((m) => `<button role="radio" aria-checked="${m === mode}" class="${m === mode ? 'on' : ''}" data-dm="${m}">${t(modeKey[m])}</button>`).join('')}</div>
+      <div class="dw-sh">${t('recents')}</div>
+      <div class="dw-rc" id="d-rc"></div>
+    </div>
+    <div class="dw-f"><button class="dw-new" id="d-newpill">${lsvg(li.edit)}<span>${t('cdNewChat')}</span></button><button class="dw-me" id="d-me" aria-label="${t('profile')}">${avatar('av')}</button></div>
+  </aside>`;
+  document.body.appendChild(d);
+  renderRecents();
+  const q = d.querySelector<HTMLInputElement>('#d-q')!;
+  d.querySelector<HTMLElement>('.dw-scrim')!.onclick = closeDrawer;
+  d.querySelector<HTMLElement>('#d-search')!.onclick = () => {
+    const box = d.querySelector<HTMLElement>('.dw-q')!;
+    box.hidden = !box.hidden;
+    if (box.hidden) { q.value = ''; drawerQuery = ''; renderRecents(); } else q.focus();
+  };
+  q.oninput = () => { drawerQuery = q.value.trim().toLowerCase(); renderRecents(); };
+  const fresh = () => { closeDrawer(); openChat(undefined); };
+  d.querySelector<HTMLElement>('#d-newpill')!.onclick = fresh;
+  d.querySelector<HTMLElement>('#m-talk')!.onclick = () => { closeDrawer(); startTalk(); };
+  d.querySelector<HTMLElement>('#d-photo')!.onclick = () => { closeDrawer(); pickPhoto(); };
+  d.querySelector<HTMLElement>('#d-me')!.onclick = () => { closeDrawer(); openProfile(); };
+  d.querySelectorAll<HTMLButtonElement>('[data-dm]').forEach((b) => (b.onclick = () => { mode = b.dataset.dm as Mode; closeDrawer(); shell(); }));
+  // Swipe left to close.
+  const p = d.querySelector<HTMLElement>('.dw-p')!;
+  let x0 = 0, y0 = 0, dx = 0, drag = false;
+  p.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0; drag = false; }, { passive: true });
+  p.addEventListener('touchmove', (e) => {
+    const mx = e.touches[0].clientX - x0, my = e.touches[0].clientY - y0;
+    if (!drag && Math.abs(mx) > 10 && Math.abs(mx) > Math.abs(my)) drag = true;
+    if (drag) { dx = Math.min(0, mx); p.style.transition = 'none'; p.style.transform = `translateX(${dx}px)`; }
+  }, { passive: true });
+  p.addEventListener('touchend', () => {
+    if (!drag) return;
+    p.style.transition = ''; p.style.transform = '';
+    if (dx < -60) closeDrawer();
+  });
+  void d.offsetWidth;
+  d.classList.add('open');
+  document.body.classList.add('dw-on');
+}
+function renderRecents() {
+  const box = document.getElementById('d-rc');
+  if (!box) return;
+  const all = loadChats();
+  const cs = drawerQuery ? all.filter((c) => (c.title || '').toLowerCase().includes(drawerQuery)) : all;
+  box.innerHTML = cs.length
+    ? cs.map((c) => `<div class="rc ${c.id === chatId ? 'sel' : ''}"><button class="ct" data-c="${c.id}">${esc(c.title || '…')}</button><button class="cx" data-d="${c.id}" aria-label="${t('deleteChat')}">${lsvg(li.x)}</button></div>`).join('')
+    : `<p class="dw-empty">${t(drawerQuery ? 'noMatches' : 'noChats')}</p>`;
+  box.querySelectorAll<HTMLButtonElement>('[data-c]').forEach((b) => (b.onclick = () => { closeDrawer(); openChat(loadChats().find((c) => c.id === b.dataset.c)); }));
+  box.querySelectorAll<HTMLButtonElement>('[data-d]').forEach((b) => (b.onclick = () => {
+    const id = b.dataset.d!; saveChats(loadChats().filter((c) => c.id !== id));
+    if (id === chatId) { closeDrawer(); openChat(undefined); } else renderRecents();
+  }));
+}
+
+/** Small picker sheet: one choice from a short list. */
+function choose<T extends string>(title: string, opts: [T, string, string?][], cur: T, pick: (v: T) => void) {
+  sheet(`<div class="shd">${title}</div><div class="grp">${opts.map(([v, l, d]) => `<button class="it ${v === cur ? 'sel' : ''}" data-ch="${v}"><span class="tl"><b>${l}</b>${d ? `<small>${d}</small>` : ''}</span>${v === cur ? '<i class="ck">✓</i>' : ''}</button>`).join('')}</div>`);
+  document.querySelectorAll<HTMLButtonElement>('[data-ch]').forEach((b) => (b.onclick = () => { pick(b.dataset.ch as T); shell(); }));
+}
+function editName() {
+  const pr = getProfile();
+  sheet(`<h3>${t('menuMe')}</h3><p>${t('meIntro')}</p>
+    <label class="fl">${t('meName')}<input id="pn" maxlength="40" value="${esc(pr.name)}"></label>
+    <button class="primary" id="psave">${t('save')}</button>`);
+  $('#psave').onclick = () => {
+    localStorage.setItem('elric.profile', JSON.stringify({ name: $<HTMLInputElement>('#pn').value.trim(), study: '' }));
+    shell();
+  };
+}
+
+function closeProfile() {
+  const p = document.getElementById('prof');
+  if (!p) return;
+  p.id = ''; p.classList.remove('open');
+  setTimeout(() => p.remove(), 260);
+}
+function openProfile() {
+  document.getElementById('prof')?.remove();
+  const p = document.createElement('div');
+  p.id = 'prof'; p.className = 'pf'; p.setAttribute('role', 'dialog'); p.setAttribute('aria-modal', 'true'); p.setAttribute('aria-label', t('profile'));
+  document.body.appendChild(p);
+  renderProfile();
+  void p.offsetWidth;
+  p.classList.add('open');
+}
+function renderProfile() {
+  const p = document.getElementById('prof');
+  if (!p) return;
+  const scroll = p.querySelector('.pf-in')?.scrollTop || 0;
+  const name = getProfile().name;
+  const row = (id: string, icon: string, label: string, val = '', chev = true) =>
+    `<button class="pr" id="${id}">${lsvg(icon)}<span class="pl">${label}</span>${val ? `<span class="pv">${val}</span>` : ''}${chev ? '<i class="chev">›</i>' : ''}</button>`;
+  const link = (href: string, icon: string, label: string) => `<a class="pr" href="${href}" target="_blank" rel="noopener">${lsvg(icon)}<span class="pl">${label}</span><i class="chev">›</i></a>`;
+  const grp = (title: string, rows: string) => `<div class="pf-sh">${title}</div><div class="pf-g">${rows}</div>`;
+  p.innerHTML = `<div class="pf-in">
+    <button class="pf-x" id="p-close" aria-label="${t('close')}">${lsvg(li.x)}</button>
+    <div class="pf-top"><button class="pf-av" id="p-edit" aria-label="${t('editName')}">${avatar('av big')}<span class="pf-pen">${lsvg(li.edit)}</span></button>
+      <div class="pf-name">${name ? esc(name) : `<span class="mu">${t('menuMeHint')}</span>`}</div></div>
+    ${grp(t('secPersonalise'),
+      row('m-me', li.user, t('menuMe'), esc(name) || t('menuMeHint'))
+      + row('p-len', li.len, t('lenTitle'), t(short ? 'lenShort' : 'lenLong'))
+      + row('m-lang', li.globe, t('menuLanguage'), getLang() === 'hi' ? 'हिन्दी' : 'English')
+      + row('p-mode', li.modes, t('defaultMode'), t(modeKey[defaultMode()])))}
+    ${grp(t('secAI'),
+      `<button class="pr" id="m-online" role="switch" aria-checked="${O.isOn()}">${lsvg(li.cloud)}<span class="pl">${t('onlineAnswers')}<small>${t('onlineHow')}</small></span><i class="sw ${O.isOn() ? 'on' : ''}"></i></button>`
+      + row('m-models', li.chip, t('menuModels'), t(E.MODEL_NAME_KEY as keyof Strings)))}
+    ${grp(t('secPrivacy'),
+      row('p-age', li.badge, t('age'), t(O.age18() ? 'ageYes' : 'ageNo'), false)
+      + row('p-clear', li.trash, t('clearAll'), '', false)
+      + row('m-priv', li.shield, t('menuPrivacy'))
+      + link('terms.html', li.doc, t('linkTerms')))}
+    ${grp(t('secAbout'),
+      row('m-about', li.info, t('menuAbout'))
+      + row('m-lic', li.code, t('menuLicenses'))
+      + row('p-ver', li.tag, t('version'), APP_VERSION, false))}
+    <p class="pf-foot">${t(isIOS() ? 'installTip' : 'installTipPc')}<br>Elric AI · Version ${APP_VERSION}</p>
+  </div>`;
+  p.querySelector('.pf-in')!.scrollTop = scroll;
+  const on = (id: string, f: () => void) => { const b = p.querySelector<HTMLElement>('#' + id); if (b) b.onclick = f; };
+  on('p-close', closeProfile);
+  on('p-edit', editName);
+  on('m-me', editName);
+  on('p-len', () => choose(t('lenTitle'), [['short', t('lenShort'), t('lenShortDesc')], ['long', t('lenLong'), t('lenLongDesc')]], short ? 'short' : 'long', (v) => { short = v === 'short'; localStorage.setItem('elric.length', v); }));
+  on('m-lang', () => choose(t('menuLanguage'), [['en', 'English'], ['hi', 'हिन्दी']], getLang(), (v) => setLang(v)));
+  on('p-mode', () => {
+    const desc: Record<Mode, keyof Strings> = { study: 'modeStudyDesc', shopping: 'modeShoppingDesc', general: 'modeGeneralDesc' };
+    choose(t('defaultMode'), (['study', 'shopping', 'general'] as Mode[]).map((m) => [m, t(modeKey[m]), t(desc[m])] as [Mode, string, string]), defaultMode(), (v) => { localStorage.setItem('elric.mode', v); if (!turns.length) mode = v; });
+  });
+  on('m-online', toggleOnline);
+  on('m-models', () => { sheet(`<h3>${t('menuModels')}</h3><div class="status-slot"></div><div class="box"><div class="mh"><b>${t('modelStandard')}</b><span>${t('comingSoon')}</span></div><p class="d">${t('modelStandardDesc')}</p></div>`); renderStatus(); });
+  on('p-clear', () => {
+    if (!loadChats().length || !confirm(t('clearAllConfirm'))) return;
+    localStorage.removeItem(CHATS_KEY);
+    if (chatId) openChat(undefined); else renderProfile();
+  });
+  on('m-priv', () => sheet(`<h3>${t('menuPrivacy')}</h3><p>${t('privacyBody')}</p>${LEGAL_LINKS()}`));
+  on('m-about', () => sheet(`<h3>${t('menuAbout')}</h3><p>${t('aboutBody')}</p>${LEGAL_LINKS()}`));
+  on('m-lic', () => sheet(`<h3>${t('menuLicenses')}</h3><p>${t('licensesIntro')}</p>${LICENSES.map(([n, l, u]) => `<p class="lic"><b>${n}</b><br><a href="${u}" target="_blank" rel="noopener">${l}</a></p>`).join('')}`));
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || document.querySelector('#sheet .panel')) return;
+  if (document.getElementById('drawer')) closeDrawer(); else closeProfile();
+});
 
 setLang(getLang());
 shell();
