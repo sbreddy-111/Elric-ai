@@ -320,6 +320,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
+const APP_VERSION = '0.3.1';
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
   ['Elric Basic model weights (Gemma 3 1B, iPhone)', 'Gemma Terms of Use', 'https://ai.google.dev/gemma/terms'],
@@ -338,7 +339,7 @@ function menuSheet() {
     <button class="row" id="m-priv"><b>${t('menuPrivacy')}</b></button>
     <button class="row" id="m-about"><b>${t('menuAbout')}</b></button>
     <button class="row" id="m-lic"><b>${t('menuLicenses')}</b></button>
-    <p class="tip">${t('installTip')}</p>`);
+    <p class="tip">${t('installTip')}</p><p class="tip pad">Version ${APP_VERSION}</p>`);
   $('#m-models').onclick = () => sheet(`<h3>${t('menuModels')}</h3><div class="status-slot"></div><div class="box"><div class="mh"><b>${t('modelStandard')}</b><span>${t('comingSoon')}</span></div><p class="d">${t('modelStandardDesc')}</p></div>`) ; 
   $('#m-models').addEventListener('click', () => renderStatus());
   document.querySelectorAll<HTMLButtonElement>('[data-c]').forEach((b) => (b.onclick = () => openChat(loadChats().find((c) => c.id === b.dataset.c))));
@@ -355,4 +356,8 @@ function menuSheet() {
 setLang(getLang());
 shell();
 E.checkDevice().then((r) => { device = r; renderStatus(); });
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  const had = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('./sw.js').then((r) => r.update()).catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !busy && modelState !== 'downloading' && modelState !== 'loading') location.reload(); });
+}
