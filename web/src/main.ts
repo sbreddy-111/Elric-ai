@@ -77,7 +77,7 @@ function renderMain() {
     renderStatus();
     return;
   }
-  m.innerHTML = `<div class="chat">${turns.map((x) => `<div class="msg ${x.role}">${esc(x.text) || '<span class="dots">•••</span>'}</div>`).join('')}
+  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${esc(x.text) || '<span class="dots">•••</span>'}</div>`).join('')}
     ${mode === 'shopping' ? `<div class="note">${t('shoppingNote')}</div>` : ''}<div id="status"></div></div>`;
   renderStatus();
   m.scrollTop = m.scrollHeight;
@@ -96,8 +96,9 @@ function reasonText(r: E.Reason): string {
 
 /** Model / device card shown on home and in chat when the model isn't ready. */
 function renderStatus() {
-  const el = document.getElementById('status');
-  if (!el) return;
+  const els = Array.from(document.querySelectorAll<HTMLElement>('#status, .status-slot'));
+  if (!els.length) return;
+  const el = { set innerHTML(h: string) { els.forEach((e) => (e.innerHTML = h)); } };
   if (modelState === 'ready') { el.innerHTML = turns.length ? '' : `<div class="ok">● ${t('modelLite')} · ${t('loaded')}</div>`; return; }
   if (!device) { el.innerHTML = `<div class="box muted">${t('checking')}</div>`; return; }
   if (!device.ok) { el.innerHTML = `<div class="box warn"><h3>${t('cantRunTitle')}</h3><p>${reasonText(device.hard!)}</p></div>`; return; }
@@ -116,7 +117,7 @@ function renderStatus() {
     body = `<h3>${t('cantRunTitle')}</h3><p class="w">${esc(failMsg)}</p><button class="primary" id="rt">${partial > 0 ? t('resume') : t('retry')}</button>`;
   }
   el.innerHTML = `<div class="box"><div class="mh"><b>${t('modelLite')}</b><span>${SIZE}</span></div><p class="d">${t('modelLiteDesc')}</p>${body}</div>`;
-  const on = (id: string, f: () => void) => { const b = document.getElementById(id); if (b) b.onclick = f; };
+  const on = (id: string, f: () => void) => { document.querySelectorAll<HTMLElement>(`[id="${id}"]`).forEach((b) => (b.onclick = f)); };
   on('dl', startDownload);
   on('cx', () => abort?.abort());
   on('ld', startLoad);
@@ -166,6 +167,8 @@ async function startLoad() {
   try {
     await E.loadModel((p) => { progress = p.done / p.total; renderStatus(); });
     modelState = 'ready';
+    const lastTurn = turns[turns.length - 1];
+    if (lastTurn?.role === 'user') { const q = turns.pop()!; setTimeout(() => send(q.text)); }
   } catch (e: any) {
     modelState = 'failed';
     failMsg = reasonText({ kind: 'loadFailed', err: String(e?.message || e) });
@@ -201,7 +204,7 @@ async function send(text: string) {
   try {
     reply.text = await E.generate(system(), turns.slice(0, -1), (txt) => {
       reply.text = txt;
-      const last = document.querySelector('.msg.model:last-of-type');
+      const last = document.getElementById('last');
       if (last) last.textContent = txt; else renderMain();
       const m = $('#main'); m.scrollTop = m.scrollHeight;
     });
@@ -243,7 +246,7 @@ function menuSheet() {
     <button class="row" id="m-about"><b>${t('menuAbout')}</b></button>
     <button class="row" id="m-lic"><b>${t('menuLicenses')}</b></button>
     <p class="tip">${t('installTip')}</p>`);
-  $('#m-models').onclick = () => sheet(`<h3>${t('menuModels')}</h3><div id="status"></div><div class="box"><div class="mh"><b>${t('modelStandard')}</b><span>${t('comingSoon')}</span></div><p class="d">${t('modelStandardDesc')}</p></div>`) ; 
+  $('#m-models').onclick = () => sheet(`<h3>${t('menuModels')}</h3><div class="status-slot"></div><div class="box"><div class="mh"><b>${t('modelStandard')}</b><span>${t('comingSoon')}</span></div><p class="d">${t('modelStandardDesc')}</p></div>`) ; 
   $('#m-models').addEventListener('click', () => renderStatus());
   $('#m-lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
   $('#m-priv').onclick = () => sheet(`<h3>${t('menuPrivacy')}</h3><p>${t('privacyBody')}</p>`);

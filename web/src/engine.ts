@@ -182,19 +182,29 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
     const endByte = Math.min(done + CHUNK, total) - 1;
     try {
-      const res = await fetch(LITE.url, { signal, cache: 'no-store', headers: { Range: `bytes=${done}-${endByte}` } });
-      if (res.status !== 206) throw new Error(`Download failed (HTTP ${res.status})`);
-      const buf = new Uint8Array(await res.arrayBuffer());
+      const piece = new AbortController();
+      const onAbort = () => piece.abort();
+      signal.addEventListener('abort', onAbort, { once: true });
+      const timer = setTimeout(() => piece.abort(), 90_000); // stalled (e.g. tab was frozen): retry this piece
+      let buf: Uint8Array;
+      try {
+        const res = await fetch(LITE.url, { signal: piece.signal, cache: 'no-store', headers: { Range: `bytes=${done}-${endByte}` } });
+        if (res.status !== 206) throw new Error(`Download failed (HTTP ${res.status})`);
+        buf = new Uint8Array(await res.arrayBuffer());
+      } finally {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+      }
       if (buf.byteLength !== endByte - done + 1) throw new Error('Short read');
       const w: FileSystemWritableFileStream = await (part as any).createWritable({ keepExistingData: true });
       await w.seek(done);
-      await w.write(buf);
+      await w.write(buf as any);
       await w.close(); // commits this piece to disk
       done += buf.byteLength;
       failures = 0;
       onProgress({ done, total });
     } catch (e: any) {
-      if (e?.name === 'AbortError' || signal.aborted) throw e;
+      if (signal.aborted) throw e;
       // Network blip or the tab was paused: retry this piece a few times before giving up.
       if (++failures > 5) throw new Error(`Download paused at ${Math.floor((done / total) * 100)}%. Tap Resume to continue.`);
       await sleep(1500 * failures);
