@@ -62,8 +62,9 @@ export async function checkDevice(): Promise<DeviceReport> {
       if (est?.quota) {
         report.quota = est.quota;
         const free = est.quota - (est.usage ?? 0);
-        if (free < LITE.sizeBytes * 1.05) {
-          report.soft.push({ kind: 'storage', need: LITE.sizeBytes, have: free });
+        const need = LITE.sizeBytes - (await partialBytes());
+        if (free < need * 1.05) {
+          report.soft.push({ kind: 'storage', need, have: free });
         }
       }
     } catch {
@@ -104,6 +105,27 @@ async function readStored(): Promise<{ stream: ReadableStream<Uint8Array>; size:
         /* fall through */
       }
     }
+  } else if (where === 'pieces') {
+    const cache = await caches.open(PIECES);
+    const n = Math.ceil(LITE.sizeBytes / CHUNK);
+    let i = 0;
+    let cur: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    const stream = new ReadableStream<Uint8Array>({
+      async pull(ctrl) {
+        for (;;) {
+          if (!cur) {
+            if (i >= n) { ctrl.close(); return; }
+            const r = await cache.match(pieceKey(i++));
+            if (!r?.body) { ctrl.error(new Error('Model file is damaged. Please remove and download again.')); return; }
+            cur = r.body.getReader();
+          }
+          const { done, value } = await cur.read();
+          if (done) { cur = null; continue; }
+          ctrl.enqueue(value); return;
+        }
+      },
+    });
+    return { stream, size: LITE.sizeBytes };
   } else if (where === 'cache') {
     const cache = await caches.open('elric-models');
     const res = await cache.match(LITE.fileName);
@@ -128,6 +150,7 @@ export async function removeStored(): Promise<void> {
   }
   try {
     await caches.delete('elric-models');
+    await caches.delete(PIECES);
   } catch {
     /* ignore */
   }
@@ -140,15 +163,51 @@ export interface Progress {
 
 const PART_NAME = () => LITE.fileName + '.part';
 const CHUNK = 16 * 1024 * 1024; // 16 MB pieces, each saved to disk as it lands
+const PIECES = 'elric-model-pieces';
+const pieceKey = (i: number) => `/elric-piece/${LITE.fileName}/${i}`;
+
+/** Bytes saved so far in the Cache API piece store (browsers without OPFS writable files, e.g. older Safari). */
+async function piecesBytes(): Promise<number> {
+  try {
+    if (!(await caches.has(PIECES))) return 0;
+    const cache = await caches.open(PIECES);
+    const n = Math.ceil(LITE.sizeBytes / CHUNK);
+    let i = 0;
+    while (i < n && (await cache.match(pieceKey(i)))) i++;
+    return Math.min(i * CHUNK, LITE.sizeBytes);
+  } catch {
+    return 0;
+  }
+}
 
 /** Bytes already saved from an earlier, unfinished download (0 if none). */
 export async function partialBytes(): Promise<number> {
+  if (isStored()) return 0;
   const root = await opfsRoot();
-  if (!root) return 0;
+  let opfs = 0;
   try {
-    return (await (await root.getFileHandle(PART_NAME())).getFile()).size;
+    if (root) opfs = (await (await root.getFileHandle(PART_NAME())).getFile()).size;
   } catch {
-    return 0;
+    opfs = 0;
+  }
+  return opfs || (await piecesBytes());
+}
+
+/** Fetches one byte range, with a stall timeout so a frozen request is retried instead of hanging. */
+async function fetchRange(from: number, to: number, signal: AbortSignal): Promise<Uint8Array> {
+  const piece = new AbortController();
+  const onAbort = () => piece.abort();
+  signal.addEventListener('abort', onAbort, { once: true });
+  const timer = setTimeout(() => piece.abort(), 90_000);
+  try {
+    const res = await fetch(LITE.url, { signal: piece.signal, cache: 'no-store', headers: { Range: `bytes=${from}-${to}` } });
+    if (res.status !== 206) throw new Error(`Download failed (HTTP ${res.status})`);
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (buf.byteLength !== to - from + 1) throw new Error('Short read');
+    return buf;
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', onAbort);
   }
 }
 
@@ -168,7 +227,7 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
   const total = LITE.sizeBytes;
   const root = await opfsRoot();
   const canResume = !!root && typeof (FileSystemFileHandle.prototype as any).createWritable === 'function';
-  if (!canResume) return downloadWhole(onProgress, signal);
+  if (!canResume) return downloadPieces(onProgress, signal);
 
   const part = await root!.getFileHandle(PART_NAME(), { create: true });
   let done = (await part.getFile()).size;
@@ -182,20 +241,7 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
     const endByte = Math.min(done + CHUNK, total) - 1;
     try {
-      const piece = new AbortController();
-      const onAbort = () => piece.abort();
-      signal.addEventListener('abort', onAbort, { once: true });
-      const timer = setTimeout(() => piece.abort(), 90_000); // stalled (e.g. tab was frozen): retry this piece
-      let buf: Uint8Array;
-      try {
-        const res = await fetch(LITE.url, { signal: piece.signal, cache: 'no-store', headers: { Range: `bytes=${done}-${endByte}` } });
-        if (res.status !== 206) throw new Error(`Download failed (HTTP ${res.status})`);
-        buf = new Uint8Array(await res.arrayBuffer());
-      } finally {
-        clearTimeout(timer);
-        signal.removeEventListener('abort', onAbort);
-      }
-      if (buf.byteLength !== endByte - done + 1) throw new Error('Short read');
+      const buf = await fetchRange(done, endByte, signal);
       const w: FileSystemWritableFileStream = await (part as any).createWritable({ keepExistingData: true });
       await w.seek(done);
       await w.write(buf as any);
@@ -205,6 +251,7 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
       onProgress({ done, total });
     } catch (e: any) {
       if (signal.aborted) throw e;
+      if (e?.name === 'QuotaExceededError') throw new Error('Not enough free space on this device for Elric Lite.');
       // Network blip or the tab was paused: retry this piece a few times before giving up.
       if (++failures > 5) throw new Error(`Download paused at ${Math.floor((done / total) * 100)}%. Tap Resume to continue.`);
       await sleep(1500 * failures);
@@ -224,6 +271,34 @@ export async function downloadModel(onProgress: (p: Progress) => void, signal: A
   const size = (await (await root!.getFileHandle(LITE.fileName)).getFile()).size;
   if (size !== total) throw new Error(`Incomplete download (${size} of ${total} bytes)`);
   localStorage.setItem(STORED_FLAG, 'opfs');
+  onProgress({ done: total, total });
+}
+
+/** Resumable fallback: each 16 MB piece is its own Cache API entry. */
+async function downloadPieces(onProgress: (p: Progress) => void, signal: AbortSignal): Promise<void> {
+  const total = LITE.sizeBytes;
+  const n = Math.ceil(total / CHUNK);
+  const cache = await caches.open(PIECES);
+  let failures = 0;
+  for (let i = 0; i < n; ) {
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (await cache.match(pieceKey(i))) { i++; onProgress({ done: Math.min(i * CHUNK, total), total }); continue; }
+    const from = i * CHUNK;
+    const to = Math.min(from + CHUNK, total) - 1;
+    try {
+      const buf = await fetchRange(from, to, signal);
+      await cache.put(pieceKey(i), new Response(buf as any, { headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(buf.byteLength) } }));
+      failures = 0;
+      i++;
+      onProgress({ done: to + 1, total });
+    } catch (e: any) {
+      if (signal.aborted) throw e;
+      if (e?.name === 'QuotaExceededError') throw new Error('Not enough free space on this device for Elric Lite.');
+      if (++failures > 5) throw new Error(`Download paused at ${Math.floor((from / total) * 100)}%. Tap Resume to continue.`);
+      await sleep(1500 * failures);
+    }
+  }
+  localStorage.setItem(STORED_FLAG, 'pieces');
   onProgress({ done: total, total });
 }
 
