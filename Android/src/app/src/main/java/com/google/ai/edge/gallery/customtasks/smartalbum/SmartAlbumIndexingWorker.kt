@@ -16,22 +16,15 @@
 
 package com.google.ai.edge.gallery.customtasks.smartalbum
 
-import android.R as AndroidR
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.Context
-import android.content.pm.ServiceInfo
 import android.os.Process
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
-import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
-import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.common.ImageUtils
 import com.google.ai.edge.gallery.data.Accelerator
 import com.google.ai.edge.gallery.services.photolibrary.DefaultPhotoLibraryService
@@ -53,8 +46,8 @@ data class IndexingProgressUpdate(
 )
 
 /**
- * Background [CoroutineWorker] that executes photo indexing in a foreground service via
- * [WorkManager].
+ * Background [CoroutineWorker] that executes photo indexing via [WorkManager]. It doesn't run as
+ * a foreground service: progress is shown in the app.
  */
 class SmartAlbumIndexingWorker
 @JvmOverloads
@@ -63,28 +56,6 @@ constructor(
   params: WorkerParameters,
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : CoroutineWorker(context, params) {
-
-  private val notificationManager =
-    context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-  private val notificationId: Int = params.id.hashCode()
-
-  init {
-    ensureNotificationChannels()
-  }
-
-  private fun ensureNotificationChannels() {
-    val channelName = applicationContext.getString(R.string.smartalbum_notification_channel_name)
-    val channelDesc = applicationContext.getString(R.string.smartalbum_notification_channel_desc)
-    val foregroundChannel =
-      NotificationChannel(
-          FOREGROUND_NOTIFICATION_CHANNEL_ID,
-          channelName,
-          NotificationManager.IMPORTANCE_LOW,
-        )
-        .apply { description = channelDesc }
-    notificationManager.createNotificationChannel(foregroundChannel)
-  }
 
   override suspend fun doWork(): Result =
     withContext(ioDispatcher) {
@@ -224,13 +195,6 @@ constructor(
         PROGRESS_KEY_RECENT_IDS to recentIds.toTypedArray(),
       )
     )
-    safeSetForeground(
-      createForegroundInfo(
-        processedCount = processedCount,
-        totalCount = totalCount,
-        isInitializing = true,
-      )
-    )
 
     embedder.initialize()
 
@@ -249,13 +213,6 @@ constructor(
         PROGRESS_KEY_TOTAL to totalCount,
         PROGRESS_KEY_IS_INITIALIZING to false,
         PROGRESS_KEY_RECENT_IDS to recentIds.toTypedArray(),
-      )
-    )
-    safeSetForeground(
-      createForegroundInfo(
-        processedCount = processedCount,
-        totalCount = totalCount,
-        isInitializing = false,
       )
     )
 
@@ -327,9 +284,6 @@ constructor(
             PROGRESS_KEY_RECENT_IDS to recentIds.toTypedArray(),
           )
         )
-        safeSetForeground(
-          createForegroundInfo(processedCount = processedCount, totalCount = totalCount)
-        )
       } catch (e: Exception) {
         if (e is CancellationException) throw e
         Log.w(TAG, "*** Failed to index user photo $id: ${e.message}", e)
@@ -387,13 +341,6 @@ constructor(
         PROGRESS_KEY_RECENT_IDS to recentIds.toTypedArray(),
       )
     )
-    safeSetForeground(
-      createForegroundInfo(
-        processedCount = processedCount,
-        totalCount = totalCount,
-        isInitializing = true,
-      )
-    )
 
     embedder.initialize()
 
@@ -412,13 +359,6 @@ constructor(
         PROGRESS_KEY_TOTAL to totalCount,
         PROGRESS_KEY_IS_INITIALIZING to false,
         PROGRESS_KEY_RECENT_IDS to recentIds.toTypedArray(),
-      )
-    )
-    safeSetForeground(
-      createForegroundInfo(
-        processedCount = processedCount,
-        totalCount = totalCount,
-        isInitializing = false,
       )
     )
 
@@ -493,9 +433,6 @@ constructor(
             PROGRESS_KEY_RECENT_IDS to recentIds.toTypedArray(),
           )
         )
-        safeSetForeground(
-          createForegroundInfo(processedCount = processedCount, totalCount = totalCount)
-        )
       } catch (e: Exception) {
         if (e is CancellationException) throw e
         Log.w(TAG, "*** Failed to index sample asset $id: ${e.message}", e)
@@ -511,54 +448,6 @@ constructor(
       }
     }
     return newlyIndexed
-  }
-
-  private suspend fun safeSetForeground(foregroundInfo: ForegroundInfo) {
-    try {
-      setForeground(foregroundInfo)
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
-      Log.w(TAG, "Unable to run as foreground service: ${e.message}")
-    }
-  }
-
-  private fun createForegroundInfo(
-    processedCount: Int,
-    totalCount: Int,
-    isIndeterminate: Boolean = false,
-    isInitializing: Boolean = false,
-  ): ForegroundInfo {
-    val title = applicationContext.getString(R.string.task_label_smart_album)
-    val contentText =
-      if (isInitializing) {
-        applicationContext.getString(R.string.smartalbum_initializing_model)
-      } else if (isIndeterminate || totalCount == 0) {
-        applicationContext.getString(R.string.smartalbum_preparing_photo_index)
-      } else {
-        val pct = (processedCount * 100) / totalCount
-        applicationContext.getString(
-          R.string.smartalbum_indexing_photos_progress,
-          processedCount,
-          totalCount,
-          pct,
-        )
-      }
-
-    val notification =
-      NotificationCompat.Builder(applicationContext, FOREGROUND_NOTIFICATION_CHANNEL_ID)
-        .setContentTitle(title)
-        .setContentText(contentText)
-        .setSmallIcon(AndroidR.drawable.ic_dialog_info)
-        .setOngoing(true)
-        .setProgress(totalCount, processedCount, isIndeterminate || isInitializing)
-        .setPriority(NotificationCompat.PRIORITY_LOW)
-        .build()
-
-    return ForegroundInfo(
-      notificationId,
-      notification,
-      ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-    )
   }
 
   companion object {
@@ -579,7 +468,6 @@ constructor(
     const val PROGRESS_KEY_RECENT_IDS = "progress_recent_ids"
     const val PROGRESS_KEY_IS_INITIALIZING = "progress_is_initializing"
 
-    private const val FOREGROUND_NOTIFICATION_CHANNEL_ID = "smart_album_indexing_foreground"
     const val UNIQUE_WORK_NAME_PREFIX = "smart_album_indexing_work_"
 
     fun enqueue(

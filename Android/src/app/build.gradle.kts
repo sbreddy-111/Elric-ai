@@ -36,8 +36,8 @@ android {
     applicationId = "com.elricai.elric"
     minSdk = 31
     targetSdk = 37
-    versionCode = 17
-    versionName = "0.4.2"
+    versionCode = 18
+    versionName = "0.4.3"
 
     // AppAuth's library manifest needs this placeholder, but its redirect activity is removed in
     // AndroidManifest.xml (Elric AI has no Hugging Face sign-in), so the value is never used.

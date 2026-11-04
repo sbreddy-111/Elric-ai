@@ -38,7 +38,6 @@ import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkQuery
@@ -48,6 +47,7 @@ import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.analytics.ModelDownloadAnalytics.analyticsModelType
 import com.google.ai.edge.gallery.worker.DownloadWorker
+import com.google.ai.edge.gallery.worker.SystemModelDownloads
 import java.time.Clock
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -224,7 +224,6 @@ class DefaultDownloadRepository(
     // Create worker request.
     val downloadWorkRequest =
       OneTimeWorkRequestBuilder<DownloadWorker>()
-        .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
         .setInputData(inputData)
         .addTag(modelNameTag(workName(model.name, isExtraDataOnly = false)))
         .addTag("$TASK_ID_TAG:${task?.id ?: ""}")
@@ -275,7 +274,6 @@ class DefaultDownloadRepository(
 
     val downloadWorkRequest =
       OneTimeWorkRequestBuilder<DownloadWorker>()
-        .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
         .setInputData(inputData)
         .addTag(modelNameTag(workName(model.name, isExtraDataOnly = true)))
         .addTag("$TASK_ID_TAG:${task?.id ?: ""}")
@@ -415,6 +413,8 @@ class DefaultDownloadRepository(
       }
     }
     workManager.cancelAllWorkByTag(modelNameTag(workName))
+    // The system download service keeps downloading after the worker stops, so stop it too.
+    SystemModelDownloads.cancel(context, modelNameTag(workName))
   }
 
   override fun getPendingDownloads(onResult: (List<PendingDownload>) -> Unit) {
@@ -521,6 +521,10 @@ class DefaultDownloadRepository(
     // finishes cancelling it, doesn't cancel and log it again.
     endedWorkerIds.add(workerId)
     workManager.cancelWorkById(workerId)
+    SystemModelDownloads.cancel(
+      context,
+      modelNameTag(workName(pendingDownload.modelName, pendingDownload.isExtraDataOnly)),
+    )
     // No observer will log this download's outcome, so log it here to pair its start.
     logDownloadOutcome(
       workerId = workerId,

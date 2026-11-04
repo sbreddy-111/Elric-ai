@@ -17,18 +17,12 @@
 package com.google.ai.edge.gallery.worker
 
 import android.annotation.SuppressLint
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
+import android.app.DownloadManager
 import android.content.Context
-import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.util.Log
 import androidx.annotation.VisibleForTesting
-import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.Data
-import androidx.work.ForegroundInfo
 import androidx.work.ListenableWorker
 import androidx.work.WorkerParameters
 import com.google.ai.edge.gallery.common.getModelStorageDir
@@ -56,6 +50,8 @@ import com.google.ai.edge.gallery.data.KEY_MODEL_START_UNZIPPING
 import com.google.ai.edge.gallery.data.KEY_MODEL_TOTAL_BYTES
 import com.google.ai.edge.gallery.data.KEY_MODEL_UNZIPPED_DIR
 import com.google.ai.edge.gallery.data.KEY_MODEL_URL
+import com.google.ai.edge.gallery.data.MODEL_NAME_TAG
+import com.google.ai.edge.gallery.ui.elric.elricModelDisplayName
 import com.google.ai.edge.gallery.data.TMP_FILE_EXT
 import com.google.ai.edge.gallery.data.UNPACKED_FILE_EXT
 import java.io.EOFException
@@ -74,8 +70,6 @@ private const val TAG = "AGDownloadWorker"
 
 data class UrlAndFileName(val url: String, val fileName: String)
 
-private const val FOREGROUND_NOTIFICATION_CHANNEL_ID = "model_download_channel_foreground"
-private var channelCreated = false
 
 private const val CONNECT_TIMEOUT_MS = 30_000
 private const val READ_TIMEOUT_MS = 60_000
@@ -83,28 +77,6 @@ private const val READ_TIMEOUT_MS = 60_000
 class DownloadWorker(context: Context, params: WorkerParameters) :
   CoroutineWorker(context, params) {
   private val modelsDir = getModelStorageDir(context)
-
-  private val notificationManager =
-    context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-  // Unique notification id.
-  private val notificationId: Int = params.id.hashCode()
-
-  init {
-    if (!channelCreated) {
-      // Create a notification channel for showing notifications for model downloading progress.
-      val channel =
-        NotificationChannel(
-            FOREGROUND_NOTIFICATION_CHANNEL_ID,
-            "Model Downloading",
-            // Make it silent.
-            NotificationManager.IMPORTANCE_LOW,
-          )
-          .apply { description = "Notifications for model downloading" }
-      notificationManager.createNotificationChannel(channel)
-      channelCreated = true
-    }
-  }
 
   override suspend fun doWork(): Result {
     val isExtraDataOnly = inputData.getBoolean(KEY_MODEL_EXTRA_DATA_ONLY, false)
@@ -164,8 +136,12 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
         // The partial file being written, deleted if the device runs out of storage.
         var currentTmpFile: File? = null
         return@withContext try {
-          // Set the worker as a foreground service immediately.
-          setForeground(createForegroundInfo(progress = 0, modelName = modelName))
+          // No foreground service: the files are downloaded by the system download service where
+          // it can write them (see SystemModelDownloads), which shows its own notification and
+          // keeps going when the app is closed.
+          val workTag = tags.firstOrNull { it.startsWith("$MODEL_NAME_TAG:") } ?: id.toString()
+          val shownModelName = elricModelDisplayName(modelName) ?: modelName
+          val useSystemDownloads = SystemModelDownloads.canDownloadTo(applicationContext, outputDir)
 
           Log.d(TAG, "About to download: $allFiles")
           // Throughputs measured on another network aren't compared to the connections.
@@ -217,13 +193,6 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
                   .putLong(KEY_MODEL_TOTAL_BYTES, totalBytes)
                   .build()
               )
-              setForeground(
-                createForegroundInfo(
-                  progress =
-                    progressPercent(downloadedBytes = downloadedBytes, totalBytes = totalBytes),
-                  modelName = modelName,
-                )
-              )
               Log.d(TAG, "downloadedBytes: $downloadedBytes")
               lastSetProgressTs = curTs
             }
@@ -263,6 +232,46 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
             ) {
               Log.d(TAG, "File '${originalFile.name}' was already downloaded. Skipping it")
               downloadedBytes += originalFile.length()
+            } else if (useSystemDownloads) {
+              // The bytes of the files downloaded before this one.
+              val fileStartBytes = downloadedBytes
+              var lastFileBytes = -1L
+              val outcome =
+                SystemModelDownloads.download(
+                  context = applicationContext,
+                  workTag = workTag,
+                  url = file.url,
+                  authorization =
+                    authorizationHeaderValue(accessToken = accessToken, url = file.url),
+                  title = shownModelName,
+                  target = outputTmpFile,
+                ) { fileBytes ->
+                  if (lastFileBytes < 0L || fileBytes < lastFileBytes) {
+                    // First reading, e.g. of a download an earlier run started: not a rate sample.
+                    downloadedBytes = fileStartBytes + fileBytes
+                    onBytesWritten(0)
+                  } else {
+                    onBytesWritten((fileBytes - lastFileBytes).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+                  }
+                  lastFileBytes = fileBytes
+                }
+              when (outcome) {
+                is SystemModelDownloads.Outcome.Failure ->
+                  return@withContext systemDownloadFailureResult(url = file.url, outcome.reason)
+                is SystemModelDownloads.Outcome.Success -> {
+                  if (originalFile.exists()) {
+                    originalFile.delete()
+                  }
+                  if (!outcome.file.renameTo(originalFile)) {
+                    throw IOException(
+                      "Failed to rename '${outcome.file.name}' to '${originalFile.name}'"
+                    )
+                  }
+                  SystemModelDownloads.forget(applicationContext, outcome.id)
+                  downloadedBytes = fileStartBytes + originalFile.length()
+                  Log.d(TAG, "System download done")
+                }
+              }
             } else {
               val authorization =
                 authorizationHeaderValue(accessToken = accessToken, url = file.url)
@@ -734,6 +743,33 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
     }
 
     /**
+     * Returns the failed worker result for a system download that failed with [reason], a
+     * `DownloadManager.ERROR_*` value or an HTTP status, using the error types the UI already shows
+     * messages for (English and Hindi).
+     */
+    @VisibleForTesting
+    fun systemDownloadFailureResult(url: String, reason: Int): ListenableWorker.Result =
+      when {
+        reason in 400..599 -> httpErrorResult(url = url, httpCode = reason, sentAccessToken = false)
+        reason == DownloadManager.ERROR_INSUFFICIENT_SPACE ->
+          ListenableWorker.Result.failure(
+            Data.Builder()
+              .putString(KEY_MODEL_DOWNLOAD_ERROR_MESSAGE, "Not enough storage")
+              .putString(KEY_MODEL_DOWNLOAD_ERROR_TYPE, ERROR_TYPE_OUT_OF_STORAGE)
+              .build()
+          )
+        else ->
+          // Data errors, failed resumes, redirects and unknown errors: the connection broke, and
+          // trying again may work.
+          ListenableWorker.Result.failure(
+            Data.Builder()
+              .putString(KEY_MODEL_DOWNLOAD_ERROR_MESSAGE, "System download failed: $reason")
+              .putString(KEY_MODEL_DOWNLOAD_ERROR_TYPE, "SocketException")
+              .build()
+          )
+      }
+
+    /**
      * Returns the worker result for a download request that got a non-2xx response.
      *
      * Hugging Face access errors carry a [DownloadAuthError] under [KEY_MODEL_DOWNLOAD_AUTH_ERROR],
@@ -759,11 +795,6 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
       }
       return ListenableWorker.Result.failure(outputData.build())
     }
-  }
-
-  override suspend fun getForegroundInfo(): ForegroundInfo {
-    // Initial progress is 0
-    return createForegroundInfo(0)
   }
 
   /**
@@ -794,51 +825,5 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
     }
     connection.connect()
     return connection
-  }
-
-  /**
-   * Creates a [ForegroundInfo] object for the download worker's ongoing notification. This
-   * notification is used to keep the worker running in the foreground, indicating to the user that
-   * an active download is in progress.
-   */
-  @SuppressLint("PendingIntentMutability")
-  private fun createForegroundInfo(progress: Int, modelName: String? = null): ForegroundInfo {
-    // Create a notification for the foreground service
-    var title = "Downloading model"
-    if (modelName != null) {
-      val shownName =
-        com.google.ai.edge.gallery.ui.elric.elricModelDisplayName(modelName) ?: modelName
-      title = "Downloading \"$shownName\""
-    }
-    val content = "Downloading in progress: $progress%"
-
-    // Name the activity rather than load its class, which the worker module doesn't depend on.
-    val intent =
-      Intent().setClassName(applicationContext, "com.google.ai.edge.gallery.MainActivity").apply {
-        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-      }
-    val pendingIntent =
-      PendingIntent.getActivity(
-        applicationContext,
-        0,
-        intent,
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-      )
-
-    val notification =
-      NotificationCompat.Builder(applicationContext, FOREGROUND_NOTIFICATION_CHANNEL_ID)
-        .setContentTitle(title)
-        .setContentText(content)
-        .setSmallIcon(android.R.drawable.ic_dialog_info)
-        .setOngoing(true) // Makes the notification non-dismissable
-        .setProgress(100, progress, false) // Show progress
-        .setContentIntent(pendingIntent)
-        .build()
-
-    return ForegroundInfo(
-      notificationId,
-      notification,
-      ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-    )
   }
 }
