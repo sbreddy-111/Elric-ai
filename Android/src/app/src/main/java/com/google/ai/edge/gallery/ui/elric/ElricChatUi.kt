@@ -154,6 +154,7 @@ fun HomeContent(
   mode: ElricMode,
   offline: Boolean,
   online: Boolean = false,
+  hasOffline: Boolean = true,
   name: String,
   onSuggestion: (index: Int, text: String) -> Unit,
   modifier: Modifier = Modifier,
@@ -165,7 +166,10 @@ fun HomeContent(
     modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 8.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp),
   ) {
-    if (offline) Banner(tr(if (shop) T.offlineAll else T.offlineStudy), warn = false)
+    if (offline) {
+      if (hasOffline) Banner(tr(if (shop) T.offlineAll else T.offlineStudy), warn = false)
+      else Banner(tr(T.offlineNoNetHome), warn = true)
+    }
     Box(
       modifier =
         Modifier.clip(CircleShape)
@@ -173,7 +177,14 @@ fun HomeContent(
           .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
       EText(
-        tr(if (shop) T.shopOffline else if (online) T.onlinePill else T.onDevice),
+        tr(
+          when {
+            online && !hasOffline -> T.onlineOnlyPill
+            shop -> T.shopOffline
+            online -> T.onlinePill
+            else -> T.onDevice
+          }
+        ),
         size = 12.sp,
         color = if (shop) p.indigoInk else p.green,
       )
@@ -497,7 +508,9 @@ fun ChatThread(
   onRegenerate: () -> Unit,
   onRate: (Int, Int) -> Unit,
   onFollow: (String) -> Unit,
-  onOpenModels: () -> Unit,
+  needText: String,
+  needButton: String,
+  onNeedAction: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val p = pal()
@@ -589,9 +602,8 @@ fun ChatThread(
                   .padding(16.dp),
               verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-              EText(tr(T.needModelTitle), weight = FontWeight.SemiBold)
-              EText(tr(T.needModelBody), size = 14.sp, color = p.muted)
-              GoldButton(tr(T.openModels), onClick = onOpenModels, small = true)
+              EText(needText, weight = FontWeight.SemiBold)
+              GoldButton(needButton, onClick = onNeedAction, small = true)
             }
           !busy && turns.isNotEmpty() && !turns.last().isUser && turns.last().failed != true -> {
             val follows =

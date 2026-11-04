@@ -111,6 +111,7 @@ import com.google.ai.edge.gallery.BuildConfig
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.proto.Theme
 import com.google.ai.edge.gallery.ui.common.tos.AppTosDialog
@@ -125,6 +126,7 @@ import kotlinx.coroutines.delay
 private enum class Screen {
   SPLASH,
   ONBOARD,
+  START,
   ABOUT,
   DOWNLOAD,
   HOME,
@@ -267,6 +269,31 @@ fun ElricApp(
     }
   }
 
+  // Offline mode: the offline model is downloaded only when the user turns it on (with progress
+  // and Cancel). Off means online answers only; the model may stay on the phone.
+  var offlineDialog by remember { mutableStateOf(false) }
+  var offlineOffDialog by remember { mutableStateOf(false) }
+  val offlineSize =
+    (lite ?: standard)?.downloadInfo?.totalBytes?.takeIf { it > 0 }?.let { gbText(it) } ?: "1.4 GB"
+  val downloadingModel = listOfNotNull(lite, standard).firstOrNull { statuses[it.name].isDownloading() }
+  val offlineTarget = downloadingModel ?: lite ?: standard
+  val hasOffline = vm.offlineOn && downloaded.isNotEmpty()
+  fun requestOffline() {
+    if (downloaded.isNotEmpty()) {
+      vm.updateOfflineOn(true)
+      showToast(T.offlineOnToast.get(vm.lang))
+    } else {
+      offlineDialog = true
+    }
+  }
+  fun toggleOffline() {
+    when {
+      !vm.offlineOn -> requestOffline()
+      downloaded.isEmpty() -> offlineDialog = true
+      else -> offlineOffDialog = true
+    }
+  }
+
   // Voice: recorded on the phone (at most 30 s) and turned into text by the on-device model.
   fun finishVoice() {
     vm.finishRecording(
@@ -275,7 +302,10 @@ fun ElricApp(
         input = if (input.isBlank()) text else input.trimEnd() + " " + text
         showToast(T.voiceCheck.get(vm.lang))
       },
-      onError = { msg -> showToast(msg.get(vm.lang)) },
+      onError = { msg ->
+        showToast(msg.get(vm.lang))
+        if (msg === T.voiceNeedModel) requestOffline()
+      },
     )
   }
   fun beginRecording() {
@@ -286,6 +316,7 @@ fun ElricApp(
     val err = vm.startTalk(currentModel)
     if (err != null) {
       showToast(err.get(vm.lang))
+      if (err === T.voiceNeedModel) requestOffline()
     } else if (screen != Screen.CHAT) {
       // Talk turns are saved in the chat, which shows when Talk ends.
       screen = Screen.CHAT
@@ -364,11 +395,12 @@ fun ElricApp(
     if (vm.talkState != ElricTalkState.OFF) vm.stopTalk() else vm.cancelVoice()
   }
   BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
-  BackHandler(enabled = overlay == Overlay.NONE && !voiceActive && screen in setOf(Screen.CHAT, Screen.MODELS, Screen.PRIVACY, Screen.MEMORY, Screen.DOWNLOAD) ||
+  BackHandler(enabled = overlay == Overlay.NONE && !voiceActive && screen in setOf(Screen.CHAT, Screen.MODELS, Screen.PRIVACY, Screen.MEMORY, Screen.DOWNLOAD, Screen.START) ||
     (overlay == Overlay.NONE && !voiceActive && screen == Screen.ABOUT && vm.onboarded)) {
     when (screen) {
       Screen.CHAT -> newChat()
-      Screen.DOWNLOAD -> go(Screen.ABOUT)
+      Screen.DOWNLOAD -> go(Screen.HOME)
+      Screen.START -> go(Screen.ONBOARD)
       Screen.ABOUT -> go(returnTo)
       else -> go(returnTo)
     }
@@ -397,7 +429,25 @@ fun ElricApp(
             OnboardingScreen(
               lang = vm.lang,
               onLang = { vm.updateLang(it) },
-              onDone = { go(Screen.ABOUT) },
+              onDone = { go(Screen.START) },
+            )
+          Screen.START ->
+            StartScreen(
+              sizeText = offlineSize,
+              onBack = { go(Screen.ONBOARD) },
+              onAdult = {
+                // 18+: online answers on, no download; straight to chat.
+                vm.confirmAge18AndGoOnline()
+                vm.updateOfflineOn(false)
+                vm.finishOnboarding()
+                go(Screen.HOME)
+              },
+              onMinor = {
+                // Under 18: online answers stay off; download the offline model.
+                vm.updateOfflineOn(true)
+                vm.finishOnboarding()
+                go(if (downloaded.isNotEmpty()) Screen.HOME else Screen.DOWNLOAD)
+              },
             )
           Screen.ABOUT ->
             AboutYouScreen(
@@ -411,8 +461,7 @@ fun ElricApp(
                 if (vm.onboarded) {
                   go(returnTo)
                 } else {
-                  vm.finishOnboarding()
-                  go(if (downloaded.isNotEmpty()) Screen.HOME else Screen.DOWNLOAD)
+                  go(Screen.START)
                 }
               },
             )
@@ -424,14 +473,18 @@ fun ElricApp(
               listLoading = mmState.loadingModelAllowlist,
               listError = listError,
               onRetryList = { modelManagerViewModel.loadModelAllowlist() },
-              onDownload = { download(it) },
-              onBack = { go(Screen.ABOUT) },
+              onDownload = {
+                vm.updateOfflineOn(true)
+                download(it)
+              },
+              onBack = { go(Screen.HOME) },
               onReady = { m ->
                 vm.updateActiveModel(m.name)
                 go(Screen.HOME)
               },
               canChatOnline = vm.onlineOn && !offline,
               onChatOnline = { go(Screen.HOME) },
+              onCancel = { m -> modelManagerViewModel.cancelDownloadModel(m) },
             )
           Screen.HOME,
           Screen.CHAT ->
@@ -483,7 +536,19 @@ fun ElricApp(
                     }
                   },
                   onFollow = { ask(it) },
-                  onOpenModels = { openFromMenu(Screen.MODELS) },
+                  needText =
+                    tr(
+                      when {
+                        downloaded.isNotEmpty() && !vm.offlineOn -> T.needTurnOnOffline
+                        vm.onlineOn && vm.needsModelLimit -> T.needLimit
+                        vm.onlineOn -> T.needNoNet
+                        else -> T.needOffline
+                      }
+                    ),
+                  needButton =
+                    tr(if (downloaded.isNotEmpty()) T.turnOnOffline else T.downloadOfflineModel) +
+                      if (downloaded.isEmpty()) " · $offlineSize" else "",
+                  onNeedAction = { requestOffline() },
                   modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
               } else {
@@ -491,6 +556,7 @@ fun ElricApp(
                   mode = vm.mode,
                   offline = offline,
                   online = vm.onlineOn && !offline,
+                  hasOffline = hasOffline,
                   name = vm.name,
                   onSuggestion = { i, text ->
                     if (i == 1) {
@@ -536,7 +602,10 @@ fun ElricApp(
               onRetryList = { modelManagerViewModel.loadModelAllowlist() },
               totalStorageBytes = remember { totalStorage(context) },
               onBack = { go(returnTo) },
-              onDownload = { download(it) },
+              onDownload = {
+                vm.updateOfflineOn(true)
+                download(it)
+              },
               onRemove = { m ->
                 vm.releaseModel(m) { modelManagerViewModel.deleteModel(m) }
                 if (vm.activeModelName == m.name) vm.updateActiveModel("")
@@ -676,6 +745,11 @@ fun ElricApp(
           },
           onAboutYou = { openFromMenu(Screen.ABOUT) },
           onModels = { openFromMenu(Screen.MODELS) },
+          showModels = downloaded.isNotEmpty(),
+          offlineOn = vm.offlineOn,
+          offlineSize = offlineSize,
+          offlinePct = downloadingModel?.let { (statuses[it.name].fraction(it) * 100).toInt() },
+          onOffline = { toggleOffline() },
           onMemory = { openFromMenu(Screen.MEMORY) },
           onPrivacy = { openFromMenu(Screen.PRIVACY) },
           onAboutApp = { overlay = Overlay.ABOUT_APP },
@@ -701,6 +775,125 @@ fun ElricApp(
           )
         }
       }
+    }
+
+    if (offlineDialog) {
+      val m = offlineTarget
+      val st = m?.let { statuses[it.name] }
+      val isDl = st.isDownloading()
+      val isReady = downloaded.isNotEmpty()
+      val isFailed =
+        !isDl &&
+          (st?.status == ModelDownloadStatusType.FAILED ||
+            st?.status == ModelDownloadStatusType.PARTIALLY_DOWNLOADED)
+      AlertDialog(
+        onDismissRequest = { offlineDialog = false },
+        containerColor = palette.surface,
+        title = {
+          EText(tr(if (isReady) T.offlineMode else T.offlineDlTitle), size = 17.sp, weight = FontWeight.SemiBold)
+        },
+        text = {
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (isReady) {
+              EText(tr(T.offlineReadyMsg), size = 14.sp, color = palette.muted)
+            } else if (m == null) {
+              if (listError) Banner(tr(T.listFailed), warn = true) else TinyText(tr(T.gettingReady))
+            } else {
+              EText(tr(T.offlineDlBody, "size" to offlineSize), size = 14.sp, color = palette.muted)
+              TinyText(tr(T.offlineWifi))
+              if (isDl || (st?.receivedBytes ?: 0L) > 0L) {
+                GradBar(st.fraction(m))
+                val total = st?.totalBytes?.takeIf { it > 0 } ?: m.downloadInfo.totalBytes
+                TinyText(tr(T.ofGb, "done" to gbText(st?.receivedBytes ?: 0L), "total" to gbText(total)))
+              }
+              if (isFailed) Banner(tr(T.dlFailed), warn = true)
+            }
+          }
+        },
+        confirmButton = {
+          if (isReady) {
+            TextButton(onClick = { offlineDialog = false }) {
+              EText(tr(T.done), color = palette.goldInk, weight = FontWeight.SemiBold)
+            }
+          } else if (m == null) {
+            TextButton(onClick = { modelManagerViewModel.loadModelAllowlist() }) {
+              EText(tr(T.retry), color = palette.goldInk, weight = FontWeight.SemiBold)
+            }
+          } else if (isDl) {
+            TextButton(onClick = { offlineDialog = false }) {
+              EText(tr(T.hide), color = palette.goldInk, weight = FontWeight.SemiBold)
+            }
+          } else {
+            TextButton(
+              onClick = {
+                vm.updateOfflineOn(true)
+                download(m)
+              }
+            ) {
+              EText(tr(if (isFailed) T.resume else T.download), color = palette.goldInk, weight = FontWeight.SemiBold)
+            }
+          }
+        },
+        dismissButton = {
+          if (!isReady) {
+            if (m != null && isDl) {
+              TextButton(
+                onClick = {
+                  modelManagerViewModel.cancelDownloadModel(m)
+                  vm.updateOfflineOn(false)
+                  offlineDialog = false
+                }
+              ) {
+                EText(tr(T.cancelDownload), color = palette.danger)
+              }
+            } else {
+              TextButton(
+                onClick = {
+                  vm.updateOfflineOn(false)
+                  offlineDialog = false
+                }
+              ) {
+                EText(tr(T.notNow), color = palette.muted)
+              }
+            }
+          }
+        },
+      )
+    }
+
+    if (offlineOffDialog) {
+      val size =
+        downloaded.sumOf { it.downloadInfo.totalBytes }.takeIf { it > 0 }?.let { gbText(it) } ?: offlineSize
+      AlertDialog(
+        onDismissRequest = { offlineOffDialog = false },
+        containerColor = palette.surface,
+        title = { EText(tr(T.offlineOffTitle), size = 17.sp, weight = FontWeight.SemiBold) },
+        text = { EText(tr(T.offlineOffBody, "size" to size), size = 14.sp, color = palette.muted) },
+        confirmButton = {
+          TextButton(
+            onClick = {
+              offlineOffDialog = false
+              vm.updateOfflineOn(false)
+            }
+          ) {
+            EText(tr(T.keep), color = palette.goldInk, weight = FontWeight.SemiBold)
+          }
+        },
+        dismissButton = {
+          TextButton(
+            onClick = {
+              offlineOffDialog = false
+              vm.updateOfflineOn(false)
+              for (m in downloaded) {
+                vm.releaseModel(m) { modelManagerViewModel.deleteModel(m) }
+              }
+              vm.updateActiveModel("")
+            }
+          ) {
+            EText(tr(T.deleteModel), color = palette.danger)
+          }
+        },
+      )
     }
 
     if (showTos && screen == Screen.HOME) {
@@ -784,6 +977,11 @@ private fun ElricDrawer(
   onOpenChat: (String) -> Unit,
   onAboutYou: () -> Unit,
   onModels: () -> Unit,
+  showModels: Boolean,
+  offlineOn: Boolean,
+  offlineSize: String,
+  offlinePct: Int?,
+  onOffline: () -> Unit,
   onMemory: () -> Unit,
   onPrivacy: () -> Unit,
   onAboutApp: () -> Unit,
@@ -908,7 +1106,7 @@ private fun ElricDrawer(
       Box(Modifier.fillMaxWidth().padding(bottom = 6.dp).background(p.line).heightIn(min = 1.dp, max = 1.dp))
       DrawerRow("☺", tr(T.aboutYou), onClick = onAboutYou)
       DrawerRow("✦", tr(T.memory), onClick = onMemory)
-      DrawerRow("▦", tr(T.models), onClick = onModels)
+      if (showModels) DrawerRow("▦", tr(T.models), onClick = onModels)
       DrawerRow(
         "☁",
         tr(T.onlineAnswers),
@@ -924,6 +1122,27 @@ private fun ElricDrawer(
         },
       )
       TinyText(tr(T.onlineHow), modifier = Modifier.padding(start = 44.dp, end = 12.dp, bottom = 4.dp))
+      DrawerRow(
+        "⇩",
+        tr(T.offlineMode),
+        trailing = {
+          Row {
+            EText(tr(T.on), size = 12.sp, weight = FontWeight.Medium, color = if (offlineOn) p.goldInk else p.muted)
+            EText(" · ", size = 12.sp, color = p.muted)
+            EText(tr(T.off), size = 12.sp, weight = FontWeight.Medium, color = if (!offlineOn) p.goldInk else p.muted)
+          }
+        },
+        onClick = onOffline,
+      )
+      TinyText(
+        if (offlinePct != null) tr(T.offlineDownloadingPct, "pct" to offlinePct.toString())
+        else tr(T.offlineHow, "size" to offlineSize),
+        modifier =
+          Modifier.padding(start = 44.dp, end = 12.dp, bottom = 4.dp).then(
+            if (offlinePct != null) Modifier.clickable(onClick = onOffline) else Modifier
+          ),
+        color = if (offlinePct != null) p.goldInk else p.muted,
+      )
       DrawerRow(
         "अ",
         tr(T.language),

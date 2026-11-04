@@ -140,6 +140,14 @@ class ElricStore(context: Context) {
     get() = age18 && prefs.getBoolean("online_on", false)
     set(v) = prefs.edit().putBoolean("online_on", v && age18).apply()
 
+  /**
+   * Offline mode: answer on the phone with the downloaded model when online can't. New installs
+   * start with it off (online-first); installs onboarded before 0.4.0 keep it on.
+   */
+  var offlineOn: Boolean
+    get() = if (prefs.contains("offline_on")) prefs.getBoolean("offline_on", false) else onboarded
+    set(v) = prefs.edit().putBoolean("offline_on", v).apply()
+
   /** Memory is on by default. */
   var memoryOn: Boolean
     get() = prefs.getBoolean("memory_on", true)

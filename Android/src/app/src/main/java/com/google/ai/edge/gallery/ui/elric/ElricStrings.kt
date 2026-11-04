@@ -62,14 +62,14 @@ object T {
   val ob1Title = Str("Answers you can trust", "ऐसे जवाब जिन पर भरोसा हो")
   val ob1Body =
     Str(
-      "Study help that works offline, with steps you can follow and check.",
-      "ऑफ़लाइन चलने वाली पढ़ाई की मदद, ऐसे स्टेप्स के साथ जिन्हें आप समझ और जाँच सकें।",
+      "Study help with steps you can follow and check, online or offline.",
+      "पढ़ाई की मदद, ऐसे स्टेप्स के साथ जिन्हें आप समझ और जाँच सकें, ऑनलाइन या ऑफ़लाइन।",
     )
   val ob2Title = Str("Private by default", "शुरू से प्राइवेट")
   val ob2Body =
     Str(
-      "Chats never leave your phone. Nothing is uploaded, nothing is sold.",
-      "चैट आपके फ़ोन से बाहर नहीं जातीं। न कुछ अपलोड होता है, न कुछ बेचा जाता है।",
+      "Chats are saved only on your phone. Online questions are sent to answer you, never sold. Offline mode keeps everything on your phone.",
+      "चैट सिर्फ़ आपके फ़ोन पर सेव होती हैं। ऑनलाइन सवाल सिर्फ़ जवाब देने के लिए भेजे जाते हैं, कभी बेचे नहीं जाते। ऑफ़लाइन मोड में सब कुछ फ़ोन पर रहता है।",
     )
   val ob3Title = Str("Hindi & English", "हिन्दी और English")
   val ob3Body =
@@ -77,6 +77,83 @@ object T {
       "Pick the language you think in. You can switch any time.",
       "वह भाषा चुनें जिसमें आप सोचते हैं। आप कभी भी बदल सकते हैं।",
     )
+
+  // Start (first launch)
+  val startTitle = Str("Start using Elric AI", "Elric AI इस्तेमाल करना शुरू करें")
+  val startBody =
+    Str(
+      "Online answers are only for users 18 or older. Under 18? Download the offline model and use Elric AI on your phone.",
+      "ऑनलाइन जवाब सिर्फ़ 18 साल या उससे ज़्यादा उम्र वालों के लिए हैं। 18 से कम हैं? ऑफ़लाइन मॉडल डाउनलोड करें और Elric AI फ़ोन पर चलाएँ।",
+    )
+  val startPrivacy =
+    Str(
+      "Online answers: your question leaves the phone and is sent to our server and an AI provider to answer you. Chats are saved only on your phone.",
+      "ऑनलाइन जवाब: आपका सवाल फ़ोन से बाहर जाकर जवाब के लिए हमारे सर्वर और एक AI प्रदाता को भेजा जाता है। चैट सिर्फ़ आपके फ़ोन पर सेव होती हैं।",
+    )
+  val startAdult = Str("I'm 18 or older — start now", "मेरी उम्र 18 या ज़्यादा है — अभी शुरू करें")
+  val startMinor =
+    Str(
+      "I'm under 18 — download offline model (about {size}, Wi‑Fi recommended)",
+      "मेरी उम्र 18 से कम है — ऑफ़लाइन मॉडल डाउनलोड करें (लगभग {size}, Wi‑Fi बेहतर)",
+    )
+
+  // Offline mode
+  val offlineMode = Str("Offline mode", "ऑफ़लाइन मोड")
+  val offlineHow =
+    Str(
+      "Answer without internet using a model on your phone (about {size}).",
+      "फ़ोन पर रखे मॉडल से बिना इंटरनेट जवाब (लगभग {size})।",
+    )
+  val offlineDownloadingPct = Str("Downloading… {pct}% · tap to see", "डाउनलोड हो रहा है… {pct}% · देखने के लिए दबाएँ")
+  val offlineDlTitle = Str("Turn on Offline mode?", "ऑफ़लाइन मोड चालू करें?")
+  val offlineDlBody =
+    Str(
+      "Elric AI will download its offline model (about {size}) so it can answer without internet.",
+      "Elric AI अपना ऑफ़लाइन मॉडल (लगभग {size}) डाउनलोड करेगा, ताकि बिना इंटरनेट जवाब दे सके।",
+    )
+  val offlineWifi =
+    Str("Use Wi‑Fi if you can. It downloads once.", "हो सके तो Wi‑Fi इस्तेमाल करें। यह एक ही बार डाउनलोड होता है।")
+  val offlineReadyMsg =
+    Str("Offline mode is ready. Elric AI can now answer without internet.", "ऑफ़लाइन मोड तैयार है। अब Elric AI बिना इंटरनेट जवाब दे सकता है।")
+  val offlineOnToast = Str("Offline mode on", "ऑफ़लाइन मोड चालू")
+  val cancelDownload = Str("Cancel download", "डाउनलोड रद्द करें")
+  val hide = Str("Hide", "छिपाएँ")
+  val offlineOffTitle = Str("Offline mode off", "ऑफ़लाइन मोड बंद")
+  val offlineOffBody =
+    Str(
+      "Elric AI will answer online only. Keep the offline model ({size}) on your phone for later, or delete it to free space.",
+      "Elric AI सिर्फ़ ऑनलाइन जवाब देगा। ऑफ़लाइन मॉडल ({size}) बाद के लिए फ़ोन पर रखें, या जगह खाली करने के लिए मिटा दें।",
+    )
+  val keep = Str("Keep", "रखें")
+  val deleteModel = Str("Delete offline model", "ऑफ़लाइन मॉडल मिटाएँ")
+  val needNoNet =
+    Str(
+      "No internet. Download the offline model to use Elric AI without internet.",
+      "इंटरनेट नहीं है। बिना इंटरनेट Elric AI इस्तेमाल करने के लिए ऑफ़लाइन मॉडल डाउनलोड करें।",
+    )
+  val needLimit =
+    Str(
+      "Online answers aren't available right now. Download the offline model to keep using Elric AI.",
+      "ऑनलाइन जवाब अभी उपलब्ध नहीं हैं। Elric AI इस्तेमाल करते रहने के लिए ऑफ़लाइन मॉडल डाउनलोड करें।",
+    )
+  val needOffline =
+    Str(
+      "Download the offline model to get answers on your phone.",
+      "फ़ोन पर जवाब पाने के लिए ऑफ़लाइन मॉडल डाउनलोड करें।",
+    )
+  val needTurnOnOffline =
+    Str(
+      "Turn on Offline mode to answer on your phone without internet.",
+      "बिना इंटरनेट फ़ोन पर जवाब पाने के लिए ऑफ़लाइन मोड चालू करें।",
+    )
+  val downloadOfflineModel = Str("Download offline model", "ऑफ़लाइन मॉडल डाउनलोड करें")
+  val turnOnOffline = Str("Turn on Offline mode", "ऑफ़लाइन मोड चालू करें")
+  val offlineNoNetHome =
+    Str(
+      "You're offline. Turn on Offline mode in the menu to use Elric AI without internet.",
+      "आप ऑफ़लाइन हैं। बिना इंटरनेट Elric AI इस्तेमाल करने के लिए मेनू में ऑफ़लाइन मोड चालू करें।",
+    )
+  val onlineOnlyPill = Str("● Online", "● ऑनलाइन")
 
   // About you
   val aboutName = Str("What should Elric call you?", "Elric आपको किस नाम से बुलाए?")
@@ -183,7 +260,7 @@ object T {
   val shopping = Str("Shopping", "शॉपिंग")
   val general = Str("General", "सामान्य")
   val studyDesc = Str("Step-by-step tutor for school and college", "स्कूल और कॉलेज के लिए स्टेप-बाय-स्टेप ट्यूटर")
-  val shoppingDesc = Str("Compare products · works offline", "प्रोडक्ट्स की तुलना · ऑफ़लाइन चलता है")
+  val shoppingDesc = Str("Compare products", "प्रोडक्ट्स की तुलना")
   val generalDesc = Str("Anything else", "बाकी सब कुछ")
   val lengthSec = Str("Answer length", "जवाब की लंबाई")
   val short = Str("Short · fast", "छोटा · तेज़")
@@ -266,7 +343,7 @@ object T {
   val savedToMemory = Str("✓ Saved to memory", "✓ मेमोरी में सेव हो गया")
   val aboutElric = Str("About Elric AI", "Elric AI के बारे में")
   val licenses = Str("Open-source licenses", "ओपन-सोर्स लाइसेंस")
-  val aboutLine = Str("v{v} · Runs on your phone, private by default", "v{v} · आपके फ़ोन पर चलता है, शुरू से प्राइवेट")
+  val aboutLine = Str("v{v} · Online or on your phone, private by default", "v{v} · ऑनलाइन या आपके फ़ोन पर, शुरू से प्राइवेट")
 
   // Models screen
   val installed = Str("Installed ✓ · {size}", "इंस्टॉल ✓ · {size}")
@@ -283,8 +360,8 @@ object T {
   val storageUsed = Str("{used} used of {total}", "{total} में से {used} इस्तेमाल")
 
   // Privacy
-  val privacyTitle = Str("Your chats stay on this phone", "आपकी चैट इसी फ़ोन पर रहती हैं")
-  val privacy1 = Str("Study answers work offline", "पढ़ाई के जवाब ऑफ़लाइन मिलते हैं")
+  val privacyTitle = Str("Your chats are saved only on this phone", "आपकी चैट सिर्फ़ इसी फ़ोन पर सेव होती हैं")
+  val privacy1 = Str("With Offline mode on, answers work without internet", "ऑफ़लाइन मोड चालू होने पर जवाब बिना इंटरनेट मिलते हैं")
   val privacy2 =
     Str(
       "With Online answers on, your question, recent messages of the chat, any photo you attach and the memory used for it are sent to our server and an AI provider to answer. We don't store them.",
@@ -292,8 +369,8 @@ object T {
     )
   val privacyOffline =
     Str(
-      "Offline answers keep everything on your phone. Turn off Online answers in the menu to stay fully offline.",
-      "ऑफ़लाइन जवाब में सब कुछ आपके फ़ोन पर रहता है। पूरी तरह ऑफ़लाइन रहने के लिए मेनू में ऑनलाइन जवाब बंद करें।",
+      "Offline answers keep everything on your phone. Turn on Offline mode and turn off Online answers in the menu to stay fully offline.",
+      "ऑफ़लाइन जवाब में सब कुछ आपके फ़ोन पर रहता है। पूरी तरह ऑफ़लाइन रहने के लिए मेनू में ऑफ़लाइन मोड चालू और ऑनलाइन जवाब बंद करें।",
     )
   val privacy3 =
     Str("Live prices are coming soon.", "लाइव कीमतें जल्द आ रही हैं।")
@@ -345,7 +422,7 @@ object T {
   val voiceNothing =
     Str("Didn't catch that. Speak a little louder and try again.", "सुनाई नहीं दिया। थोड़ा ज़ोर से बोलकर फिर कोशिश करें।")
   val voiceNeedModel =
-    Str("Download Elric Lite first to ask by voice", "बोलकर पूछने के लिए पहले Elric Lite डाउनलोड करें")
+    Str("Voice is turned into text on your phone. Download the offline model to ask by voice.", "आवाज़ फ़ोन पर ही टेक्स्ट बनती है। बोलकर पूछने के लिए ऑफ़लाइन मॉडल डाउनलोड करें।")
   val voiceUnsupported =
     Str(
       "Voice can't run on this phone yet. Typing still works.",
@@ -376,8 +453,8 @@ object T {
     )
   val talkHint =
     Str(
-      "Speak in Hindi or English. Everything runs on your phone.",
-      "हिन्दी या English में बोलें। सब कुछ आपके फ़ोन पर चलता है।",
+      "Speak in Hindi or English. Your voice is turned into text on your phone.",
+      "हिन्दी या English में बोलें। आपकी आवाज़ फ़ोन पर ही टेक्स्ट बनती है।",
     )
   val cancelVoice = Str("Cancel", "रद्द करें")
   val micNeeded = Str("Allow the microphone to ask by voice", "बोलकर पूछने के लिए माइक की अनुमति दें")

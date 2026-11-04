@@ -101,8 +101,12 @@ private const val TRANSCRIBE_PROMPT =
     "(Devanagari script). If it is in English, write it in English. Output only the spoken " +
     "words, with no notes, labels or translation."
 
-/** Online: time to the first word before answering on the phone instead, and longest pause after. */
-private const val ONLINE_FIRST_TOKEN_MS = 8_000L
+/**
+ * Online: time to the first word before giving up on the online answer (text, and questions with a
+ * photo), and the longest pause after it. Matches the web app.
+ */
+private const val ONLINE_FIRST_TOKEN_MS = 15_000L
+private const val ONLINE_PHOTO_FIRST_TOKEN_MS = 30_000L
 private const val ONLINE_STALL_MS = 6_000L
 
 /** After this many online failures in a row, online is skipped for [ONLINE_BACKOFF_MS]. */
@@ -225,6 +229,19 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
   var onlineOn by mutableStateOf(store.onlineOn)
     private set
 
+  /**
+   * Offline mode: when on, the downloaded model answers when online can't (or when Online answers
+   * are off). When off, answers are online only, even if a model is still on the phone.
+   */
+  var offlineOn by mutableStateOf(store.offlineOn)
+    private set
+
+  fun updateOfflineOn(on: Boolean) {
+    offlineOn = on
+    store.offlineOn = on
+    if (on) needsModel = false
+  }
+
   /** The user confirmed they are 18 or older: remember it and turn online answers on. */
   fun confirmAge18AndGoOnline() {
     age18 = true
@@ -238,19 +255,30 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     store.onlineOn = v
     onlineFails = 0
     onlineBlockedUntil = 0L
+    limitBlockedUntil = 0L
     if (!v) onlineCall?.cancel()
   }
 
   /** The online answer being streamed, if any. */
   @Volatile private var onlineCall: ElricOnlineCall? = null
 
-  /** Online is skipped until this time ([SystemClock.elapsedRealtime]) after a limit or repeated failures. */
+  /**
+   * Online is skipped until this time ([SystemClock.elapsedRealtime]) after repeated failures, so
+   * the phone answers sooner. Only used when there is an offline model to fall back to.
+   */
   private var onlineBlockedUntil = 0L
   private var onlineFails = 0
 
-  /** True when an online answer can be tried now. */
-  fun onlineReady(): Boolean =
-    onlineOn && SystemClock.elapsedRealtime() >= onlineBlockedUntil && ElricCloud.online(context)
+  /** Online is skipped until this time after the server said a limit was reached. */
+  private var limitBlockedUntil = 0L
+
+  /** True when an online answer can be tried now. [hasModel]: an offline model can answer instead. */
+  fun onlineReady(hasModel: Boolean = true): Boolean {
+    if (!onlineOn || !ElricCloud.online(context)) return false
+    val now = SystemClock.elapsedRealtime()
+    if (now < limitBlockedUntil) return false
+    return !hasModel || now >= onlineBlockedUntil
+  }
 
   /** What Elric remembers about the user, newest first. Only on this phone. */
   val memories = mutableStateListOf<ElricMemory>().apply { addAll(store.loadMemories()) }
@@ -343,6 +371,10 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
 
   /** True when the last question could not be answered because no model is downloaded. */
   var needsModel by mutableStateOf(false)
+    private set
+
+  /** With [needsModel]: online answers were stopped by a server limit (not a missing connection). */
+  var needsModelLimit by mutableStateOf(false)
     private set
 
   /** Private path of the photo waiting to be sent with the next question, if any. */
@@ -1426,12 +1458,16 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     val history = turns.filter { it.failed != true && it.text.isNotBlank() }.toList()
     turns.add(ElricTurn(role = "user", text = q, image = image))
     replySavedMemory = rememberFrom(q)
-    val hasModel = model != null && (model.instance != null || modelFileComplete(model))
-    val tryOnline = onlineReady()
+    // With Offline mode off, answers are online only (a model left on the phone is not used).
+    val offlineModel = if (offlineOn) model else null
+    val hasModel = offlineModel != null && (offlineModel.instance != null || modelFileComplete(offlineModel))
+    val tryOnline = onlineReady(hasModel)
     if (!hasModel && !tryOnline) {
-      // Never fake an answer: the chat shows that a (complete) model is needed.
-      if (model != null) Log.w(TAG, "Model file for ${model.name} is incomplete")
+      // Never fake an answer: the chat shows that the offline model is needed.
+      if (offlineModel != null) Log.w(TAG, "Model file for ${offlineModel.name} is incomplete")
       needsModel = true
+      needsModelLimit = onlineOn && SystemClock.elapsedRealtime() < limitBlockedUntil
+      replySavedMemory = false
       persist()
       return true
     }
@@ -1441,9 +1477,9 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     turns.add(ElricTurn(role = "model", text = "", memSaved = if (replySavedMemory) true else null))
     val replyIndex = turns.size - 1
     if (tryOnline) {
-      answerOnline(q, image, history, replyIndex, if (hasModel) model else null)
+      answerOnline(q, image, history, replyIndex, if (hasModel) offlineModel else null)
     } else {
-      answerOffline(model!!, q, image, history, replyIndex)
+      answerOffline(offlineModel!!, q, image, history, replyIndex)
     }
     return true
   }
@@ -1513,7 +1549,8 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
       val live = AtomicBoolean(true)
       val end =
         try {
-          call.run(body, ONLINE_FIRST_TOKEN_MS, ONLINE_STALL_MS) { piece ->
+          val firstTokenMs = if (image != null) ONLINE_PHOTO_FIRST_TOKEN_MS else ONLINE_FIRST_TOKEN_MS
+          call.run(body, firstTokenMs, ONLINE_STALL_MS) { piece ->
             synchronized(raw) { raw.append(piece) }
             if (firstMs == null && piece.isNotBlank()) firstMs = SystemClock.elapsedRealtime() - t0
             if (posted.compareAndSet(false, true)) {
@@ -1538,6 +1575,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
       if (onlineCall === call) onlineCall = null
       val text = cleanModelText(synchronized(raw) { raw.toString() }).trim()
       val ms = SystemClock.elapsedRealtime() - t0
+      var limited = false
       when (end) {
         ElricOnlineEnd.Done -> {
           onlineFails = 0
@@ -1553,7 +1591,8 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
         }
         is ElricOnlineEnd.Limit -> {
           val wait = end.retryAfterSec.coerceIn(60, 3600) * 1000L
-          onlineBlockedUntil = SystemClock.elapsedRealtime() + wait
+          limitBlockedUntil = SystemClock.elapsedRealtime() + wait
+          limited = true
           Log.i(TAG, "online limit (${end.scope}); offline for ${wait / 1000} s")
         }
         is ElricOnlineEnd.Failed -> {
@@ -1584,8 +1623,7 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
       if (model != null && (model.instance != null || modelFileComplete(model))) {
         answerOffline(model, q, image, history, replyIndex)
       } else {
-        finishReply(replyIndex, ElricTurn(role = "model", text = T.onlineUnavailable.get(lang), failed = true))
-        needsModel = true
+        failNeedsModel(replyIndex, limited)
       }
     }
   }
@@ -1741,6 +1779,27 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     } catch (e: Exception) {
       Log.e(TAG, "runInference failed", e)
       finish(e.message ?: "error")
+    }
+  }
+
+  /**
+   * Ends an answer that couldn't be made online when there is no offline model: the empty reply is
+   * removed and the chat shows a friendly card with a button to download the offline model.
+   */
+  private fun failNeedsModel(replyIndex: Int, limited: Boolean) {
+    if (replyIndex in turns.indices && !turns[replyIndex].isUser && turns[replyIndex].text.isBlank()) {
+      turns.removeAt(replyIndex)
+    }
+    replySavedMemory = false
+    busy = false
+    needsModel = true
+    needsModelLimit = limited
+    streamTick++
+    persist()
+    if (talkState != ElricTalkState.OFF && replyIndex == talkReplyIndex) {
+      talkReplyIndex = -1
+      talkCaption = T.needNoNet.get(lang)
+      talkState = ElricTalkState.PAUSED
     }
   }
 
