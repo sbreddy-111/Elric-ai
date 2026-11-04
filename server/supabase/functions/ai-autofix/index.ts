@@ -5,7 +5,7 @@
 //
 // Evidence (free tier only):
 //   default  : the function finds candidate pages itself (Wikipedia search API +
-//              DuckDuckGo HTML results, both free, no key) and Gemini reads them
+//              GDELT news search + DuckDuckGo HTML results, both free, no key) and Gemini reads them
 //              with the free URL-context tool. Only pages Gemini actually
 //              retrieved AND cites as supporting count as sources.
 //   optional : set Edge secret AUTOFIX_GOOGLE_GROUNDING=1 to use Google Search
@@ -81,6 +81,13 @@ const site = (u: string) => {
   return h.slice(h.length > 2 && h[h.length - 2].length <= 3 ? -3 : -2).join(".");
 };
 
+const STOP = new Set("a an the of in on at to for and or is are was were be been what which who whom whose when where why how do does did can could should would will current currently latest today now news effect effects impact about tell me please give explain is it this that there their its from with by as".split(" "));
+/** Short keyword query from a question (for news search). */
+function keywords(q: string): string {
+  const w = q.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((x) => x.length >= 3 && !STOP.has(x));
+  return [...new Set(w)].slice(0, 5).join(" ");
+}
+
 async function candidateUrls(q: string, hindi: boolean): Promise<string[]> {
   const query = q.slice(0, 200);
   const urls: string[] = [];
@@ -93,6 +100,33 @@ async function candidateUrls(q: string, hindi: boolean): Promise<string[]> {
     const j = await r.json();
     for (const s of j?.query?.search ?? []) urls.push(`https://${lang}.wikipedia.org/wiki/${encodeURIComponent(s.title.replace(/ /g, "_"))}`);
   } catch { /* ignore */ }
+  // Recent news (free GDELT DOC API, no key): catches events newer than Wikipedia.
+  const kw = keywords(query);
+  if (kw) {
+    for (const qq of [kw, kw.split(" ").sort((a, b) => b.length - a.length).slice(0, 2).join(" ")]) {
+      try {
+        const r = await fetch(
+          `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(qq)}&mode=artlist&format=json&maxrecords=15&sort=hybridrel&timespan=3months`,
+          { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12000) },
+        );
+        const txt = await r.text();
+        let arts: { url?: string; language?: string }[] = [];
+        try { arts = JSON.parse(txt)?.articles ?? []; } catch { arts = []; }
+        const seen = new Set(urls.map(site));
+        let added = 0;
+        for (const a of arts) {
+          const u = String(a.url ?? "");
+          const s = site(u);
+          if (!u.startsWith("http") || !s || SKIP_DOMAINS.test(host(u)) || seen.has(s)) continue;
+          if (a.language && !/english|hindi/i.test(a.language)) continue;
+          seen.add(s); urls.push(u); added++;
+          if (added >= 4) break;
+        }
+        if (added) break;
+        await new Promise((res) => setTimeout(res, 5500)); // GDELT asks for ≥5 s between requests
+      } catch { /* ignore */ }
+    }
+  }
   try {
     const r = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; ElricAI-autofix/1.0)" }, signal: AbortSignal.timeout(8000),
