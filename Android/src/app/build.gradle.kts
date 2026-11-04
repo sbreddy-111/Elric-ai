@@ -133,6 +133,8 @@ dependencies {
   implementation(libs.hilt.navigation.compose)
   implementation(libs.play.services.oss.licenses)
   implementation(libs.androidx.exifinterface)
+  // Used by SkillManager; was only on the classpath through Firebase before.
+  implementation("androidx.documentfile:documentfile:1.0.1")
   implementation(libs.moshi.kotlin)
   ksp(libs.hilt.android.compiler)
   ksp("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
