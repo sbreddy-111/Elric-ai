@@ -6,7 +6,7 @@
 //     name?, study?, memory? }
 // Response:
 //   200 text/event-stream:  data: {"t":"..."}  (text pieces)
-//                           data: {"done":true,"m":"a"|"b"}   (finished; a = primary, b = fallback model)
+//                           data: {"done":true,"m":"g"|"a"|"b"}   (finished; g = Groq, a/b = Gemini primary/fallback)
 //                           data: {"error":"failed"|"limit"|"blocked"}   (stream broke; app answers offline)
 //   400 {status:'bad_request'} · 401 {status:'unauthorized'} · 413 {status:'too_large'}
 //   429 {status:'limit', scope:'device'|'ip'|'provider', retry_after} · 503 {status:'unavailable'}
@@ -15,7 +15,10 @@
 //
 // Privacy: no question, answer, photo or memory text is stored or logged. Only a salted
 // SHA-256 of the device id and of the IP, with hourly counters (table ai_usage).
-// Models: gemini-3.5-flash-lite, then gemini-3.1-flash-lite on 429/5xx (free tier).
+// Models: text questions → Groq openai/gpt-oss-20b first (web search only for time-sensitive questions),
+// then, if Groq has no first word within a few seconds, errors or is rate limited (or GROQ_API_KEY is
+// not set), gemini-3.5-flash-lite hedged with gemini-3.1-flash-lite. Photos always go to Gemini.
+// Response header x-elric-src: g1 = Groq, g2 = Groq + web search, gem = Gemini.
 
 const MODELS = (Deno.env.get("AI_CHAT_MODELS") ?? "gemini-3.5-flash-lite,gemini-3.1-flash-lite")
   .split(",").map((s) => s.trim()).filter(Boolean);
@@ -24,6 +27,13 @@ const SB_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 const SALT = Deno.env.get("AI_CHAT_SALT") ?? "";
 const TEST_SECRET = Deno.env.get("AUTOFIX_SECRET") ?? "";
+const GROQ_KEY = Deno.env.get("GROQ_API_KEY") ?? "";
+const GROQ_MODEL = Deno.env.get("AI_CHAT_GROQ_MODEL") ?? "openai/gpt-oss-20b";
+/** Fall back to Gemini if Groq has not sent its first word by then. */
+const GROQ_FIRST_MS = 4_000;
+const GROQ_FIRST_SEARCH_MS = 7_000;
+/** After a Groq 429, skip Groq until this time (ms epoch). Per isolate, best effort. */
+let groqCooldownUntil = 0;
 
 // Limits (abuse guard).
 const DEVICE_HOUR = 30, DEVICE_DAY = 100;
@@ -158,11 +168,14 @@ type Req = {
 const clean = (s: unknown, max: number) =>
   typeof s === "string" ? s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, max) : "";
 
-function systemPrompt(r: Req, facts: Fact[]): string {
+function systemPrompt(r: Req, facts: Fact[], search = false): string {
   const today = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" })
     .format(new Date());
-  let s = `Today is ${today}. Your knowledge may be out of date, so for recent news, results or events, ` +
-    "say you may not know and suggest checking a trusted source. ";
+  let s = search
+    ? `Today is ${today}. Use web search for current facts and answer from what you find; if the results are ` +
+      "unclear, say so. Do not paste links, URLs or citation marks; you may name a source in words (like The Hindu). "
+    : `Today is ${today}. Your knowledge may be out of date, so for recent news, results or events, ` +
+      "say you may not know and suggest checking a trusted source. ";
   s += "You are Elric AI. Do not introduce yourself or mention who made you unless the user asks. Answer reliably in the user's language (English or " +
     "Hindi). If unsure, say so. If asked which model or company you are, say you are Elric AI. " +
     "Write maths in plain text (like 17 × 24 = 408), never LaTeX. Keep answers clear and not too long.";
@@ -196,7 +209,8 @@ function systemPrompt(r: Req, facts: Fact[]): string {
   s += " IDENTITY (most important): if asked what model you are, which company made you, or whether you are " +
     "some other AI, reply only that you are Elric AI, founded by Brahma Reddy Suravarapu. " +
     "In that reply never write the names of any other AI company or model (no Google, Gemini, Gemma, DeepMind, " +
-    "OpenAI, ChatGPT), not even to deny it.";
+    "OpenAI, ChatGPT, GPT, Llama, Meta, Groq, Qwen, Anthropic, Claude, Mistral), not even to deny it. " +
+    "Never say you are ChatGPT, GPT, OpenAI, Llama, Meta, Google, Gemini, Groq or any other company's model.";
   return s;
 }
 
@@ -371,6 +385,135 @@ function relay(res: Response, model: number): ReadableStream<Uint8Array> {
   });
 }
 
+// ---------------------------------------------------------------- Groq (OpenAI-compatible)
+
+// Time-sensitive questions only (a search costs ~4000 of the 8000 tokens/min shared limit), so study
+// words like "current" (electricity) or "rate" (of reaction) do not trigger it on their own.
+const SEARCH_RE = new RegExp(
+  "\\b(today|today's|tonight|tomorrow|yesterday|right now|as of now|latest|currently|recent|recently|news|" +
+  "breaking|headlines?|current (affairs|news|events|situation|status|cm|pm|president|chief minister|prime minister)|" +
+  "scores?|live score|weather|forecast|cyclone|storm|flood|earthquake|elections?|exam results?|results? (of|for|declared)|" +
+  "who won|winner|ipl|world cup|sensex|nifty|share price|stock price|gold price|gold rate|petrol price|" +
+  "this week|this month|last week|202[5-9])\\b|\\baaj\\b|\\babhi\\b|taaza|\\btaza\\b|khabar|samachar|mausam|chunav|natija|" +
+  "आज|अभी|ताज़ा|ताजा|खबर|ख़बर|समाचार|मौसम|चुनाव|नतीजा|परिणाम|स्कोर", "i");
+
+function needsSearch(q: string) { return SEARCH_RE.test(q); }
+
+type GroqLive = { reader: ReadableStreamDefaultReader<Uint8Array>; dec: TextDecoder; buf: string; pending: string[]; finish: string; ended: boolean };
+
+/** Starts a streamed Groq answer and waits for its first word. null = use Gemini instead. Never logs text. */
+async function startGroq(r: Req, system: string, search: boolean): Promise<GroqLive | null> {
+  if (!GROQ_KEY || r.image || Date.now() < groqCooldownUntil) return null;
+  const messages = [
+    { role: "system", content: system },
+    ...r.history.map((t) => ({ role: t.role === "model" ? "assistant" : "user", content: t.text })),
+    { role: "user", content: r.question },
+  ];
+  const body: Record<string, unknown> = {
+    model: GROQ_MODEL, messages, stream: true, temperature: 0.4,
+    reasoning_effort: "low", include_reasoning: false,
+    max_completion_tokens: r.short || r.talk ? 900 : 2600,
+  };
+  if (search) body.tools = [{ type: "browser_search" }];
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), search ? GROQ_FIRST_SEARCH_MS : GROQ_FIRST_MS);
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_KEY}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.any([ctrl.signal, AbortSignal.timeout(CALL_TIMEOUT_MS)]),
+    });
+    if (!res.ok || !res.body) {
+      console.log(`ai-chat groq status ${res.status}`); // status only, never content
+      if (res.status === 429) {
+        const ra = Number(res.headers.get("retry-after") ?? "");
+        groqCooldownUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 3600) : 60) * 1000;
+      }
+      await res.body?.cancel().catch(() => {});
+      clearTimeout(timer);
+      return null;
+    }
+    const live: GroqLive = { reader: res.body.getReader(), dec: new TextDecoder(), buf: "", pending: [], finish: "", ended: false };
+    while (!live.pending.length && !live.ended) await groqRead(live);
+    clearTimeout(timer);
+    if (!live.pending.length) { console.log("ai-chat groq empty"); return null; }
+    return live;
+  } catch {
+    clearTimeout(timer);
+    console.log("ai-chat groq timeout/error");
+    return null;
+  }
+}
+
+/** Reads one network chunk; only delta.content is kept (never reasoning or tool output). */
+async function groqRead(live: GroqLive) {
+  const { value, done } = await live.reader.read();
+  if (done) { live.ended = true; return; }
+  live.buf += live.dec.decode(value, { stream: true });
+  let idx;
+  while ((idx = live.buf.indexOf("\n")) >= 0) {
+    const line = live.buf.slice(0, idx).trim();
+    live.buf = live.buf.slice(idx + 1);
+    if (!line.startsWith("data:")) continue;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === "[DONE]") continue;
+    let ev: any;
+    try { ev = JSON.parse(payload); } catch { continue; }
+    if (ev?.error) { live.ended = true; live.finish = "error"; return; }
+    const ch = ev?.choices?.[0];
+    if (ch?.finish_reason) live.finish = ch.finish_reason;
+    const t = ch?.delta?.content;
+    if (typeof t === "string" && t) live.pending.push(t);
+  }
+}
+
+// Removes search citation marks like 【3†L4-L9】 even when split across pieces.
+function citeFilter() {
+  let hold = "";
+  return (piece: string, end = false): string => {
+    let t = (hold + piece).replace(/【[^】]{0,80}】/g, "");
+    hold = "";
+    const open = t.lastIndexOf("【");
+    if (!end && open >= 0 && t.length - open < 80) { hold = t.slice(open); t = t.slice(0, open); }
+    if (end) t = t.replace(/【[^】]*$/, "");
+    return t;
+  };
+}
+
+function relayGroq(live: GroqLive): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  const send = (c: ReadableStreamDefaultController<Uint8Array>, o: unknown) =>
+    c.enqueue(enc.encode(`data: ${JSON.stringify(o)}\n\n`));
+  const filter = citeFilter();
+  let sent = 0;
+  return new ReadableStream({
+    async start(c) {
+      try {
+        while (true) {
+          for (const p of live.pending.splice(0)) {
+            const t = filter(p);
+            if (t) { sent += t.length; send(c, { t }); }
+          }
+          if (live.ended) break;
+          await groqRead(live);
+        }
+        const tail = filter("", true);
+        if (tail) { sent += tail.length; send(c, { t: tail }); }
+        if (sent === 0 || live.finish === "error") send(c, { error: "failed" });
+        else send(c, { done: true, m: "g", f: live.finish === "length" ? "length" : undefined });
+      } catch {
+        try { send(c, { error: "failed" }); } catch { /* closed */ }
+      } finally {
+        try { c.close(); } catch { /* closed */ }
+      }
+    },
+    cancel() {
+      live.reader.cancel().catch(() => {});
+    },
+  });
+}
+
 // ---------------------------------------------------------------- handler
 
 // CORS: only the Elric AI website may call this from a browser (the app doesn't need CORS).
@@ -449,9 +592,34 @@ async function handle(req: Request): Promise<Response> {
   }
 
   marks.limit = Date.now() - t0;
-  if (!GEMINI_KEY) return json(503, { status: "unavailable" });
-  const system = systemPrompt(parsed, await factsP);
+  const facts = await factsP;
   marks.facts = Date.now() - t0;
+  const sse = {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-store",
+    "X-Accel-Buffering": "no",
+    "Access-Control-Expose-Headers": "x-elric-src",
+  };
+
+  // 1) Groq for text questions (skipped when no key, photo, cooldown, or test header no-groq).
+  if (!parsed.image && test !== "no-groq" && test !== "limit" && test !== "fail-primary") {
+    const search = needsSearch(parsed.question);
+    const live = await startGroq(parsed, systemPrompt(parsed, facts, search), search);
+    marks.groq = Date.now() - t0;
+    if (live) {
+      return new Response(relayGroq(live), {
+        headers: {
+          ...sse,
+          "x-elric-src": search ? "g2" : "g1",
+          "Server-Timing": `limit;dur=${marks.limit}, facts;dur=${marks.facts}, model;dur=${marks.groq}`,
+        },
+      });
+    }
+  }
+
+  // 2) Gemini (as before).
+  if (!GEMINI_KEY) return json(503, { status: "unavailable" });
+  const system = systemPrompt(parsed, facts);
   const a = await callGemini(parsed, system, test, testAuth ? (req.headers.get("x-elric-think") ?? "") : "");
   marks.model = Date.now() - t0;
   if (a.kind === "limit") return json(429, { status: "limit", scope: "provider", retry_after: 600 });
@@ -459,10 +627,9 @@ async function handle(req: Request): Promise<Response> {
   if (a.kind === "blocked") return json(422, { status: "blocked" });
   return new Response(relay(a.res, a.model), {
     headers: {
-      "Server-Timing": `limit;dur=${marks.limit}, facts;dur=${marks.facts}, model;dur=${marks.model}`,
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-store",
-      "X-Accel-Buffering": "no",
+      ...sse,
+      "x-elric-src": "gem",
+      "Server-Timing": `limit;dur=${marks.limit}, facts;dur=${marks.facts}${marks.groq !== undefined ? `, groq;dur=${marks.groq}` : ""}, model;dur=${marks.model}`,
     },
   });
 }
