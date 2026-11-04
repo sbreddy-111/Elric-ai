@@ -7,7 +7,7 @@ import * as P from './photo';
 import * as F from './feedback';
 
 type Mode = 'study' | 'shopping' | 'general';
-const defaultMode = (): Mode => { const m = localStorage.getItem('elric.mode'); return m === 'shopping' || m === 'general' ? m : 'study'; };
+const defaultMode = (): Mode => { const m = localStorage.getItem('elric.mode'); return m === 'shopping' || m === 'study' ? m : 'general'; };
 let mode: Mode = defaultMode();
 let short = localStorage.getItem('elric.length') !== 'long';
 /** A chat turn; photo (with its full image) lives only in memory, never in saved chats. */
@@ -703,7 +703,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.5';
+const APP_VERSION = '0.4.6';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
