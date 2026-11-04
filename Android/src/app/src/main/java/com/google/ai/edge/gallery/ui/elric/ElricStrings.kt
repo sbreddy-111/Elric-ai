@@ -90,6 +90,9 @@ object T {
       "Online answers are for users 18+. By tapping Continue you confirm you're 18 or older.",
       "ऑनलाइन जवाब 18+ उम्र वालों के लिए हैं। Continue दबाकर आप पुष्टि करते हैं कि आपकी उम्र 18 या ज़्यादा है।",
     )
+  // Small inline links under the welcome text (not buttons).
+  val welcomeTermsLink = Str("Terms", "शर्तें")
+  val welcomePrivacyLink = Str("Privacy", "प्राइवेसी")
   val welcomeContinue = Str("Continue", "Continue")
   val welcomeUnder18 = Str("Under 18? Use offline mode", "18 से कम? ऑफ़लाइन मोड इस्तेमाल करें")
   val offlineTip =

@@ -17,27 +17,20 @@
 package com.google.ai.edge.gallery
 
 import android.os.Bundle
-import android.util.Log
 import androidx.annotation.VisibleForTesting
-import com.google.firebase.Firebase
-import com.google.firebase.analytics.FirebaseAnalytics
-import com.google.firebase.analytics.analytics
 
-private const val TAG = "AGAnalyticsFirebase"
 
 /**
- * The [FirebaseAnalytics] instance, or `null` if Firebase Analytics is not available.
- *
- * Resolved once on first access.
+ * Elric AI ships without Firebase (no analytics SDK, no ads), so there is no analytics backend:
+ * events go only to the test hooks below and are otherwise dropped.
  */
-private val firebaseAnalyticsDelegate: FirebaseAnalytics? by lazy {
-  runCatching { Firebase.analytics }
-    .onFailure { exception ->
-      // Firebase.analytics can throw an exception if goolgle-services is not set up, e.g.,
-      // missing google-services.json.
-      Log.w(TAG, "Firebase Analytics is not available", exception)
-    }
-    .getOrNull()
+private val firebaseAnalyticsDelegate: NoAnalytics? = null
+
+/** Stand-in for the removed analytics SDK. Never instantiated. */
+private class NoAnalytics {
+  fun logEvent(name: String, params: Bundle?) {}
+
+  fun setAnalyticsCollectionEnabled(enabled: Boolean) {}
 }
 
 /**

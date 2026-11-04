@@ -962,6 +962,22 @@ fun ElricApp(
           Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             EText(tr(T.welcomePrivacy), size = 14.sp, color = palette.muted)
             EText(tr(T.welcomeAge), size = 14.sp, color = palette.text)
+            // Inline "Terms · Privacy" link text (opens elricai.sbs in the browser).
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              EText(
+                tr(T.welcomeTermsLink),
+                size = 13.sp,
+                color = palette.goldInk,
+                modifier = Modifier.clickable { openElricLink(context, ELRIC_TERMS_URL) },
+              )
+              EText("  ·  ", size = 13.sp, color = palette.muted)
+              EText(
+                tr(T.welcomePrivacyLink),
+                size = 13.sp,
+                color = palette.goldInk,
+                modifier = Modifier.clickable { openElricLink(context, ELRIC_PRIVACY_URL) },
+              )
+            }
           }
         },
         confirmButton = {
