@@ -4,13 +4,14 @@ import * as E from './engine';
 import * as O from './online';
 import * as V from './voice';
 import * as P from './photo';
+import * as F from './feedback';
 
 type Mode = 'study' | 'shopping' | 'general';
 const defaultMode = (): Mode => { const m = localStorage.getItem('elric.mode'); return m === 'shopping' || m === 'general' ? m : 'study'; };
 let mode: Mode = defaultMode();
 let short = localStorage.getItem('elric.length') !== 'long';
 /** A chat turn; photo (with its full image) lives only in memory, never in saved chats. */
-type Turn = E.Turn & { photo?: P.Photo };
+type Turn = E.Turn & { photo?: P.Photo; reported?: boolean };
 let turns: Turn[] = [];
 interface Chat { id: string; title: string; mode: Mode; turns: Turn[]; at: number }
 const CHATS_KEY = 'elric.chats';
@@ -81,7 +82,9 @@ function stats(x: Turn, i = -1): string {
   if (x.role !== 'model') return '';
   const ra = x.src && !x.failed && x.text && i >= 0 && V.canSpeak() && !(busy && i === turns.length - 1)
     ? ` <button class="ra${reading === i ? ' on' : ''}" data-r="${i}" aria-label="${t('readAloud')}">🔊</button>` : '';
-  const tag = (x.src ? t(x.src === 'online' ? 'tagOnline' : 'tagOffline') : '') + ra;
+  const fb = x.text && !x.failed && i >= 0 && !(busy && i === turns.length - 1)
+    ? ` <button class="fb${x.reported ? ' on' : ''}" data-fb="${i}" aria-label="${t(x.reported ? 'fbReported' : 'fbReport')}"${x.reported ? ' aria-disabled="true"' : ''}>👎</button>` : '';
+  const tag = ((x.src ? t(x.src === 'online' ? 'tagOnline' : 'tagOffline') : '') + ra + fb).trim();
   if (!x.ms) return tag ? `<div class="stat">${tag}</div>` : '';
   const words = x.text.trim().split(/\s+/).filter(Boolean).length;
   const gen = Math.max(1, x.ms - (x.firstMs || 0));
@@ -182,6 +185,7 @@ function renderMain() {
     const inp = $<HTMLTextAreaElement>('#input'); inp.value = pending && q === t('photoAsk') ? '' : q; inp.focus(); inp.dispatchEvent(new Event('input'));
   }));
   m.querySelectorAll<HTMLButtonElement>('[data-r]').forEach((b) => (b.onclick = () => readAloud(+b.dataset.r!)));
+  m.querySelectorAll<HTMLButtonElement>('[data-fb]').forEach((b) => (b.onclick = () => reportSheet(+b.dataset.fb!)));
 }
 
 /** In a chat, the model card shows when offline answers are on, or when a question still needs the model. */
@@ -526,6 +530,57 @@ function readAloud(i: number) {
   cancelReading = V.speak(V.plain(turns[i].text), () => { if (reading === i) { cancelReading = null; stopReading(); } });
 }
 
+// ---------------------------------------------------------------- report a wrong answer
+
+let toastTimer = 0;
+function toast(msg: string, kind: 'ok' | 'err' = 'ok') {
+  let el = document.getElementById('toast');
+  if (!el) { el = document.createElement('div'); el.id = 'toast'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); document.body.appendChild(el); }
+  el.className = `toast ${kind} show`; el.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => el!.classList.remove('show'), 3200);
+}
+
+/** Bottom sheet to report the answer at [i]. Sends only that question and answer (plus the optional note). */
+function reportSheet(i: number) {
+  const ans = turns[i];
+  if (!ans || ans.role !== 'model' || ans.reported) { if (ans?.reported) toast(t('fbAlready')); return; }
+  sheet(`<h3>${t('fbTitle')}</h3>
+    <textarea id="fbnote" class="fbnote" rows="3" maxlength="4000" placeholder="${t('fbPlaceholder')}" aria-label="${t('fbPlaceholder')}"></textarea>
+    <p class="fbinfo">${t('fbInfo')}</p>
+    <div class="fbbtns"><button class="ghost" id="fbcancel">${t('cancel')}</button><button class="primary" id="fbsend">${t('fbSend')}</button></div>`, false);
+  $('#fbcancel').onclick = () => { $('#sheet').innerHTML = ''; };
+  const sendBtn = $<HTMLButtonElement>('#fbsend');
+  sendBtn.onclick = async () => {
+    if (sendBtn.disabled) return;
+    sendBtn.disabled = true; sendBtn.textContent = t('fbSending');
+    const q = turns.slice(0, i).reverse().find((x) => x.role === 'user');
+    const backend = ans.src || null;
+    const ok = await F.send({
+      kind: 'wrong_answer',
+      app_version: APP_VERSION,
+      platform: `web ${F.shortUA()}`,
+      device: F.device(),
+      backend,
+      model: backend === 'online' ? 'Elric Online' : backend === 'offline' ? t(E.MODEL_NAME_KEY) : null,
+      mode,
+      question: q?.text || null,
+      answer: ans.text,
+      note: $<HTMLTextAreaElement>('#fbnote')?.value.trim() || null,
+    });
+    if (ok) {
+      ans.reported = true; persist();
+      $('#sheet').innerHTML = '';
+      const b = document.querySelector<HTMLButtonElement>(`[data-fb="${i}"]`);
+      if (b) { b.classList.add('on'); b.setAttribute('aria-disabled', 'true'); b.setAttribute('aria-label', t('fbReported')); }
+      toast(t('fbThanks'));
+    } else {
+      sendBtn.disabled = false; sendBtn.textContent = t('fbSend');
+      toast(t('fbFailed'), 'err');
+    }
+  };
+}
+
 // ---------------------------------------------------------------- talk (hands-free)
 
 type TalkState = 'listening' | 'thinking' | 'speaking' | 'paused';
@@ -646,7 +701,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.2';
+const APP_VERSION = '0.4.3';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],

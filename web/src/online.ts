@@ -3,9 +3,10 @@
 // server-sent events: data: {"t":"..."} pieces, then {"done":true} or {"error":"failed|limit|blocked"}.
 // No chat text is logged or stored here; the server stores none either (see privacy.html).
 
-const CHAT_URL = 'https://hqsqpiwmozgsxiizhaml.supabase.co/functions/v1/ai-chat';
+export const SB_URL = 'https://hqsqpiwmozgsxiizhaml.supabase.co';
+const CHAT_URL = `${SB_URL}/functions/v1/ai-chat`;
 /** Public by design (the same publishable key the Android app ships). */
-const CHAT_KEY = 'sb_publishable_Yv1D_ZUk38W3-ZvYdoAD8A_-fx5gPCT';
+export const CHAT_KEY = 'sb_publishable_Yv1D_ZUk38W3-ZvYdoAD8A_-fx5gPCT';
 
 /** Time to the first word before answering on the device instead, and longest pause after it. */
 export const FIRST_TOKEN_MS = 15000;
