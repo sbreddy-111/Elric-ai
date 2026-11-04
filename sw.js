@@ -1,7 +1,7 @@
 // Elric AI service worker: keeps the app shell available offline.
 // The model file itself is stored separately by the app (OPFS / Cache API),
 // never by this worker.
-const VERSION = 'elric-shell-v13';
+const VERSION = 'elric-shell-v14';
 const BASE = new URL('./', self.location).pathname;
 const SHELL = ['', 'index.html', 'manifest.webmanifest', 'favicon.ico',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/mark.png'].map((p) => BASE + p);
