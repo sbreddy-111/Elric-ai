@@ -12,11 +12,14 @@ export type Feedback = {
   device: string | null; backend: string | null; model: string | null; mode: string | null;
   question: string | null; answer: string | null; note: string | null; review_status: string;
   ai_verdict: string | null; ai_sources: unknown; reviewed_at: string | null;
+  duplicate_of?: string | null; recheck_count?: number;
 };
 export type Fact = {
   id: number; updated_at: string; topic: string | null; fact: string; lang: string | null;
-  active: boolean; source: string; sources: unknown;
+  active: boolean; source: string; sources: unknown; expires_at?: string | null;
 };
+export type Automation = { key: string; enabled: boolean; last_run_at: string | null; last_result: string | null; updated_at: string };
+export type AdminEvent = { id: number; created_at: string; automation: string; action: string; message: string; ref: string | null; details: unknown };
 
 let session: Session | null = load();
 let refreshing: Promise<void> | null = null;

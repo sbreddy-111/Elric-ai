@@ -246,13 +246,63 @@ async function check(row: Row, facts: Fact[]) {
   return { v, sources, independent: independent.size, candidates: urls };
 }
 
-async function mark(id: string, status: string, verdict: string, sources: unknown) {
+async function mark(id: string, status: string, verdict: string, sources: unknown, extra: Record<string, unknown> = {}) {
   await db(`ai_feedback?id=eq.${id}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({ review_status: status, ai_verdict: verdict.slice(0, 1000), ai_sources: sources, reviewed_at: new Date().toISOString() }),
+    body: JSON.stringify({ review_status: status, ai_verdict: verdict.slice(0, 1000), ai_sources: sources, reviewed_at: new Date().toISOString(), ...extra }),
   });
 }
+
+// ---------- automations: switches, activity log ----------
+const AUTOMATIONS = ["checker", "auto_add", "duplicates", "spam", "recheck", "expiry", "daily_summary"] as const;
+type Key = typeof AUTOMATIONS[number];
+type Settings = Record<Key, boolean>;
+async function loadSettings(): Promise<Settings> {
+  const s = Object.fromEntries(AUTOMATIONS.map((k) => [k, true])) as Settings;
+  try {
+    const rows: { key: string; enabled: boolean }[] = await db("ai_settings?select=key,enabled", { method: "GET" });
+    for (const r of rows) if ((AUTOMATIONS as readonly string[]).includes(r.key)) s[r.key as Key] = !!r.enabled;
+  } catch { /* table missing: defaults on */ }
+  return s;
+}
+async function logEvent(automation: string, action: string, message: string, ref: string | null = null, details: unknown = null) {
+  try {
+    await db("ai_admin_events", { method: "POST", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ automation, action, message: message.slice(0, 500), ref, details }) });
+  } catch { /* never block the run on logging */ }
+}
+async function setResult(key: Key, result: string) {
+  try {
+    await db(`ai_settings?key=eq.${key}`, { method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ last_run_at: new Date().toISOString(), last_result: result.slice(0, 300) }) });
+  } catch { /* ignore */ }
+}
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const FEEDBACK_KINDS = "wrong_answer,thumbs_down";
+const NEWS_DAYS = 30;
+const RECHECK_MAX = 10;
+const FLOOD_PER_DAY = 20;
+const short = (s: string | null, n = 60) => { const t = (s ?? "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
+
+/** Why a feedback report is junk (empty / too short / gibberish), or "" if it looks real. */
+function junkReason(r: { question: string | null; note: string | null; answer: string | null }): string {
+  const q = (r.question ?? "").trim(), note = (r.note ?? "").trim();
+  if (!q && !note && !(r.answer ?? "").trim()) return "Empty report (no question or note shared)";
+  if (!q) return "";
+  const chars = (q.match(/[\p{L}\p{N}]/gu) ?? []).length;
+  if (chars < 3) return "Question too short to check";
+  if (/^[\x00-\x7F]+$/.test(q)) {
+    const letters = (q.toLowerCase().match(/[a-z]/g) ?? []);
+    const vowels = letters.filter((c) => "aeiouy".includes(c)).length;
+    if (letters.length >= 6 && vowels / letters.length < 0.2 && /[bcdfghjklmnpqrstvwxz]{6,}/i.test(q)) return "Looks like random letters";
+    if (/(.)\1{5,}/.test(q.replace(/\s/g, "")) && new Set(q.replace(/\s/g, "").toLowerCase()).size <= 3) return "Looks like random letters";
+    if (/^(asdf|qwer|zxcv|hjkl|sdfg|jkl;)+$/i.test(q.replace(/\s/g, ""))) return "Looks like keyboard mashing";
+  }
+  return "";
+}
+const isTestRow = (r: { question: string | null; note: string | null; platform: string | null }) =>
+  /^\s*(test|testing)\b\s*(from\s+hark|[-–:!.,]|$)/i.test(r.question ?? "") || /^\s*test\s*$/i.test(r.note ?? "") || /\btest\b/i.test(r.platform ?? "");
 
 function cors(req: Request): Record<string, string> {
   const o = req.headers.get("origin") ?? "";
@@ -291,81 +341,232 @@ Deno.serve(async (req) => {
 
 async function run(): Promise<Response> {
   const started = Date.now();
-  const out: Record<string, unknown> = { no_question: 0, checked: 0, auto_added: 0, duplicate: 0, needs_review: 0, rejected: 0, deferred: 0, errors: 0 };
+  const out: Record<string, unknown> = {
+    no_question: 0, checked: 0, auto_added: 0, duplicate: 0, needs_review: 0, rejected: 0, deferred: 0, errors: 0,
+    spam: 0, merged: 0, rechecked: 0, recheck_added: 0, recheck_kept: 0, expired: 0,
+  };
   const inc = (k: string) => (out[k] = (out[k] as number) + 1);
+  const S = await loadSettings();
+  const now = () => new Date().toISOString();
+  const ago = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
 
-  // 1) Rows without a question (crash/stuck reports, Q&A not shared) -> owner review, no AI call.
+  // A) Auto-clean junk: empty / too short / gibberish, old test rows, floods from one device label. Reject with a reason, never delete.
+  if (S.spam) {
+    try {
+      const reject = async (ids: string[], reason: string) => {
+        if (!ids.length) return;
+        await db(`ai_feedback?id=in.(${ids.join(",")})`, { method: "PATCH", headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ review_status: "rejected", ai_verdict: `Auto-cleaned: ${reason}.`, reviewed_at: now() }) });
+        out.spam = (out.spam as number) + ids.length;
+      };
+      const fresh: { id: string; question: string | null; note: string | null; answer: string | null; platform: string | null; device: string | null; app_version: string | null; created_at: string }[] =
+        await db(`ai_feedback?review_status=eq.new&kind=in.(${FEEDBACK_KINDS})&select=id,question,note,answer,platform,device,app_version,created_at&order=created_at.asc&limit=500`, { method: "GET" });
+      const byReason = new Map<string, string[]>();
+      for (const r of fresh) {
+        const why = junkReason(r);
+        if (why) byReason.set(why, [...(byReason.get(why) ?? []), r.id]);
+      }
+      for (const [why, ids] of byReason) await reject(ids, why);
+      const junkIds = new Set([...byReason.values()].flat());
+      // test rows older than 7 days that are still open
+      const old: { id: string; question: string | null; note: string | null; platform: string | null }[] =
+        await db(`ai_feedback?review_status=in.(new,needs_review)&created_at=lt.${ago(24 * 7)}&select=id,question,note,platform&limit=500`, { method: "GET" });
+      await reject(old.filter(isTestRow).map((r) => r.id), "test report older than 7 days");
+      // floods: more than FLOOD_PER_DAY reports in 24 h from the same platform + device + version
+      const day: { id: string; platform: string | null; device: string | null; app_version: string | null; review_status: string }[] =
+        await db(`ai_feedback?kind=in.(${FEEDBACK_KINDS})&created_at=gte.${ago(24)}&select=id,platform,device,app_version,review_status&order=created_at.asc&limit=2000`, { method: "GET" });
+      const groups = new Map<string, typeof day>();
+      for (const r of day) { const k = `${r.platform}|${r.device}|${r.app_version}`; groups.set(k, [...(groups.get(k) ?? []), r]); }
+      const flood: string[] = [];
+      for (const g of groups.values()) if (g.length > FLOOD_PER_DAY) flood.push(...g.slice(FLOOD_PER_DAY).filter((r) => r.review_status === "new" && !junkIds.has(r.id)).map((r) => r.id));
+      await reject(flood, `more than ${FLOOD_PER_DAY} reports in 24 hours from the same device`);
+      const n = out.spam as number;
+      if (n) await logEvent("spam", "rejected", `Cleaned up ${plural(n, "junk report")} (empty, random letters, old tests or floods).`, null, { reasons: Object.fromEntries([...byReason].map(([k, v]) => [k, v.length])), flood: flood.length });
+      await setResult("spam", n ? `Cleaned ${plural(n, "report")}` : "Nothing to clean");
+    } catch (e) { await setResult("spam", `Failed: ${(e as Error).message}`); }
+  }
+
+  // B) Auto-merge duplicates: a new report with the same question as an earlier one is linked to it and closed.
+  if (S.duplicates) {
+    try {
+      const pool: { id: string; question: string; review_status: string; ai_verdict: string | null; created_at: string }[] = await db(
+        `ai_feedback?kind=in.(${FEEDBACK_KINDS})&question=not.is.null&review_status=neq.duplicate&created_at=gte.${ago(24 * 90)}&select=id,question,review_status,ai_verdict,created_at&order=created_at.asc&limit=3000`,
+        { method: "GET" });
+      const first = new Map<string, { id: string; review_status: string }>();
+      const merged: { id: string; to: string }[] = [];
+      for (const r of pool) {
+        const k = norm(r.question);
+        if (k.length < 8) continue;
+        const f = first.get(k);
+        if (!f) { if (!/^Auto-cleaned/.test(r.ai_verdict ?? "")) first.set(k, r); continue; }
+        if (r.review_status !== "new") continue;
+        const state = f.review_status === "needs_review" ? "waiting for you" : f.review_status === "new" ? "being checked" : "already handled";
+        await mark(r.id, "duplicate", `Duplicate: same question as report ${f.id.slice(0, 8)} (${state}).`, null, { duplicate_of: f.id });
+        merged.push({ id: r.id, to: f.id });
+      }
+      out.merged = merged.length;
+      if (merged.length) await logEvent("duplicates", "merged", `Merged ${plural(merged.length, "repeat report")} into earlier ones.`, merged[0].to, { merged });
+      await setResult("duplicates", merged.length ? `Merged ${plural(merged.length, "report")}` : "No repeats found");
+    } catch (e) { await setResult("duplicates", `Failed: ${(e as Error).message}`); }
+  }
+
+  // C) Rows without a question (crash/stuck reports, Q&A not shared) -> owner review, no AI call.
   const noQ = await db("ai_feedback?review_status=eq.new&or=(question.is.null,question.eq.)&select=id", {
     method: "PATCH",
-    body: JSON.stringify({ review_status: "needs_review", ai_verdict: "No question shared - nothing to fact-check.", reviewed_at: new Date().toISOString() }),
+    body: JSON.stringify({ review_status: "needs_review", ai_verdict: "No question shared - nothing to fact-check.", reviewed_at: now() }),
   });
   out.no_question = noQ?.length ?? 0;
 
-  // 2) Up to BATCH rows with a question, oldest first.
-  const rows: Row[] = await db(
-    `ai_feedback?review_status=eq.new&question=not.is.null&select=id,question,answer,note&order=created_at.asc&limit=${BATCH}`,
-    { method: "GET" },
-  );
-  if (!rows.length || !GEMINI_KEY) return Response.json(out);
-  const facts: Fact[] = await db("ai_facts?active=eq.true&select=id,fact&order=id&limit=300", { method: "GET" });
-  let stop = false; // set on quota / outage / config errors: leave the rest 'new' for next hour
-
-  async function handle(row: Row, i: number) {
-    await new Promise((r) => setTimeout(r, i * STAGGER_MS));
-    if (stop || Date.now() - started > LAST_START_MS) { inc("deferred"); return; }
-    try {
-      const { v, sources, independent, candidates } = await check(row, facts);
-      inc("checked");
-      const src = { model: MODEL, mode: GOOGLE_GROUNDING ? "google_search" : "url_context", sources, candidates };
-      if (!v) { await mark(row.id, "needs_review", "AI reply could not be read.", src); inc("needs_review"); return; }
-      const fact = String(v.correct_fact ?? "").trim();
-      const summary = `${v.answer_status}/${v.category}: ${v.reason ?? ""}${fact ? ` | Suggested fact: ${fact}` : ""}`;
-      const brand = BRAND_RE.test(`${row.question} ${row.answer ?? ""} ${fact}`);
-
-      if (v.answer_status === "correct" && !brand) {
-        await mark(row.id, "rejected", `App answer judged correct. ${summary}`, src); inc("rejected"); return;
-      }
-      // Already covered by an existing (owner-curated or earlier auto) fact: close it, add nothing.
-      const dup = (v.answer_status === "wrong" || v.answer_status === "partly_wrong") && v.category === "general_public_fact" && !brand &&
-        ((v.duplicate_of != null && facts.find((f) => f.id === Number(v.duplicate_of) && f.id > 0)) || (fact && facts.find((f) => f.id > 0 && covers(f.fact, fact))));
-      if (dup) {
-        await mark(row.id, "auto_added", `Already covered by fact #${dup.id} - nothing new added. ${summary}`, src);
-        inc("duplicate"); return;
-      }
-      // Very similar to an existing fact but not clearly the same: let the owner decide (avoids near-duplicates/conflicts).
-      const similar = facts.find((f) => f.id > 0 && fact && overlap(f.fact, fact) >= 0.6);
-      if (similar && v.category === "general_public_fact" && !brand) {
-        await mark(row.id, "needs_review", `Needs review (similar to fact #${similar.id}). ${summary}`, src); inc("needs_review"); return;
-      }
-      const eligible = (v.answer_status === "wrong" || v.answer_status === "partly_wrong") &&
-        v.category === "general_public_fact" && !brand && fact.length > 10 && fact.length <= 300 &&
-        independent >= 2 && v.conflicts_with == null;
-      if (!eligible) {
-        const why = brand ? "Elric/founder topic" : v.category !== "general_public_fact" ? `${v.category}` :
-          independent < 2 ? `only ${independent} independent source(s)` :
-          v.conflicts_with != null ? `conflicts with fact #${v.conflicts_with}` : "not clearly wrong-and-correctable";
-        await mark(row.id, "needs_review", `Needs review (${why}). ${summary}`, src); inc("needs_review"); return;
-      }
-      const placeholder = { id: -1, fact }; facts.push(placeholder); // reserve before await (dedupe within batch)
-      const [ins] = await db("ai_facts", {
-        method: "POST",
-        body: JSON.stringify({
-          topic: String(v.topic ?? "general").slice(0, 60), fact, lang: v.lang === "hi" ? "hi" : "en",
-          active: true, source: "auto", sources: { ...src, from_feedback: row.id },
-        }),
-      });
-      placeholder.id = ins.id;
-      await mark(row.id, "auto_added", `Added fact #${ins.id}. ${summary}`, src); inc("auto_added");
-    } catch (e) {
-      const status = (e as { status?: number }).status;
-      if (status && (status === 429 || status >= 500 || [400, 401, 403, 404].includes(status))) {
-        stop = true; inc("deferred"); out.last_error = (e as Error).message; return;
-      }
-      if ((e as Error).name === "TimeoutError") { inc("deferred"); return; }
-      inc("errors");
-      await mark(row.id, "needs_review", `Auto-check failed: ${(e as Error).message}`.slice(0, 300), null).catch(() => {});
+  // D) Checker: up to BATCH new rows (oldest first), then re-checks of items waiting > 24 h, sharing the same budget.
+  type Job = Row & { recheck: boolean };
+  let jobs: Job[] = [];
+  if (S.checker && GEMINI_KEY) {
+    const rows: Row[] = await db(
+      `ai_feedback?review_status=eq.new&question=not.is.null&select=id,question,answer,note&order=created_at.asc&limit=${BATCH}`,
+      { method: "GET" });
+    jobs = rows.map((r) => ({ ...r, recheck: false }));
+    if (S.recheck && jobs.length < BATCH) {
+      const waiting: (Row & { ai_verdict: string | null })[] = await db(
+        `ai_feedback?review_status=eq.needs_review&recheck_count=eq.0&kind=in.(${FEEDBACK_KINDS})&question=not.is.null&reviewed_at=lt.${ago(24)}&select=id,question,answer,note,ai_verdict&order=created_at.asc&limit=50`,
+        { method: "GET" });
+      const ok = waiting.filter((r) => (r.question ?? "").trim() && !BRAND_RE.test(`${r.question} ${r.answer ?? ""}`) && !/^Auto-cleaned/.test(r.ai_verdict ?? ""));
+      jobs.push(...ok.slice(0, Math.min(RECHECK_MAX, BATCH - jobs.length)).map((r) => ({ id: r.id, question: r.question, answer: r.answer, note: r.note, recheck: true })));
+      // brand / personal ones can never be auto-added: mark them as re-check done so they are not looked at again
+      const skip = waiting.filter((r) => !ok.includes(r)).map((r) => r.id);
+      if (skip.length) await db(`ai_feedback?id=in.(${skip.join(",")})`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ recheck_count: 1 }) });
     }
   }
-  await Promise.all(rows.map(handle));
+  if (jobs.length) {
+    const facts: Fact[] = await db("ai_facts?active=eq.true&select=id,fact&order=id&limit=300", { method: "GET" });
+    let stop = false; // set on quota / outage / config errors: leave the rest for next hour
+    const added: { id: number; fact: string; news: boolean; recheck: boolean }[] = [];
+
+    async function handle(row: Job, i: number) {
+      await new Promise((r) => setTimeout(r, i * STAGGER_MS));
+      if (stop || Date.now() - started > LAST_START_MS) { inc("deferred"); return; }
+      const extra = row.recheck ? { recheck_count: 1 } : {};
+      const pre = row.recheck ? "Re-checked after 24 h: " : "";
+      // On a re-check only a proven fact changes the status; otherwise the item keeps waiting for the owner.
+      const keep = async (status: string, verdict: string, src: unknown) => {
+        if (row.recheck) { await mark(row.id, "needs_review", pre + verdict, src, extra); inc("recheck_kept"); }
+        else { await mark(row.id, status, verdict, src); inc(status === "rejected" ? "rejected" : "needs_review"); }
+      };
+      try {
+        const { v, sources, independent, candidates } = await check(row, facts);
+        inc("checked"); if (row.recheck) inc("rechecked");
+        const src = { model: MODEL, mode: GOOGLE_GROUNDING ? "google_search" : "url_context", sources, candidates };
+        if (!v) { await keep("needs_review", "AI reply could not be read.", src); return; }
+        const fact = String(v.correct_fact ?? "").trim();
+        const summary = `${v.answer_status}/${v.category}: ${v.reason ?? ""}${fact ? ` | Suggested fact: ${fact}` : ""}`;
+        const brand = BRAND_RE.test(`${row.question} ${row.answer ?? ""} ${fact}`);
+        const news = v.category === "time_sensitive" && S.expiry; // news facts may be added, with an expiry date
+        const addable = v.category === "general_public_fact" || news;
+
+        if (v.answer_status === "correct" && !brand) { await keep("rejected", `App answer judged correct. ${summary}`, src); return; }
+        const wrong = v.answer_status === "wrong" || v.answer_status === "partly_wrong";
+        const dup = wrong && addable && !brand &&
+          ((v.duplicate_of != null && facts.find((f) => f.id === Number(v.duplicate_of) && f.id > 0)) || (fact && facts.find((f) => f.id > 0 && covers(f.fact, fact))));
+        if (dup) {
+          await mark(row.id, "auto_added", `${pre}Already covered by fact #${dup.id} - nothing new added. ${summary}`, src, extra);
+          inc("duplicate"); return;
+        }
+        const similar = facts.find((f) => f.id > 0 && fact && overlap(f.fact, fact) >= 0.6);
+        if (similar && addable && !brand) { await keep("needs_review", `Needs review (similar to fact #${similar.id}). ${summary}`, src); return; }
+        const eligible = wrong && addable && !brand && fact.length > 10 && fact.length <= 300 && independent >= 2 && v.conflicts_with == null;
+        if (!eligible) {
+          const why = brand ? "Elric/founder topic" : !addable ? `${v.category}` :
+            independent < 2 ? `only ${independent} independent source(s)` :
+            v.conflicts_with != null ? `conflicts with fact #${v.conflicts_with}` : "not clearly wrong-and-correctable";
+          await keep("needs_review", `Needs review (${why}). ${summary}`, src); return;
+        }
+        if (!S.auto_add) { await keep("needs_review", `Needs review (auto-add is switched off; ${independent} sources agree). ${summary}`, src); return; }
+        const placeholder = { id: -1, fact }; facts.push(placeholder); // reserve before await (dedupe within batch)
+        const expires = news ? new Date(Date.now() + NEWS_DAYS * 86400_000).toISOString() : null;
+        const [ins] = await db("ai_facts", {
+          method: "POST",
+          body: JSON.stringify({
+            topic: String(v.topic ?? "general").slice(0, 60), fact, lang: v.lang === "hi" ? "hi" : "en",
+            active: true, source: "auto", sources: { ...src, from_feedback: row.id, ...(news ? { time_sensitive: true } : {}) },
+            ...(expires ? { expires_at: expires } : {}),
+          }),
+        });
+        placeholder.id = ins.id;
+        await mark(row.id, "auto_added", `${pre}Added fact #${ins.id}${news ? ` (news, switches off after ${NEWS_DAYS} days)` : ""}. ${summary}`, src, extra);
+        inc("auto_added"); if (row.recheck) inc("recheck_added");
+        added.push({ id: ins.id, fact, news, recheck: row.recheck });
+      } catch (e) {
+        const status = (e as { status?: number }).status;
+        if (status && (status === 429 || status >= 500 || [400, 401, 403, 404].includes(status))) {
+          stop = true; inc("deferred"); out.last_error = (e as Error).message; return;
+        }
+        if ((e as Error).name === "TimeoutError") { inc("deferred"); return; }
+        inc("errors");
+        await mark(row.id, "needs_review", `${pre}Auto-check failed: ${(e as Error).message}`.slice(0, 300), null, extra).catch(() => {});
+      }
+    }
+    await Promise.all(jobs.map(handle));
+    for (const a of added) {
+      await logEvent(a.recheck ? "recheck" : "auto_add", "fact_added",
+        `Added fact #${a.id}${a.news ? " (news, expires in 30 days)" : ""}: ${short(a.fact, 120)}`, String(a.id));
+    }
+  }
+  const n = (k: string) => out[k] as number;
+  const fresh = n("checked") - n("rechecked");
+  if (S.checker) {
+    const parts = [fresh && `checked ${plural(fresh, "report")}`, n("auto_added") - n("recheck_added") && `added ${plural(n("auto_added") - n("recheck_added"), "fact")}`,
+      n("rejected") && `${n("rejected")} answer(s) were right`, n("duplicate") && `${n("duplicate")} already covered`,
+      (n("needs_review") + n("no_question")) && `${n("needs_review") + n("no_question")} need you`, n("deferred") && `${n("deferred")} left for next hour`].filter(Boolean);
+    if (fresh || n("no_question")) await logEvent("checker", "checked", `Checker: ${parts.join(", ")}.`, null, out);
+    await setResult("checker", !GEMINI_KEY ? "Not set up (no AI key)" : parts.length ? parts.join(", ") : "Nothing new to check");
+    if (S.auto_add) await setResult("auto_add", n("auto_added") - n("recheck_added") > 0 ? `Added ${plural(n("auto_added") - n("recheck_added"), "fact")}` : fresh ? "Nothing proven this run" : "Nothing new to check");
+  }
+  if (S.recheck && S.checker) {
+    const r = n("rechecked");
+    if (r) await logEvent("recheck", "rechecked", `Re-checked ${plural(r, "waiting item")}: ${n("recheck_added")} now proven and added.`);
+    await setResult("recheck", r ? `Re-checked ${r}, added ${n("recheck_added")}` : "Nothing waiting over 24 h");
+  }
+
+  // E) News facts expire: switch off facts whose expires_at has passed (apps only download active facts).
+  if (S.expiry) {
+    try {
+      const gone: { id: number; fact: string }[] = await db(`ai_facts?active=is.true&expires_at=lt.${now()}&select=id,fact`, {
+        method: "PATCH", body: JSON.stringify({ active: false, updated_at: now() }) });
+      out.expired = gone.length;
+      for (const f of gone) await logEvent("expiry", "expired", `Switched off expired news fact #${f.id}: ${short(f.fact, 100)}`, String(f.id));
+      await setResult("expiry", gone.length ? `Switched off ${plural(gone.length, "fact")}` : "No facts expired");
+    } catch (e) { await setResult("expiry", `Failed: ${(e as Error).message}`); }
+  }
+
+  // F) Keep daily online-question totals (ai_usage only holds 2 days) and a once-a-day summary.
+  try { await fetch(`${SB_URL}/rest/v1/rpc/ai_usage_rollup`, { method: "POST", headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" }, body: "{}" }); } catch { /* ignore */ }
+  if (S.daily_summary) {
+    try {
+      const ist = (d: Date) => new Date(d.getTime() + 5.5 * 3600_000).toISOString().slice(0, 10);
+      const yday = ist(new Date(Date.now() - 86400_000));
+      const have: unknown[] = await db(`ai_admin_events?automation=eq.daily_summary&ref=eq.${yday}&select=id&limit=1`, { method: "GET" });
+      if (!have.length) {
+        const from = new Date(`${yday}T00:00:00+05:30`).toISOString(), to = new Date(`${yday}T24:00:00+05:30`).toISOString();
+        const cnt = async (path: string) => {
+          const r = await fetch(`${SB_URL}/rest/v1/${path}`, { method: "HEAD", headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, Prefer: "count=exact", Range: "0-0" } });
+          return Number((r.headers.get("content-range") ?? "/0").split("/")[1]) || 0;
+        };
+        const [reports, factsAdded, cleaned, waiting, usage] = await Promise.all([
+          cnt(`ai_feedback?select=id&created_at=gte.${from}&created_at=lt.${to}`),
+          cnt(`ai_admin_events?select=id&action=eq.fact_added&created_at=gte.${from}&created_at=lt.${to}`),
+          cnt(`ai_feedback?select=id&review_status=in.(rejected,duplicate)&reviewed_at=gte.${from}&reviewed_at=lt.${to}&or=(ai_verdict.like.${encodeURIComponent("Auto-cleaned*")},ai_verdict.like.${encodeURIComponent("Duplicate*")},ai_verdict.like.${encodeURIComponent("App answer judged correct*")})`),
+          cnt("ai_feedback?select=id&review_status=eq.needs_review"),
+          db(`ai_usage_daily?day=eq.${yday}&select=questions,devices`, { method: "GET" }).catch(() => []),
+        ]);
+        const q = usage?.[0]?.questions ?? 0, dv = usage?.[0]?.devices ?? 0;
+        const label = new Date(`${yday}T12:00:00+05:30`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
+        await logEvent("daily_summary", "summary",
+          `Daily summary for ${label}: ${plural(q, "online question")} from ${plural(dv, "device")}, ${plural(reports, "new report")}, ${plural(factsAdded, "fact")} added, ${cleaned} closed automatically, ${waiting} waiting for you.`,
+          yday, { questions: q, devices: dv, reports, facts_added: factsAdded, closed: cleaned, waiting });
+        await setResult("daily_summary", `Summary written for ${label}`);
+      }
+    } catch (e) { await setResult("daily_summary", `Failed: ${(e as Error).message}`); }
+  }
+  // housekeeping: keep 120 days of activity
+  try { await db(`ai_admin_events?created_at=lt.${ago(24 * 120)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }); } catch { /* ignore */ }
   return Response.json(out);
 }
