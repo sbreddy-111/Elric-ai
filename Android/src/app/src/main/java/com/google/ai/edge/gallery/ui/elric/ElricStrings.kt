@@ -356,6 +356,8 @@ object T {
   val savedToMemory = Str("✓ Saved to memory", "✓ मेमोरी में सेव हो गया")
   val aboutElric = Str("About Elric AI", "Elric AI के बारे में")
   val licenses = Str("Open-source licenses", "ओपन-सोर्स लाइसेंस")
+  val privacyPolicy = Str("Privacy policy", "प्राइवेसी पॉलिसी")
+  val termsOfUse = Str("Terms of use", "उपयोग की शर्तें")
   val aboutLine = Str("v{v} · Online or on your phone, private by default", "v{v} · ऑनलाइन या आपके फ़ोन पर, शुरू से प्राइवेट")
 
   // Models screen

@@ -51,11 +51,33 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  // Play upload key. Used only when all three env vars are set (the "Build Play AAB" workflow sets
+  // them from GitHub secrets). Without them, release keeps the debug key so the test-APK workflow
+  // and local builds work unchanged.
+  val uploadStoreFile = System.getenv("ANDROID_UPLOAD_KEYSTORE_PATH")
+  val uploadKeyPassword = System.getenv("ANDROID_UPLOAD_KEY_PASSWORD")
+  val uploadKeyAlias = System.getenv("ANDROID_UPLOAD_KEY_ALIAS")
+  val hasUploadKey =
+    !uploadStoreFile.isNullOrBlank() && !uploadKeyPassword.isNullOrBlank() && !uploadKeyAlias.isNullOrBlank()
+  signingConfigs {
+    if (hasUploadKey) {
+      create("upload") {
+        storeFile = file(uploadStoreFile!!)
+        storeType = "PKCS12"
+        storePassword = uploadKeyPassword
+        keyAlias = uploadKeyAlias
+        keyPassword = uploadKeyPassword
+      }
+    }
+  }
+
   buildTypes {
     release {
       isMinifyEnabled = false
+      isDebuggable = false
+      isJniDebuggable = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("debug")
+      signingConfig = signingConfigs.getByName(if (hasUploadKey) "upload" else "debug")
     }
   }
   compileOptions {

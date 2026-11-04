@@ -79,6 +79,7 @@ import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.DownloadForOffline
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.GraphicEq
@@ -86,6 +87,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Policy
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Sell
@@ -1340,6 +1342,20 @@ private fun ESwitch(on: Boolean) {
   }
 }
 
+const val ELRIC_PRIVACY_URL = "https://elricai.sbs/privacy.html"
+const val ELRIC_TERMS_URL = "https://elricai.sbs/terms.html"
+
+/** Opens an Elric web page (privacy policy, terms) in the browser; never crashes without one. */
+fun openElricLink(context: android.content.Context, url: String) {
+  try {
+    context.startActivity(
+      Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+  } catch (_: Exception) {
+    // No browser installed: nothing to open.
+  }
+}
+
 /** One row of a profile group (`.pr`). */
 @Composable
 private fun ProfileRow(
@@ -1422,6 +1438,7 @@ private fun ProfileScreen(
 ) {
   val p = pal()
   val lang = LocalElricLang.current
+  val profileContext = LocalContext.current
   var askAge by remember { mutableStateOf(false) }
   var pick by remember { mutableStateOf<String?>(null) }
   var confirmClear by remember { mutableStateOf(false) }
@@ -1573,6 +1590,8 @@ private fun ProfileScreen(
       }
       ProfileGroup(tr(T.secAbout)) {
         ProfileRow(Icons.Outlined.Info, tr(T.aboutElric), first = true, onClick = onAboutApp)
+        ProfileRow(Icons.Outlined.Policy, tr(T.privacyPolicy)) { openElricLink(profileContext, ELRIC_PRIVACY_URL) }
+        ProfileRow(Icons.Outlined.Description, tr(T.termsOfUse)) { openElricLink(profileContext, ELRIC_TERMS_URL) }
         ProfileRow(Icons.Outlined.Code, tr(T.licenses), onClick = onLicenses)
         ProfileRow(Icons.Outlined.Sell, tr(T.version), value = BuildConfig.VERSION_NAME, chevron = false)
       }
