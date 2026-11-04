@@ -27,7 +27,8 @@ const SB_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 const SALT = Deno.env.get("AI_CHAT_SALT") ?? "";
 const TEST_SECRET = Deno.env.get("AUTOFIX_SECRET") ?? "";
-const GROQ_KEY = Deno.env.get("GROQ_API_KEY") ?? "";
+const GROQ_KEY = (Deno.env.get("GROQ_API_KEY") ?? "").trim().replace(/^Bearer\s+/i, "");
+let groqLast = "";
 const GROQ_MODEL = Deno.env.get("AI_CHAT_GROQ_MODEL") ?? "openai/gpt-oss-20b";
 /** Fall back to Gemini if Groq has not sent its first word by then. */
 const GROQ_FIRST_MS = 4_000;
@@ -426,6 +427,7 @@ async function startGroq(r: Req, system: string, search: boolean): Promise<GroqL
     });
     if (!res.ok || !res.body) {
       console.log(`ai-chat groq status ${res.status}`); // status only, never content
+      groqLast = String(res.status);
       if (res.status === 429) {
         const ra = Number(res.headers.get("retry-after") ?? "");
         groqCooldownUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 3600) : 60) * 1000;
@@ -442,6 +444,7 @@ async function startGroq(r: Req, system: string, search: boolean): Promise<GroqL
   } catch {
     clearTimeout(timer);
     console.log("ai-chat groq timeout/error");
+    groqLast = "err";
     return null;
   }
 }
@@ -628,7 +631,7 @@ async function handle(req: Request): Promise<Response> {
   return new Response(relay(a.res, a.model), {
     headers: {
       ...sse,
-      "x-elric-src": "gem",
+      "x-elric-src": "gem", "x-elric-gs": groqLast,
       "Server-Timing": `limit;dur=${marks.limit}, facts;dur=${marks.facts}${marks.groq !== undefined ? `, groq;dur=${marks.groq}` : ""}, model;dur=${marks.model}`,
     },
   });
