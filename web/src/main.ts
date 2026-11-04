@@ -415,6 +415,8 @@ async function send(text: string, photo: P.Photo | null = null): Promise<Turn | 
   shell();
   let final = false;
   if (online) final = await answerOnline(reply, text, history, photo);
+  // Photos can't fall back to the device, so try online once more on our own before giving up.
+  if (!final && photo && online && !stopRequested && O.ready()) final = await answerOnline(reply, text, history, photo);
   if (!final) {
     if (photo) { reply.text = t('photoFailed'); reply.failed = true; } // the device model can't see photos
     else if (E.isLoaded()) { paint(reply); await answerOffline(reply, [...history, { role: 'user', text }]); }
@@ -701,7 +703,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.3';
+const APP_VERSION = '0.4.4';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],

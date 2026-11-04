@@ -10,6 +10,8 @@ export const CHAT_KEY = 'sb_publishable_Yv1D_ZUk38W3-ZvYdoAD8A_-fx5gPCT';
 
 /** Time to the first word before answering on the device instead, and longest pause after it. */
 export const FIRST_TOKEN_MS = 15000;
+/** Photos take longer to read: wait longer for the first word. */
+export const PHOTO_FIRST_TOKEN_MS = 30000;
 const STALL_MS = 6000;
 /** After this many failures in a row, online is skipped for BACKOFF_MS. */
 const MAX_FAILS = 2;
@@ -115,6 +117,7 @@ export function busy(): boolean {
 
 /** Sends the question and streams the answer to onText (called with each new piece). */
 export async function ask(body: Body, onText: (piece: string) => void): Promise<End> {
+  const firstMs = body.image ? PHOTO_FIRST_TOKEN_MS : FIRST_TOKEN_MS;
   const me = { ctrl: new AbortController(), cancelled: false };
   current = me;
   const start = Date.now();
@@ -123,7 +126,7 @@ export async function ask(body: Body, onText: (piece: string) => void): Promise<
   let why = '';
   const dog = setInterval(() => {
     const now = Date.now();
-    if (!gotFirst && now - start > FIRST_TOKEN_MS) { why = `no first word in ${FIRST_TOKEN_MS} ms`; me.ctrl.abort(); }
+    if (!gotFirst && now - start > firstMs) { why = `no first word in ${firstMs} ms`; me.ctrl.abort(); }
     else if (gotFirst && now - lastData > STALL_MS) { why = 'stalled'; me.ctrl.abort(); }
   }, 200);
   try {
