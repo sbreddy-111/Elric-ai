@@ -72,7 +72,8 @@ jobs:
           ANDROID_UPLOAD_KEYSTORE_PATH: ${{ steps.key.outputs.signed == 'true' && format('{0}/upload.p12', runner.temp) || '' }}
           ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
           ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
-        run: ./gradlew bundleRelease
+        # More heap than gradle.properties' 2 GB: bundling/signing a ~130 MB bundle can run out.
+        run: ./gradlew bundleRelease --stacktrace -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
 
       - name: Name the bundle
         id: aab
