@@ -33,15 +33,15 @@ android {
   compileSdk { this.version = release(37) { minorApiLevel = 0 } }
 
   defaultConfig {
-    applicationId = "in.elricai.app"
+    applicationId = "com.elricai.elric"
     minSdk = 31
     targetSdk = 37
-    versionCode = 16
+    versionCode = 17
     versionName = "0.4.2"
 
     // AppAuth's library manifest needs this placeholder, but its redirect activity is removed in
     // AndroidManifest.xml (Elric AI has no Hugging Face sign-in), so the value is never used.
-    manifestPlaceholders["appAuthRedirectScheme"] = "in.elricai.app.unused"
+    manifestPlaceholders["appAuthRedirectScheme"] = "com.elricai.elric.unused"
     manifestPlaceholders["applicationName"] = "com.google.ai.edge.gallery.GalleryApplication"
     manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
 
