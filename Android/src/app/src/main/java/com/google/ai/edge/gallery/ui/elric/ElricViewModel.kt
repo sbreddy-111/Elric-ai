@@ -492,6 +492,8 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     chatId = null
     turns.clear()
     needsModel = false
+    // A new chat starts in the user's chosen mode (General unless they picked another).
+    mode = ElricMode.fromId(store.mode)
   }
 
   fun openChat(id: String) {
@@ -519,6 +521,13 @@ class ElricViewModel @Inject constructor(@ApplicationContext private val context
     store.saveChats(chats.toList())
     if (chatId == id) newChat()
     ElricImages.delete(context, images.filter { !isUsed(it) })
+  }
+
+  /** Deletes every saved chat (and their photos) on this phone. */
+  fun clearChats() {
+    val ids = chats.map { it.id }
+    for (id in ids) deleteChat(id)
+    newChat()
   }
 
   /** True when a photo is still shown in a chat or waiting in the composer. */

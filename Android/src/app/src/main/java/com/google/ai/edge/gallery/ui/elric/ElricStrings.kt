@@ -78,32 +78,31 @@ object T {
       "वह भाषा चुनें जिसमें आप सोचते हैं। आप कभी भी बदल सकते हैं।",
     )
 
-  // Start (first launch)
-  val startTitle = Str("Start using Elric AI", "Elric AI इस्तेमाल करना शुरू करें")
-  val startBody =
+  // Welcome (first launch): one short dialog over the chat.
+  val welcomeTitle = Str("Welcome to Elric AI", "Elric AI में आपका स्वागत है")
+  val welcomePrivacy =
     Str(
-      "Online answers are only for users 18 or older. Under 18? Download the offline model and use Elric AI on your phone.",
-      "ऑनलाइन जवाब सिर्फ़ 18 साल या उससे ज़्यादा उम्र वालों के लिए हैं। 18 से कम हैं? ऑफ़लाइन मॉडल डाउनलोड करें और Elric AI फ़ोन पर चलाएँ।",
+      "Chats stay on your phone. Online questions are sent to our server only to answer you.",
+      "चैट आपके फ़ोन पर ही रहती हैं। ऑनलाइन सवाल सिर्फ़ जवाब देने के लिए हमारे सर्वर पर जाते हैं।",
     )
-  val startPrivacy =
+  val welcomeAge =
     Str(
-      "Online answers: your question leaves the phone and is sent to our server and an AI provider to answer you. Chats are saved only on your phone.",
-      "ऑनलाइन जवाब: आपका सवाल फ़ोन से बाहर जाकर जवाब के लिए हमारे सर्वर और एक AI प्रदाता को भेजा जाता है। चैट सिर्फ़ आपके फ़ोन पर सेव होती हैं।",
+      "Online answers are for users 18+. By tapping Continue you confirm you're 18 or older.",
+      "ऑनलाइन जवाब 18+ उम्र वालों के लिए हैं। Continue दबाकर आप पुष्टि करते हैं कि आपकी उम्र 18 या ज़्यादा है।",
     )
-  val startAdult = Str("I'm 18 or older — start now", "मेरी उम्र 18 या ज़्यादा है — अभी शुरू करें")
-  val startMinor =
+  val welcomeContinue = Str("Continue", "Continue")
+  val welcomeUnder18 = Str("Under 18? Use offline mode", "18 से कम? ऑफ़लाइन मोड इस्तेमाल करें")
+  val offlineTip =
     Str(
-      "I'm under 18 — download offline model (about {size}, Wi‑Fi recommended)",
-      "मेरी उम्र 18 से कम है — ऑफ़लाइन मॉडल डाउनलोड करें (लगभग {size}, Wi‑Fi बेहतर)",
+      "Tip: turn on Offline mode in ☰ to use without internet.",
+      "सुझाव: बिना इंटरनेट इस्तेमाल के लिए ☰ में ऑफ़लाइन मोड चालू करें।",
     )
 
   // Offline mode
   val offlineMode = Str("Offline mode", "ऑफ़लाइन मोड")
-  val offlineHow =
-    Str(
-      "Answer without internet using a model on your phone (about {size}).",
-      "फ़ोन पर रखे मॉडल से बिना इंटरनेट जवाब (लगभग {size})।",
-    )
+  val offlineMenu = Str("Offline mode — works without internet", "ऑफ़लाइन मोड — बिना इंटरनेट चलता है")
+  val offlineHow = Str("One-time download · about {size}", "एक बार डाउनलोड · लगभग {size}")
+  val offlineReadyCap = Str("Ready on your phone", "आपके फ़ोन पर तैयार")
   val offlineDownloadingPct = Str("Downloading… {pct}% · tap to see", "डाउनलोड हो रहा है… {pct}% · देखने के लिए दबाएँ")
   val offlineDlTitle = Str("Turn on Offline mode?", "ऑफ़लाइन मोड चालू करें?")
   val offlineDlBody =
@@ -311,11 +310,25 @@ object T {
   val privacy = Str("Privacy", "प्राइवेसी")
   val memory = Str("Memory", "मेमोरी")
   val onlineAnswers = Str("Online answers", "ऑनलाइन जवाब")
-  val onlineHow =
-    Str(
-      "When online, answers come from our server; offline, from your phone.",
-      "इंटरनेट होने पर जवाब हमारे सर्वर से, बिना इंटरनेट आपके फ़ोन से।",
-    )
+  val onlineHow = Str("Smarter answers with internet · 18+", "इंटरनेट से बेहतर जवाब · 18+")
+  // Drawer + profile (mirrors the web app).
+  val recents = Str("Recents", "हाल की चैट")
+  val photoQuestion = Str("Photo question", "फ़ोटो से सवाल")
+  val profile = Str("Profile", "प्रोफ़ाइल")
+  val addName = Str("Add your name", "अपना नाम जोड़ें")
+  val secPersonalise = Str("Personalise", "आपके हिसाब से")
+  val secAI = Str("AI", "AI")
+  val secPrivacy = Str("Privacy & data", "प्राइवेसी और डेटा")
+  val secAbout = Str("About", "जानकारी")
+  val age = Str("Age", "उम्र")
+  val ageYes = Str("18 or older", "18 या ज़्यादा")
+  val ageNo = Str("Not confirmed", "पुष्टि नहीं")
+  val clearChats = Str("Clear all chats", "सारी चैट मिटाएँ")
+  val clearChatsConfirm =
+    Str("Delete all saved chats on this phone? This can't be undone.", "इस फ़ोन की सारी सेव चैट मिटाएँ? यह वापस नहीं होगा।")
+  val version = Str("Version", "वर्शन")
+  val close = Str("Close", "बंद करें")
+  val noMatches = Str("No matching chats.", "कोई मिलती चैट नहीं।")
   val age18Text =
     Str(
       "Online answers are for users 18 or older. Questions are sent to our server and an AI provider.",

@@ -114,7 +114,8 @@ class ElricStore(context: Context) {
     set(v) = prefs.edit().putString("lang", v).apply()
 
   var mode: String
-    get() = prefs.getString("mode", ElricMode.STUDY.id) ?: ElricMode.STUDY.id
+    // General is the default until the user picks another mode (Study before 0.4.1).
+    get() = prefs.getString("mode", ElricMode.GENERAL.id) ?: ElricMode.GENERAL.id
     set(v) = prefs.edit().putString("mode", v).apply()
 
   /** Short answers are the default. */

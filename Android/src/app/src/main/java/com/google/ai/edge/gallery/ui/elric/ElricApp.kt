@@ -55,6 +55,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -62,13 +63,35 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DownloadForOffline
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Sell
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -105,6 +128,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.google.ai.edge.gallery.BuildConfig
@@ -126,7 +150,6 @@ import kotlinx.coroutines.delay
 private enum class Screen {
   SPLASH,
   ONBOARD,
-  START,
   ABOUT,
   DOWNLOAD,
   HOME,
@@ -134,6 +157,7 @@ private enum class Screen {
   MODELS,
   PRIVACY,
   MEMORY,
+  PROFILE,
 }
 
 private enum class Overlay {
@@ -188,6 +212,7 @@ fun ElricApp(
     mutableStateOf(if (!vm.onboarded) Screen.SPLASH else if (vm.turns.isNotEmpty()) Screen.CHAT else Screen.HOME)
   }
   var returnTo by rememberSaveable { mutableStateOf(Screen.HOME) }
+  var profileReturn by rememberSaveable { mutableStateOf(Screen.HOME) }
   var overlay by rememberSaveable { mutableStateOf(Overlay.NONE) }
   var input by rememberSaveable { mutableStateOf("") }
   var toast by remember { mutableStateOf<String?>(null) }
@@ -222,6 +247,17 @@ fun ElricApp(
 
   fun openFromMenu(s: Screen) {
     returnTo = if (screen == Screen.CHAT) Screen.CHAT else Screen.HOME
+    go(s)
+  }
+
+  // Settings live on the Profile page (drawer avatar); its sub-screens come back to it.
+  fun openProfile() {
+    if (screen != Screen.PROFILE) profileReturn = if (screen == Screen.CHAT) Screen.CHAT else Screen.HOME
+    go(Screen.PROFILE)
+  }
+
+  fun openFromProfile(s: Screen) {
+    returnTo = Screen.PROFILE
     go(s)
   }
 
@@ -395,12 +431,12 @@ fun ElricApp(
     if (vm.talkState != ElricTalkState.OFF) vm.stopTalk() else vm.cancelVoice()
   }
   BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
-  BackHandler(enabled = overlay == Overlay.NONE && !voiceActive && screen in setOf(Screen.CHAT, Screen.MODELS, Screen.PRIVACY, Screen.MEMORY, Screen.DOWNLOAD, Screen.START) ||
+  BackHandler(enabled = overlay == Overlay.NONE && !voiceActive && screen in setOf(Screen.CHAT, Screen.MODELS, Screen.PRIVACY, Screen.MEMORY, Screen.DOWNLOAD, Screen.PROFILE) ||
     (overlay == Overlay.NONE && !voiceActive && screen == Screen.ABOUT && vm.onboarded)) {
     when (screen) {
       Screen.CHAT -> newChat()
       Screen.DOWNLOAD -> go(Screen.HOME)
-      Screen.START -> go(Screen.ONBOARD)
+      Screen.PROFILE -> go(profileReturn)
       Screen.ABOUT -> go(returnTo)
       else -> go(returnTo)
     }
@@ -424,30 +460,12 @@ fun ElricApp(
         label = "screen",
       ) { s ->
         when (s) {
-          Screen.SPLASH -> SplashScreen(onDone = { if (screen == Screen.SPLASH) go(Screen.ONBOARD) })
+          Screen.SPLASH -> SplashScreen(onDone = { if (screen == Screen.SPLASH) go(Screen.HOME) })
           Screen.ONBOARD ->
             OnboardingScreen(
               lang = vm.lang,
               onLang = { vm.updateLang(it) },
-              onDone = { go(Screen.START) },
-            )
-          Screen.START ->
-            StartScreen(
-              sizeText = offlineSize,
-              onBack = { go(Screen.ONBOARD) },
-              onAdult = {
-                // 18+: online answers on, no download; straight to chat.
-                vm.confirmAge18AndGoOnline()
-                vm.updateOfflineOn(false)
-                vm.finishOnboarding()
-                go(Screen.HOME)
-              },
-              onMinor = {
-                // Under 18: online answers stay off; download the offline model.
-                vm.updateOfflineOn(true)
-                vm.finishOnboarding()
-                go(if (downloaded.isNotEmpty()) Screen.HOME else Screen.DOWNLOAD)
-              },
+              onDone = { go(Screen.HOME) },
             )
           Screen.ABOUT ->
             AboutYouScreen(
@@ -461,7 +479,7 @@ fun ElricApp(
                 if (vm.onboarded) {
                   go(returnTo)
                 } else {
-                  go(Screen.START)
+                  go(Screen.HOME)
                 }
               },
             )
@@ -557,6 +575,7 @@ fun ElricApp(
                   offline = offline,
                   online = vm.onlineOn && !offline,
                   hasOffline = hasOffline,
+                  showOfflineTip = !vm.offlineOn && downloadingModel == null,
                   name = vm.name,
                   onSuggestion = { i, text ->
                     if (i == 1) {
@@ -626,6 +645,30 @@ fun ElricApp(
               onDelete = { vm.deleteMemory(it) },
               onClearAll = { vm.clearMemories() },
               onBack = { go(returnTo) },
+            )
+          Screen.PROFILE ->
+            ProfileScreen(
+              vm = vm,
+              light = light,
+              showModels = downloaded.isNotEmpty(),
+              modelValue = currentModel?.let { elricModelDisplayName(it.name) } ?: "",
+              offlineOn = vm.offlineOn,
+              offlineReady = downloaded.isNotEmpty(),
+              offlineSize = offlineSize,
+              offlinePct = downloadingModel?.let { (statuses[it.name].fraction(it) * 100).toInt() },
+              onClose = { go(profileReturn) },
+              onAboutYou = { openFromProfile(Screen.ABOUT) },
+              onOffline = { toggleOffline() },
+              onModels = { openFromProfile(Screen.MODELS) },
+              onMemory = { openFromProfile(Screen.MEMORY) },
+              onPrivacy = { openFromProfile(Screen.PRIVACY) },
+              onAboutApp = { overlay = Overlay.ABOUT_APP },
+              onLicenses = { context.startActivity(Intent(context, OssLicensesMenuActivity::class.java)) },
+              onTheme = { wantLight ->
+                val t = if (wantLight) Theme.THEME_LIGHT else Theme.THEME_DARK
+                ThemeSettings.themeOverride.value = t
+                modelManagerViewModel.saveThemeOverride(t)
+              },
             )
         }
       }
@@ -736,28 +779,16 @@ fun ElricApp(
       ) {
         ElricDrawer(
           vm = vm,
-          light = light,
           onClose = { overlay = Overlay.NONE },
           onOpenChat = { id ->
             vm.openChat(id)
             input = ""
             go(Screen.CHAT)
           },
-          onAboutYou = { openFromMenu(Screen.ABOUT) },
-          onModels = { openFromMenu(Screen.MODELS) },
-          showModels = downloaded.isNotEmpty(),
-          offlineOn = vm.offlineOn,
-          offlineSize = offlineSize,
-          offlinePct = downloadingModel?.let { (statuses[it.name].fraction(it) * 100).toInt() },
-          onOffline = { toggleOffline() },
-          onMemory = { openFromMenu(Screen.MEMORY) },
-          onPrivacy = { openFromMenu(Screen.PRIVACY) },
-          onAboutApp = { overlay = Overlay.ABOUT_APP },
-          onToggleTheme = {
-            val t = if (light) Theme.THEME_DARK else Theme.THEME_LIGHT
-            ThemeSettings.themeOverride.value = t
-            modelManagerViewModel.saveThemeOverride(t)
-          },
+          onNewChat = { newChat() },
+          onTalk = { startTalk() },
+          onPhoto = { overlay = Overlay.CAMERA },
+          onProfile = { openProfile() },
         )
       }
 
@@ -896,7 +927,68 @@ fun ElricApp(
       )
     }
 
-    if (showTos && screen == Screen.HOME) {
+    // First launch (new installs): one short welcome dialog over the chat. Continue confirms 18+
+    // and starts online; "Under 18?" keeps online off and offers the offline download.
+    if (!vm.onboarded && screen == Screen.HOME) {
+      fun finishWelcome() {
+        if (showTos) {
+          showTos = false
+          tosViewModel.acceptTos()
+        }
+        vm.finishOnboarding()
+      }
+      AlertDialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        containerColor = palette.surface,
+        title = {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            EText(tr(T.welcomeTitle), size = 18.sp, weight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            EText(
+              if (vm.lang == ElricLang.HI) "English" else "हिन्दी",
+              size = 13.sp,
+              color = palette.goldInk,
+              weight = FontWeight.Medium,
+              modifier =
+                Modifier.clip(CircleShape)
+                  .clickable { vm.updateLang(if (vm.lang == ElricLang.HI) ElricLang.EN else ElricLang.HI) }
+                  .padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+          }
+        },
+        text = {
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            EText(tr(T.welcomePrivacy), size = 14.sp, color = palette.muted)
+            EText(tr(T.welcomeAge), size = 14.sp, color = palette.text)
+          }
+        },
+        confirmButton = {
+          TextButton(
+            onClick = {
+              vm.confirmAge18AndGoOnline()
+              vm.updateOfflineOn(false)
+              finishWelcome()
+            }
+          ) {
+            EText(tr(T.welcomeContinue), color = palette.goldInk, weight = FontWeight.SemiBold)
+          }
+        },
+        dismissButton = {
+          TextButton(
+            onClick = {
+              vm.updateOnlineOn(false)
+              vm.updateOfflineOn(false)
+              finishWelcome()
+              requestOffline()
+            }
+          ) {
+            EText(tr(T.welcomeUnder18), size = 13.sp, color = palette.muted)
+          }
+        },
+      )
+    }
+
+    if (showTos && vm.onboarded && screen == Screen.HOME) {
       AppTosDialog(
         onTosAccepted = {
           showTos = false
@@ -972,54 +1064,28 @@ private fun dayGroup(at: Long): Int {
 @Composable
 private fun ElricDrawer(
   vm: ElricViewModel,
-  light: Boolean,
   onClose: () -> Unit,
   onOpenChat: (String) -> Unit,
-  onAboutYou: () -> Unit,
-  onModels: () -> Unit,
-  showModels: Boolean,
-  offlineOn: Boolean,
-  offlineSize: String,
-  offlinePct: Int?,
-  onOffline: () -> Unit,
-  onMemory: () -> Unit,
-  onPrivacy: () -> Unit,
-  onAboutApp: () -> Unit,
-  onToggleTheme: () -> Unit,
+  onNewChat: () -> Unit,
+  onTalk: () -> Unit,
+  onPhoto: () -> Unit,
+  onProfile: () -> Unit,
 ) {
   val p = pal()
-  val lang = LocalElricLang.current
   var query by rememberSaveable { mutableStateOf("") }
+  var searching by rememberSaveable { mutableStateOf(false) }
   var menuFor by remember { mutableStateOf<String?>(null) }
   var renaming by remember { mutableStateOf<String?>(null) }
-  var askAge by remember { mutableStateOf(false) }
-  if (askAge) {
-    AlertDialog(
-      onDismissRequest = { askAge = false },
-      containerColor = p.surface,
-      title = { EText(tr(T.onlineAnswers), size = 17.sp, weight = FontWeight.SemiBold) },
-      text = { EText(tr(T.age18Text), size = 14.sp, color = p.muted) },
-      confirmButton = {
-        TextButton(
-          onClick = {
-            askAge = false
-            vm.confirmAge18AndGoOnline()
-          }
-        ) {
-          EText(tr(T.age18Yes), color = p.goldInk, weight = FontWeight.SemiBold)
-        }
-      },
-      dismissButton = { TextButton(onClick = { askAge = false }) { EText(tr(T.notNow), color = p.muted) } },
-    )
-  }
   val shape = RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)
   var dragX by remember { mutableStateOf(0f) }
-  Column(
+  val searchFocus = remember { FocusRequester() }
+  LaunchedEffect(searching) { if (searching) searchFocus.requestFocus() }
+  Box(
     modifier =
       Modifier.fillMaxHeight()
-        .fillMaxWidth(0.86f)
+        .fillMaxWidth(0.84f)
         .clip(shape)
-        .background(p.surface)
+        .background(p.bg)
         .border(1.dp, p.line, shape)
         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
           menuFor = null
@@ -1027,54 +1093,125 @@ private fun ElricDrawer(
         .pointerInput(Unit) {
           detectHorizontalDragGestures(
             onDragStart = { dragX = 0f },
-            onDragEnd = { if (dragX < -80f) onClose() },
+            onDragEnd = { if (dragX < -60f) onClose() },
           ) { _, dx ->
             dragX += dx
           }
         }
-        .padding(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 8.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
-    Row(
-      modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-      Image(
-        painterResource(R.drawable.elric_mark),
-        contentDescription = null,
-        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)),
-      )
-      Column {
-        EText(tr(T.brand), size = 16.sp, weight = FontWeight.Bold)
-        TinyText(tr(T.tagline))
+    Column(modifier = Modifier.fillMaxSize()) {
+      // Header: mark, name, search.
+      Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Image(
+          painterResource(R.drawable.elric_mark),
+          contentDescription = null,
+          modifier = Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)),
+        )
+        EText(tr(T.brand), size = 20.sp, weight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Box(
+          modifier =
+            Modifier.size(42.dp)
+              .clip(CircleShape)
+              .background(p.surface)
+              .border(1.dp, p.line, CircleShape)
+              .clickable {
+                searching = !searching
+                if (!searching) query = ""
+              },
+          contentAlignment = Alignment.Center,
+        ) {
+          Icon(Icons.Outlined.Search, contentDescription = tr(T.searchChats), tint = p.text, modifier = Modifier.size(22.dp))
+        }
       }
-    }
-    EField(value = query, onValueChange = { query = it }, placeholder = tr(T.searchChats), height = 44)
-
-    val q = query.trim().lowercase()
-    val filtered = vm.chats.filter { q.isEmpty() || it.title.lowercase().contains(q) }
-    LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
-      item { SecLabel(tr(T.recentChats)) }
-      if (filtered.isEmpty()) {
-        item { TinyText(tr(T.noChats), modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) }
-      }
-      val groups = filtered.groupBy { dayGroup(it.at) }
-      for (g in 0..2) {
-        val list = groups[g] ?: continue
-        item(key = "g$g") {
-          TinyText(
-            tr(
-              when (g) {
-                0 -> T.today
-                1 -> T.yesterday
-                else -> T.earlier
-              }
-            ),
-            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
+      if (searching) {
+        Box(Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) {
+          EField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = tr(T.searchChats),
+            height = 44,
+            modifier = Modifier.focusRequester(searchFocus),
           )
         }
-        for (c in list) {
+      }
+
+      val q = query.trim().lowercase()
+      val filtered = vm.chats.filter { q.isEmpty() || it.title.lowercase().contains(q) }
+      LazyColumn(
+        modifier = Modifier.weight(1f).fillMaxWidth(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 96.dp),
+      ) {
+        item(key = "nav") {
+          Column(Modifier.padding(top = 2.dp, bottom = 8.dp)) {
+            DrawerItem(Icons.Outlined.GraphicEq, tr(T.talk), onTalk)
+            DrawerItem(Icons.Outlined.PhotoCamera, tr(T.photoQuestion), onPhoto)
+          }
+        }
+        item(key = "modes") {
+          Row(
+            modifier =
+              Modifier.fillMaxWidth()
+                .padding(start = 10.dp, end = 10.dp, top = 2.dp, bottom = 10.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(p.surface)
+                .border(1.dp, p.line, RoundedCornerShape(12.dp))
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            for (m in listOf(ElricMode.STUDY, ElricMode.SHOPPING, ElricMode.GENERAL)) {
+              val sel = vm.mode == m
+              Box(
+                modifier =
+                  Modifier.weight(1f)
+                    .heightIn(min = 36.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(if (sel) p.surface2 else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickable {
+                      vm.updateMode(m)
+                      onClose()
+                    },
+                contentAlignment = Alignment.Center,
+              ) {
+                EText(
+                  tr(
+                    when (m) {
+                      ElricMode.STUDY -> T.study
+                      ElricMode.SHOPPING -> T.shopping
+                      ElricMode.GENERAL -> T.general
+                    }
+                  ),
+                  size = 13.5.sp,
+                  weight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                  color = if (sel) p.goldInk else p.muted,
+                )
+              }
+            }
+          }
+        }
+        item(key = "recents") {
+          EText(
+            tr(T.recents),
+            size = 13.sp,
+            weight = FontWeight.SemiBold,
+            color = p.muted,
+            modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 12.dp, bottom = 4.dp),
+          )
+        }
+        if (filtered.isEmpty()) {
+          item(key = "empty") {
+            EText(
+              tr(if (q.isEmpty()) T.noChats else T.noMatches),
+              size = 14.sp,
+              color = p.muted,
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+          }
+        }
+        for (c in filtered) {
           item(key = c.id) {
             ChatRow(
               chat = c,
@@ -1102,99 +1239,364 @@ private fun ElricDrawer(
       }
     }
 
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-      Box(Modifier.fillMaxWidth().padding(bottom = 6.dp).background(p.line).heightIn(min = 1.dp, max = 1.dp))
-      DrawerRow("☺", tr(T.aboutYou), onClick = onAboutYou)
-      DrawerRow("✦", tr(T.memory), onClick = onMemory)
-      if (showModels) DrawerRow("▦", tr(T.models), onClick = onModels)
-      DrawerRow(
-        "☁",
-        tr(T.onlineAnswers),
-        trailing = {
-          Row {
-            EText(tr(T.on), size = 12.sp, weight = FontWeight.Medium, color = if (vm.onlineOn) p.goldInk else p.muted)
-            EText(" · ", size = 12.sp, color = p.muted)
-            EText(tr(T.off), size = 12.sp, weight = FontWeight.Medium, color = if (!vm.onlineOn) p.goldInk else p.muted)
-          }
-        },
-        onClick = {
-          if (!vm.onlineOn && !vm.age18) askAge = true else vm.updateOnlineOn(!vm.onlineOn)
-        },
-      )
-      TinyText(tr(T.onlineHow), modifier = Modifier.padding(start = 44.dp, end = 12.dp, bottom = 4.dp))
-      DrawerRow(
-        "⇩",
-        tr(T.offlineMode),
-        trailing = {
-          Row {
-            EText(tr(T.on), size = 12.sp, weight = FontWeight.Medium, color = if (offlineOn) p.goldInk else p.muted)
-            EText(" · ", size = 12.sp, color = p.muted)
-            EText(tr(T.off), size = 12.sp, weight = FontWeight.Medium, color = if (!offlineOn) p.goldInk else p.muted)
-          }
-        },
-        onClick = onOffline,
-      )
-      TinyText(
-        if (offlinePct != null) tr(T.offlineDownloadingPct, "pct" to offlinePct.toString())
-        else tr(T.offlineHow, "size" to offlineSize),
+    // Footer: New chat pill + profile avatar.
+    Row(
+      modifier =
+        Modifier.align(Alignment.BottomStart)
+          .fillMaxWidth()
+          .background(
+            androidx.compose.ui.graphics.Brush.verticalGradient(
+              0f to p.bg.copy(alpha = 0f),
+              0.38f to p.bg,
+              1f to p.bg,
+            )
+          )
+          .padding(horizontal = 16.dp, vertical = 14.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Row(
         modifier =
-          Modifier.padding(start = 44.dp, end = 12.dp, bottom = 4.dp).then(
-            if (offlinePct != null) Modifier.clickable(onClick = onOffline) else Modifier
-          ),
-        color = if (offlinePct != null) p.goldInk else p.muted,
-      )
-      DrawerRow(
-        "अ",
-        tr(T.language),
-        trailing = {
-          Row {
-            EText("English", size = 12.sp, weight = FontWeight.Medium, color = if (lang == ElricLang.EN) p.goldInk else p.muted)
-            EText(" · ", size = 12.sp, color = p.muted)
-            EText("हिन्दी", size = 12.sp, weight = FontWeight.Medium, color = if (lang == ElricLang.HI) p.goldInk else p.muted)
-          }
-        },
-        onClick = { vm.updateLang(if (lang == ElricLang.EN) ElricLang.HI else ElricLang.EN) },
-      )
-      DrawerRow(
-        "◐",
-        tr(T.appearance),
-        trailing = {
-          Row {
-            EText(tr(T.dark), size = 12.sp, weight = FontWeight.Medium, color = if (!light) p.goldInk else p.muted)
-            EText(" · ", size = 12.sp, color = p.muted)
-            EText(tr(T.light), size = 12.sp, weight = FontWeight.Medium, color = if (light) p.goldInk else p.muted)
-          }
-        },
-        onClick = onToggleTheme,
-      )
-      DrawerRow("⛉", tr(T.privacy), onClick = onPrivacy)
-      DrawerRow("ⓘ", tr(T.aboutElric), onClick = onAboutApp)
-      TinyText("v${BuildConfig.VERSION_NAME}", modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+          Modifier.heightIn(min = 46.dp)
+            .clip(CircleShape)
+            .background(p.gold)
+            .clickable(onClick = onNewChat)
+            .padding(start = 16.dp, end = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Icon(Icons.Outlined.Edit, contentDescription = null, tint = p.onGold, modifier = Modifier.size(20.dp))
+        EText(tr(T.newChat), size = 15.5.sp, weight = FontWeight.SemiBold, color = p.onGold)
+      }
+      Box(modifier = Modifier.clip(CircleShape).clickable(onClick = onProfile)) {
+        Avatar(vm.name, size = 46)
+      }
+    }
+  }
+}
+
+/** Round avatar: the user's initials, or a person icon when no name is set. */
+@Composable
+private fun Avatar(name: String, size: Int) {
+  val p = pal()
+  val initials =
+    name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.take(2).joinToString("") {
+      it.substring(0, it.offsetByCodePoints(0, 1)).uppercase()
+    }
+  Box(
+    modifier =
+      Modifier.size(size.dp)
+        .clip(CircleShape)
+        .background(p.surface2)
+        .border(if (size > 60) 1.5.dp else 1.dp, p.gold.copy(alpha = 0.45f), CircleShape),
+    contentAlignment = Alignment.Center,
+  ) {
+    if (initials.isNotEmpty()) {
+      EText(initials, size = (size * 0.36f).sp, weight = FontWeight.SemiBold, color = p.goldInk)
+    } else {
+      Icon(Icons.Outlined.Person, contentDescription = tr(T.profile), tint = p.goldInk, modifier = Modifier.size((size * 0.48f).dp))
+    }
+  }
+}
+
+/** Drawer action row (`.dw-it`). */
+@Composable
+private fun DrawerItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+  val p = pal()
+  Row(
+    modifier =
+      Modifier.fillMaxWidth()
+        .heightIn(min = 48.dp)
+        .clip(RoundedCornerShape(12.dp))
+        .clickable(onClick = onClick)
+        .padding(horizontal = 10.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(14.dp),
+  ) {
+    Icon(icon, contentDescription = null, tint = p.muted, modifier = Modifier.size(22.dp))
+    EText(label, size = 16.sp)
+  }
+}
+
+/** Small on/off switch (`.sw`). */
+@Composable
+private fun ESwitch(on: Boolean) {
+  val p = pal()
+  val x by androidx.compose.animation.core.animateDpAsState(if (on) 20.dp else 2.dp, tween(200), label = "sw")
+  Box(
+    modifier =
+      Modifier.width(46.dp)
+        .height(28.dp)
+        .clip(CircleShape)
+        .background(if (on) p.gold else p.surface2)
+        .border(1.dp, if (on) p.gold else p.line, CircleShape)
+  ) {
+    Box(
+      Modifier.padding(start = x, top = 2.dp)
+        .size(22.dp)
+        .clip(CircleShape)
+        .background(androidx.compose.ui.graphics.Color.White)
+    )
+  }
+}
+
+/** One row of a profile group (`.pr`). */
+@Composable
+private fun ProfileRow(
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  label: String,
+  value: String? = null,
+  caption: String? = null,
+  captionColor: androidx.compose.ui.graphics.Color? = null,
+  chevron: Boolean = true,
+  switchOn: Boolean? = null,
+  danger: Boolean = false,
+  first: Boolean = false,
+  onClick: (() -> Unit)? = null,
+) {
+  val p = pal()
+  Column {
+    if (!first) Box(Modifier.padding(start = 52.dp).fillMaxWidth().height(1.dp).background(p.line))
+    Row(
+      modifier =
+        Modifier.fillMaxWidth()
+          .heightIn(min = 52.dp)
+          .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+          .padding(horizontal = 16.dp, vertical = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+      Icon(icon, contentDescription = null, tint = if (danger) p.danger else p.muted, modifier = Modifier.size(22.dp))
+      Column(Modifier.weight(1f)) {
+        EText(label, size = 16.sp, color = if (danger) p.danger else p.text, lineHeight = 21.sp)
+        if (caption != null) EText(caption, size = 12.5.sp, color = captionColor ?: p.muted, lineHeight = 17.sp)
+      }
+      if (value != null) EText(value, size = 13.sp, color = p.muted, maxLines = 1, modifier = Modifier.widthIn(max = 140.dp))
+      if (switchOn != null) ESwitch(switchOn)
+      else if (chevron) EText("›", size = 20.sp, color = p.muted, lineHeight = 20.sp)
     }
   }
 }
 
 @Composable
-private fun DrawerRow(
-  glyph: String,
-  label: String,
-  trailing: (@Composable () -> Unit)? = null,
-  onClick: () -> Unit,
-) {
+private fun ProfileGroup(title: String, content: @Composable () -> Unit) {
   val p = pal()
-  Row(
+  EText(
+    title,
+    size = 13.sp,
+    weight = FontWeight.SemiBold,
+    color = p.muted,
+    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 7.dp),
+  )
+  Column(
     modifier =
       Modifier.fillMaxWidth()
-        .heightIn(min = 44.dp)
-        .clip(RoundedCornerShape(12.dp))
-        .clickable(onClick = onClick)
-        .padding(horizontal = 12.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(12.dp),
+        .clip(RoundedCornerShape(14.dp))
+        .background(p.surface)
+        .border(1.dp, p.line, RoundedCornerShape(14.dp))
   ) {
-    EText(glyph, size = 14.sp, color = p.muted, modifier = Modifier.width(20.dp), textAlign = TextAlign.Center)
-    EText(label, size = 14.sp, modifier = Modifier.weight(1f))
-    trailing?.invoke()
+    content()
+  }
+}
+
+/** Profile & settings (mirrors the web app's profile page), opened from the drawer avatar. */
+@Composable
+private fun ProfileScreen(
+  vm: ElricViewModel,
+  light: Boolean,
+  showModels: Boolean,
+  modelValue: String,
+  offlineOn: Boolean,
+  offlineReady: Boolean,
+  offlineSize: String,
+  offlinePct: Int?,
+  onClose: () -> Unit,
+  onAboutYou: () -> Unit,
+  onOffline: () -> Unit,
+  onModels: () -> Unit,
+  onMemory: () -> Unit,
+  onPrivacy: () -> Unit,
+  onAboutApp: () -> Unit,
+  onLicenses: () -> Unit,
+  onTheme: (Boolean) -> Unit,
+) {
+  val p = pal()
+  val lang = LocalElricLang.current
+  var askAge by remember { mutableStateOf(false) }
+  var pick by remember { mutableStateOf<String?>(null) }
+  var confirmClear by remember { mutableStateOf(false) }
+  if (askAge) {
+    AlertDialog(
+      onDismissRequest = { askAge = false },
+      containerColor = p.surface,
+      title = { EText(tr(T.onlineAnswers), size = 17.sp, weight = FontWeight.SemiBold) },
+      text = { EText(tr(T.age18Text), size = 14.sp, color = p.muted) },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            askAge = false
+            vm.confirmAge18AndGoOnline()
+          }
+        ) {
+          EText(tr(T.age18Yes), color = p.goldInk, weight = FontWeight.SemiBold)
+        }
+      },
+      dismissButton = { TextButton(onClick = { askAge = false }) { EText(tr(T.notNow), color = p.muted) } },
+    )
+  }
+  if (confirmClear) {
+    AlertDialog(
+      onDismissRequest = { confirmClear = false },
+      containerColor = p.surface,
+      title = { EText(tr(T.clearChats), size = 17.sp, weight = FontWeight.SemiBold) },
+      text = { EText(tr(T.clearChatsConfirm), size = 14.sp, color = p.muted) },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            confirmClear = false
+            vm.clearChats()
+          }
+        ) {
+          EText(tr(T.delete), color = p.danger, weight = FontWeight.SemiBold)
+        }
+      },
+      dismissButton = { TextButton(onClick = { confirmClear = false }) { EText(tr(T.cancel), color = p.muted) } },
+    )
+  }
+  pick?.let { which ->
+    // Small picker: one choice from a short list (like the web app's chooser sheet).
+    val (title, opts, cur) =
+      when (which) {
+        "len" -> Triple(tr(T.lengthSec), listOf("short" to tr(T.short), "long" to tr(T.detailed)), if (vm.short) "short" else "long")
+        "lang" -> Triple(tr(T.language), listOf("en" to "English", "hi" to "हिन्दी"), if (lang == ElricLang.HI) "hi" else "en")
+        else -> Triple(tr(T.appearance), listOf("dark" to tr(T.dark), "light" to tr(T.light)), if (light) "light" else "dark")
+      }
+    AlertDialog(
+      onDismissRequest = { pick = null },
+      containerColor = p.surface,
+      title = { EText(title, size = 17.sp, weight = FontWeight.SemiBold) },
+      text = {
+        Column {
+          for ((v, l) in opts) {
+            Row(
+              modifier =
+                Modifier.fillMaxWidth()
+                  .heightIn(min = 48.dp)
+                  .clip(RoundedCornerShape(12.dp))
+                  .clickable {
+                    when (which) {
+                      "len" -> vm.updateShort(v == "short")
+                      "lang" -> vm.updateLang(if (v == "hi") ElricLang.HI else ElricLang.EN)
+                      else -> onTheme(v == "light")
+                    }
+                    pick = null
+                  }
+                  .padding(horizontal = 12.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              EText(l, size = 16.sp, weight = if (v == cur) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.weight(1f))
+              if (v == cur) EText("✓", color = p.goldInk, weight = FontWeight.SemiBold)
+            }
+          }
+        }
+      },
+      confirmButton = {},
+    )
+  }
+
+  Box(Modifier.fillMaxSize()) {
+    Column(
+      modifier =
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 28.dp)
+    ) {
+      Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 30.dp, bottom = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Box(modifier = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onAboutYou)) {
+          Avatar(vm.name, size = 88)
+          Box(
+            modifier =
+              Modifier.align(Alignment.BottomEnd)
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(p.surface2)
+                .border(2.dp, p.bg, CircleShape),
+            contentAlignment = Alignment.Center,
+          ) {
+            Icon(Icons.Outlined.Edit, contentDescription = tr(T.aboutYou), tint = p.text, modifier = Modifier.size(15.dp))
+          }
+        }
+        if (vm.name.isNotBlank()) EText(vm.name.trim(), size = 20.sp, weight = FontWeight.SemiBold)
+        else EText(tr(T.addName), size = 16.sp, weight = FontWeight.Medium, color = p.muted)
+      }
+
+      ProfileGroup(tr(T.secPersonalise)) {
+        ProfileRow(Icons.Outlined.Person, tr(T.aboutYou), value = vm.name.trim().ifEmpty { tr(T.addName) }, first = true, onClick = onAboutYou)
+        ProfileRow(Icons.Outlined.TextFields, tr(T.lengthSec), value = tr(if (vm.short) T.short else T.detailed)) { pick = "len" }
+        ProfileRow(Icons.Outlined.Language, tr(T.language), value = if (lang == ElricLang.HI) "हिन्दी" else "English") { pick = "lang" }
+        ProfileRow(Icons.Outlined.DarkMode, tr(T.appearance), value = tr(if (light) T.light else T.dark)) { pick = "theme" }
+      }
+      ProfileGroup(tr(T.secAI)) {
+        ProfileRow(
+          Icons.Outlined.Cloud,
+          tr(T.onlineAnswers),
+          caption = tr(T.onlineHow),
+          switchOn = vm.onlineOn,
+          first = true,
+        ) {
+          if (!vm.onlineOn && !vm.age18) askAge = true else vm.updateOnlineOn(!vm.onlineOn)
+        }
+        ProfileRow(
+          Icons.Outlined.DownloadForOffline,
+          tr(T.offlineMenu),
+          caption =
+            when {
+              offlinePct != null -> tr(T.offlineDownloadingPct, "pct" to offlinePct.toString())
+              offlineReady -> tr(T.offlineReadyCap)
+              else -> tr(T.offlineHow, "size" to offlineSize)
+            },
+          captionColor = if (offlinePct != null) p.goldInk else null,
+          switchOn = offlineOn,
+          onClick = onOffline,
+        )
+        if (showModels) ProfileRow(Icons.Outlined.Memory, tr(T.models), value = modelValue, onClick = onModels)
+      }
+      ProfileGroup(tr(T.secPrivacy)) {
+        ProfileRow(Icons.Outlined.AutoAwesome, tr(T.memory), value = tr(if (vm.memoryOn) T.on else T.off), first = true, onClick = onMemory)
+        ProfileRow(Icons.Outlined.VerifiedUser, tr(T.age), value = tr(if (vm.age18) T.ageYes else T.ageNo), chevron = false)
+        ProfileRow(Icons.Outlined.Delete, tr(T.clearChats), chevron = false, danger = true) {
+          if (vm.chats.isNotEmpty()) confirmClear = true
+        }
+        ProfileRow(Icons.Outlined.Shield, tr(T.privacy), onClick = onPrivacy)
+      }
+      ProfileGroup(tr(T.secAbout)) {
+        ProfileRow(Icons.Outlined.Info, tr(T.aboutElric), first = true, onClick = onAboutApp)
+        ProfileRow(Icons.Outlined.Code, tr(T.licenses), onClick = onLicenses)
+        ProfileRow(Icons.Outlined.Sell, tr(T.version), value = BuildConfig.VERSION_NAME, chevron = false)
+      }
+      EText(
+        "Elric AI · ${tr(T.version)} ${BuildConfig.VERSION_NAME}",
+        size = 12.5.sp,
+        color = p.muted,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(top = 22.dp),
+      )
+    }
+    Box(
+      modifier =
+        Modifier.align(Alignment.TopEnd)
+          .padding(12.dp)
+          .size(42.dp)
+          .clip(CircleShape)
+          .background(p.surface)
+          .border(1.dp, p.line, CircleShape)
+          .clickable(onClick = onClose),
+      contentAlignment = Alignment.Center,
+    ) {
+      Icon(Icons.Outlined.Close, contentDescription = tr(T.close), tint = p.text, modifier = Modifier.size(20.dp))
+    }
   }
 }
 

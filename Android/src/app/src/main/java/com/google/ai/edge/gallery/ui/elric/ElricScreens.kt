@@ -270,56 +270,6 @@ fun OnboardingScreen(
   }
 }
 
-// ------------------------------------------------------------------ start (first launch)
-
-/**
- * First launch: one screen to start. 18 or older starts chatting online right away; under 18
- * downloads the offline model (online answers are 18+ only).
- */
-@Composable
-fun StartScreen(
-  sizeText: String,
-  onBack: () -> Unit,
-  onAdult: () -> Unit,
-  onMinor: () -> Unit,
-) {
-  val p = pal()
-  Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-    BackBar(onBack)
-    Column(
-      modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-      verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-      Image(
-        painterResource(R.drawable.elric_mark),
-        contentDescription = null,
-        modifier = Modifier.padding(top = 16.dp).size(64.dp).clip(RoundedCornerShape(18.dp)),
-      )
-      EText(tr(T.startTitle), size = 26.sp, weight = FontWeight.SemiBold, letterSpacing = (-0.26).sp)
-      EText(tr(T.startBody), color = p.muted)
-      TinyText(tr(T.startPrivacy))
-    }
-    Column(
-      modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-      GoldButton(tr(T.startAdult), onClick = onAdult, modifier = Modifier.fillMaxWidth())
-      Box(
-        modifier =
-          Modifier.fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .border(1.dp, p.line, RoundedCornerShape(24.dp))
-            .clickable(onClick = onMinor)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        contentAlignment = Alignment.Center,
-      ) {
-        EText(tr(T.startMinor, "size" to sizeText), size = 14.sp, textAlign = TextAlign.Center)
-      }
-    }
-  }
-}
-
 // ------------------------------------------------------------------ 3 about you
 
 @OptIn(ExperimentalLayoutApi::class)

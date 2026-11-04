@@ -155,6 +155,7 @@ fun HomeContent(
   offline: Boolean,
   online: Boolean = false,
   hasOffline: Boolean = true,
+  showOfflineTip: Boolean = false,
   name: String,
   onSuggestion: (index: Int, text: String) -> Unit,
   modifier: Modifier = Modifier,
@@ -233,6 +234,9 @@ fun HomeContent(
           }
         }
       }
+    }
+    if (showOfflineTip) {
+      TinyText(tr(T.offlineTip), modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp))
     }
   }
 }
