@@ -10,6 +10,11 @@ name: Build Play AAB
 
 on:
   workflow_dispatch:
+    inputs:
+      signed_aab_url:
+        description: "Optional: short-lived URL of an AAB already signed with the upload key (used while the upload-key secrets are not set). Skips the build; the bundle is verified, reported and attached to the release."
+        required: false
+        default: ""
   push:
     tags: [ "play-*" ]
 
@@ -20,6 +25,7 @@ concurrency:
 jobs:
   bundle:
     name: Build signed release AAB
+    if: github.event_name != 'workflow_dispatch' || inputs.signed_aab_url == ''
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -138,3 +144,77 @@ jobs:
           make_latest: false
           body: "Release Android App Bundle for Google Play, signed with the Elric AI upload key. versionName ${{ steps.ver.outputs.name }}, versionCode ${{ steps.ver.outputs.code }}. Upload this .aab in Play Console (Play App Signing)."
           files: ${{ steps.aab.outputs.path }}
+
+  publish_signed:
+    name: Verify and publish an upload-key-signed AAB
+    if: github.event_name == 'workflow_dispatch' && inputs.signed_aab_url != ''
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BUNDLETOOL_VERSION: "1.18.3"
+    steps:
+      - name: Download the signed bundle (before the short-lived URL expires)
+        env:
+          AAB_URL: ${{ inputs.signed_aab_url }}
+        run: |
+          mkdir -p out
+          curl -sSfL --retry 3 -o out/bundle.aab "$AAB_URL"
+          ls -l out/bundle.aab
+
+      - name: Checkout the source code
+        uses: actions/checkout@v4
+        with:
+          path: src
+          sparse-checkout: Android/src/app/build.gradle.kts
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Read version and name the bundle
+        id: ver
+        run: |
+          G=src/Android/src/app/build.gradle.kts
+          NAME=$(grep -E '^\s*versionName\s*=' $G | head -1 | sed -E 's/.*"(.*)".*/\1/')
+          CODE=$(grep -E '^\s*versionCode\s*=' $G | head -1 | sed -E 's/[^0-9]//g')
+          OUT="$GITHUB_WORKSPACE/out/Elric-AI-$NAME-$CODE.aab"
+          mv out/bundle.aab "$OUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          echo "AAB size: $(du -h "$OUT" | cut -f1) ($(stat -c %s "$OUT") bytes)"
+
+      - name: Verify signature and version
+        run: |
+          AAB="${{ steps.ver.outputs.path }}"
+          jarsigner -verify -verbose:summary -certs "$AAB" > verify.txt 2>&1 || { cat verify.txt; exit 1; }
+          grep -E "jar verified" verify.txt
+          grep -q "CN=Elric AI" verify.txt || { echo "::error::Not signed with the Elric AI upload key"; exit 1; }
+          if grep -q "CN=Android Debug" verify.txt; then echo "::error::Debug-signed bundle"; exit 1; fi
+          curl -sSL -o bundletool.jar "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
+          java -jar bundletool.jar validate --bundle="$AAB" > /dev/null && echo "bundletool validate: OK"
+          java -jar bundletool.jar dump manifest --bundle="$AAB" | grep -E "versionCode|targetSdkVersion|debuggable|testOnly|uses-permission" || true
+          java -jar bundletool.jar dump manifest --bundle="$AAB" | grep -q "android:versionName=\"${{ steps.ver.outputs.name }}\"" || { echo "::error::Bundle version does not match the source"; exit 1; }
+          printf '{"supportedAbis":["arm64-v8a"],"supportedLocales":["en"],"screenDensity":480,"sdkVersion":35}' > arm64.json
+          java -jar bundletool.jar build-apks --bundle="$AAB" --output=app.apks --overwrite
+          echo "arm64-v8a phone (xxhdpi, en, API 35), bytes MIN,MAX:"
+          java -jar bundletool.jar get-size total --apks=app.apks --device-spec=arm64.json
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: elric-ai-play-aab
+          path: ${{ steps.ver.outputs.path }}
+          if-no-files-found: error
+
+      - name: Attach to prerelease play-${{ steps.ver.outputs.name }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: play-${{ steps.ver.outputs.name }}
+          name: Elric AI ${{ steps.ver.outputs.name }} (Play upload bundle)
+          prerelease: true
+          make_latest: false
+          files: ${{ steps.ver.outputs.path }}
