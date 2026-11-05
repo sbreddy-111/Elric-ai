@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@mediapipe/tasks-genai": "0.10.30",
+    "mermaid": "^12.3.0",
+    "pdfjs-dist": "^6.5.438",
     "qrcode-generator": "^1.4.4"
   },
   "devDependencies": {

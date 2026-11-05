@@ -40,7 +40,14 @@ export interface Body {
   talk?: boolean;
   /** A photo with the question (JPEG, base64). */
   image?: { mime: string; data: string };
+  /** Text taken from a PDF/TXT file on the device (trimmed); the server does not keep it. */
+  doc?: { name: string; text: string };
+  /** Multi-step maths/science or recent facts: the server thinks longer and uses its tools. */
+  hard?: boolean;
 }
+
+/** A web page the online answer used. */
+export interface Src { t: string; u: string }
 
 // ---------- settings
 
@@ -116,8 +123,11 @@ export function busy(): boolean {
 }
 
 /** Sends the question and streams the answer to onText (called with each new piece). */
-export async function ask(body: Body, onText: (piece: string) => void): Promise<End> {
-  const firstMs = body.image ? PHOTO_FIRST_TOKEN_MS : FIRST_TOKEN_MS;
+/** Hard questions (tools, web search) can take longer to start. */
+export const HARD_FIRST_TOKEN_MS = 25000;
+
+export async function ask(body: Body, onText: (piece: string) => void, opts: { firstMs?: number; onSources?: (s: Src[]) => void } = {}): Promise<End> {
+  const firstMs = opts.firstMs ?? (body.image ? PHOTO_FIRST_TOKEN_MS : FIRST_TOKEN_MS);
   const me = { ctrl: new AbortController(), cancelled: false };
   current = me;
   const start = Date.now();
@@ -160,6 +170,10 @@ export async function ask(body: Body, onText: (piece: string) => void): Promise<
         try { o = JSON.parse(line.slice(5).trim()); } catch { continue; }
         if (typeof o.t === 'string') {
           if (o.t) { if (o.t.trim()) gotFirst = true; onText(o.t); }
+        } else if (Array.isArray(o.src)) {
+          const list = (o.src as any[]).filter((x) => x && typeof x.u === 'string' && /^https?:\/\//.test(x.u))
+            .slice(0, 3).map((x) => ({ u: String(x.u).slice(0, 500), t: String(x.t || '').slice(0, 120) }));
+          if (list.length) opts.onSources?.(list);
         } else if (o.done) {
           try { reader.cancel(); } catch { /* closed */ }
           return { kind: 'done' };

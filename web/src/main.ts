@@ -5,13 +5,16 @@ import * as O from './online';
 import * as V from './voice';
 import * as P from './photo';
 import * as F from './feedback';
+import * as D from './file';
+import { isHard } from './smart';
+import { drawDiagrams } from './diagram';
 
 type Mode = 'study' | 'shopping' | 'general';
 const defaultMode = (): Mode => { const m = localStorage.getItem('elric.mode'); return m === 'shopping' || m === 'study' ? m : 'general'; };
 let mode: Mode = defaultMode();
 let short = localStorage.getItem('elric.length') !== 'long';
-/** A chat turn; photo (with its full image) lives only in memory, never in saved chats. */
-type Turn = E.Turn & { photo?: P.Photo; reported?: boolean };
+/** A chat turn; photo and file text live only in memory, never in saved chats. */
+type Turn = E.Turn & { photo?: P.Photo; doc?: D.Doc; reported?: boolean; sources?: O.Src[]; hard?: boolean };
 let turns: Turn[] = [];
 interface Chat { id: string; title: string; mode: Mode; turns: Turn[]; at: number }
 const CHATS_KEY = 'elric.chats';
@@ -25,7 +28,7 @@ function saveChats(cs: Chat[]) {
 }
 function persist() {
   // Saved chats keep a placeholder instead of the photo (browser storage is small).
-  const done = turns.filter((x) => x.text).map(({ photo, ...x }) => (photo ? { ...x, text: `📷 ${t('photoLabel')} · ${x.text}` } : x));
+  const done = turns.filter((x) => x.text).map(({ photo, doc, ...x }) => (photo ? { ...x, text: `📷 ${t('photoLabel')} · ${x.text}` } : doc ? { ...x, text: `📄 ${doc.name} · ${x.text}` } : x));
   if (!done.length) return;
   if (!chatId) { chatId = Date.now().toString(36); localStorage.setItem(CUR_KEY, chatId); }
   const cs = loadChats().filter((c) => c.id !== chatId);
@@ -48,6 +51,16 @@ function tex(m: string): string {
 }
 /** Light, safe Markdown for model answers (escape first, then format). */
 function md(src: string): string {
+  // Code blocks first (kept exactly); a closed ```mermaid block becomes a diagram placeholder.
+  const blocks: string[] = [];
+  src = src.replace(/(^|\n)[ \t]*```[ \t]*([\w+-]*)[^\n]*\n([\s\S]*?)(?:\n[ \t]*```[ \t]*(?=\n|$)|$)/g, (all, pre, lang, code) => {
+    const closed = /```[ \t]*$/.test(all.trimEnd()) && all.trimEnd().length > all.indexOf('```') + 3 + lang.length;
+    const c = esc(code.replace(/\n[ \t]*```[ \t]*$/, ''));
+    blocks.push(lang.toLowerCase() === 'mermaid' && closed
+      ? `<div class="mmd"><pre class="code"><code>${c}</code></pre></div>`
+      : `<pre class="code"><code>${c}</code></pre>`);
+    return `${pre}\u0003${blocks.length - 1}\u0003\n`;
+  });
   let s = src.replace(/\$\$([\s\S]*?)\$\$/g, (_, m) => `\u0001${tex(m).trim()}\u0002`).replace(/\$([^$\n]+?)\$/g, (_, m) => tex(m));
   s = esc(s).replace(/(^\s*\|.*\|\s*)\n\s*\n(?=\s*\|)/gm, '$1\n').replace(/(^\s*\|.*\|\s*)\n\s*\n(?=\s*\|)/gm, '$1\n');
   const out: string[] = []; let list = ''; let head = true;
@@ -62,6 +75,8 @@ function md(src: string): string {
       out.push(`<tr>${cells.map((c) => `<${tag}>${fmt(c)}</${tag}>`).join('')}</tr>`);
       continue;
     }
+    const bm = raw.match(/^\u0003(\d+)\u0003$/);
+    if (bm) { close(); out.push(blocks[+bm[1]]); continue; }
     const line = raw.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, '$1<i>$2</i>').replace(/\u0001(.*?)\u0002/g, '<span class="eq">$1</span>');
     let m;
     if (/^\s*(\*{3,}|-{3,})\s*$/.test(raw)) { close(); out.push('<hr>'); }
@@ -74,7 +89,17 @@ function md(src: string): string {
   close();
   return out.join('');
 }
-const body = (x: Turn) => (x.role === 'model' ? md(x.text) : (x.photo ? `<img class="ph" src="${x.photo.thumb}" alt="${t('photoLabel')}">` : '') + esc(x.text));
+const body = (x: Turn) => (x.role === 'model' ? md(x.text) : (x.photo ? `<img class="ph" src="${x.photo.thumb}" alt="${t('photoLabel')}">` : '') + (x.doc ? `<span class="dq">📄 ${esc(x.doc.name)}</span>` : '') + esc(x.text));
+const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+/** Small source links under an answer that used the web, and a tip under a hard question answered offline. */
+function extras(x: Turn, i: number): string {
+  if (x.role !== 'model' || (busy && i === turns.length - 1)) return '';
+  let h = '';
+  const src = (x.sources || []).filter((s) => /^https?:\/\//.test(s.u) && host(s.u));
+  if (src.length && !x.failed) h += `<div class="srcs"><span>${t('sources')}</span>${src.map((s) => `<a href="${esc(s.u)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(s.t || host(s.u))}">${esc(host(s.u))}</a>`).join('')}</div>`;
+  if (x.hard && x.src === 'offline' && O.age18()) h += `<div class="hint">${t(O.isOn() ? 'hardOfflineOn' : 'hardOfflineOff')}</div>`;
+  return h;
+}
 interface Profile { name: string; study: string }
 function getProfile(): Profile { try { return { name: '', study: '', ...JSON.parse(localStorage.getItem('elric.profile') || '{}') }; } catch { return { name: '', study: '' }; } }
 const secs = (ms: number) => (ms / 1000).toFixed(1);
@@ -137,7 +162,7 @@ function shell() {
   <form class="composer" id="form">
     <input type="file" id="file" accept="image/*" hidden>
     <button type="button" class="snap" id="snap" aria-label="${t('cdSnap')}">${svg(ic.cam)}</button>
-    <textarea id="input" rows="1" placeholder="${t(pending ? 'photoHint' : 'composerHint')}"></textarea>
+    <textarea id="input" rows="1" placeholder="${t(pending ? 'photoHint' : pendingDoc ? 'docHint' : 'composerHint')}"></textarea>
     <button type="button" class="icon mic${dictation ? ' on' : ''}" id="mic" aria-label="${t(dictation ? 'cdMicStop' : 'cdMic')}">${svg(ic.mic)}</button>
     <button type="submit" class="send" id="send" aria-label="${busy ? t('cdStop') : t('cdSend')}">${svg(busy ? ic.stop : ic.send)}</button>
   </form>
@@ -146,7 +171,7 @@ function shell() {
   $('#modebtn').onclick = modeSheet;
   $('#lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
   $('#newc').onclick = () => openChat(undefined);
-  $('#snap').onclick = pickPhoto;
+  $('#snap').onclick = pickAttach;
   $<HTMLInputElement>('#file').onchange = onPhotoPicked;
   wireMic($('#mic'));
   renderAtt();
@@ -174,15 +199,17 @@ function renderMain() {
     renderStatus();
     return;
   }
-  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || waitDots()}</div>${stats(x, i)}${x.role === 'user' && !busy ? `<button class="edit" data-e="${i}">✎ ${t('editQ')}</button>` : ''}`).join('')}
+  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || waitDots()}</div>${stats(x, i)}${extras(x, i)}${x.role === 'user' && !busy ? `<button class="edit" data-e="${i}">✎ ${t('editQ')}</button>` : ''}`).join('')}
     ${mode === 'shopping' ? `<div class="note">${t('shoppingNote')}</div>` : ''}${showStatusInChat() ? '<div id="status"></div>' : ''}</div>`;
   renderStatus();
   m.scrollTop = m.scrollHeight;
+  if (!busy) drawDiagrams(m).then(() => { if (m.scrollHeight - m.scrollTop - m.clientHeight < 400) m.scrollTop = m.scrollHeight; });
   m.querySelectorAll<HTMLButtonElement>('[data-e]').forEach((b) => (b.onclick = () => {
     const i = +b.dataset.e!; const q = turns[i].text;
-    if (turns[i].photo) pending = turns[i].photo!;
+    if (turns[i].photo) { pending = turns[i].photo!; pendingDoc = null; }
+    if (turns[i].doc) { pendingDoc = turns[i].doc!; pending = null; }
     turns = turns.slice(0, i); shell();
-    const inp = $<HTMLTextAreaElement>('#input'); inp.value = pending && q === t('photoAsk') ? '' : q; inp.focus(); inp.dispatchEvent(new Event('input'));
+    const inp = $<HTMLTextAreaElement>('#input'); inp.value = (pending && q === t('photoAsk')) || (pendingDoc && q === t('docAsk')) ? '' : q; inp.focus(); inp.dispatchEvent(new Event('input'));
   }));
   m.querySelectorAll<HTMLButtonElement>('[data-r]').forEach((b) => (b.onclick = () => readAloud(+b.dataset.r!)));
   m.querySelectorAll<HTMLButtonElement>('[data-fb]').forEach((b) => (b.onclick = () => reportSheet(+b.dataset.fb!)));
@@ -308,18 +335,19 @@ function submit() {
   if (busy) { stopRequested = true; E.stop(); O.stop(); return; }
   const i = $<HTMLTextAreaElement>('#input');
   const text = i.value.trim();
-  if (!text && !pending) return;
+  if (!text && !pending && !pendingDoc) return;
   if (dictation) dictation.stop();
   const photo = pending;
+  const doc = pendingDoc;
   if (photo && !photoOk()) return;
   i.value = ''; i.style.height = 'auto';
-  pending = null;
-  send(text || t('photoAsk'), photo);
+  pending = null; pendingDoc = null;
+  send(text || t(doc ? 'docAsk' : 'photoAsk'), photo, doc);
 }
 
 /** Turns that can be sent to a model as history (no notices, no empty replies). */
 function historyOf(list: Turn[]): E.Turn[] {
-  return list.filter((x) => !x.failed && x.text.trim()).map(({ photo, ...x }) => (photo ? { ...x, text: `[${t('photoLabel')}] ${x.text}` } : x));
+  return list.filter((x) => !x.failed && x.text.trim()).map(({ photo, doc, sources, hard, reported, ...x }) => (photo ? { ...x, text: `[${t('photoLabel')}] ${x.text}` } : doc ? { ...x, text: `[📄 ${doc.name}] ${x.text}` } : x));
 }
 
 let frame = 0;
@@ -343,7 +371,7 @@ function waitDots(): string {
 }
 
 /** Online answer. Returns true when the reply is final (answered or stopped), false to answer on the device. */
-async function answerOnline(reply: Turn, question: string, history: E.Turn[], photo: P.Photo | null = null): Promise<boolean> {
+async function answerOnline(reply: Turn, question: string, history: E.Turn[], photo: P.Photo | null = null, doc: D.Doc | null = null, hard = false): Promise<boolean> {
   const pr = getProfile();
   const t0 = performance.now();
   let raw = '';
@@ -356,6 +384,8 @@ async function answerOnline(reply: Turn, question: string, history: E.Turn[], ph
     lang: getLang(),
     talk: !!talk,
     ...(photo ? { image: { mime: photo.mime, data: photo.data } } : {}),
+    ...(doc ? { doc: { name: doc.name, text: D.excerpt(doc, question, ONLINE_DOC_CHARS).text } } : {}),
+    ...(hard ? { hard: true } : {}),
     ...(pr.name ? { name: pr.name.trim() } : {}),
     ...(pr.study ? { study: pr.study } : {}),
   }, (piece) => {
@@ -364,7 +394,7 @@ async function answerOnline(reply: Turn, question: string, history: E.Turn[], ph
     if (!reply.firstMs && raw.trim()) reply.firstMs = Math.round(performance.now() - t0);
     reply.text = raw;
     paint(reply);
-  });
+  }, { ...(hard && !photo ? { firstMs: O.HARD_FIRST_TOKEN_MS } : {}), onSources: (s) => { reply.sources = s; } });
   onlineWaiting = false;
   flush();
   O.record(end);
@@ -376,7 +406,7 @@ async function answerOnline(reply: Turn, question: string, history: E.Turn[], ph
     return true;
   }
   // Limit, error, no first word in time or the connection dropped: answer on the device, from the start.
-  reply.text = ''; reply.firstMs = undefined;
+  reply.text = ''; reply.firstMs = undefined; reply.sources = undefined;
   return false;
 }
 
@@ -401,25 +431,32 @@ async function answerOffline(reply: E.Turn, history: E.Turn[]) {
 
 let stopRequested = false;
 /** Asks a question (optionally with a photo). Resolves with the answer turn, or null if none was started. */
-async function send(text: string, photo: P.Photo | null = null): Promise<Turn | null> {
+async function send(text: string, photo: P.Photo | null = null, newDoc: D.Doc | null = null): Promise<Turn | null> {
   if (busy) return null;
   stopReading();
   const history = historyOf(turns);
-  turns.push(photo ? { role: 'user', text, photo } : { role: 'user', text });
+  // A file attached earlier in this chat stays in use for follow-up questions (in memory only).
+  const doc = newDoc || (photo ? null : [...turns].reverse().find((x) => x.doc)?.doc || null);
+  const hard = !photo && isHard(text);
+  turns.push(photo ? { role: 'user', text, photo } : newDoc ? { role: 'user', text, doc: newDoc } : { role: 'user', text });
   const online = O.ready();
   if (!E.isLoaded() && !online) { renderMain(); return null; } // status card explains what's needed; never fake an answer
   busy = true;
   stopRequested = false;
-  const reply: Turn = { role: 'model', text: '' };
+  const reply: Turn = { role: 'model', text: '', ...(hard ? { hard: true } : {}) };
   turns.push(reply);
   shell();
   let final = false;
-  if (online) final = await answerOnline(reply, text, history, photo);
-  // Photos can't fall back to the device, so try online once more on our own before giving up.
-  if (!final && photo && online && !stopRequested && O.ready()) final = await answerOnline(reply, text, history, photo);
+  if (online) final = await answerOnline(reply, text, history, photo, doc, hard);
+  // Photos can't fall back to the device, and hard questions are much better online: try online once more first.
+  if (!final && (photo || hard) && online && !stopRequested && O.ready()) final = await answerOnline(reply, text, history, photo, doc, hard);
   if (!final) {
     if (photo) { reply.text = t('photoFailed'); reply.failed = true; } // the device model can't see photos
-    else if (E.isLoaded()) { paint(reply); await answerOffline(reply, [...history, { role: 'user', text }]); }
+    else if (E.isLoaded()) {
+      paint(reply);
+      const q = doc ? `${t('docForModel', { name: doc.name })}\n<<<\n${D.excerpt(doc, text, E.isIOS ? 700 : 1800).text}\n>>>\n\n${text}` : text;
+      await answerOffline(reply, [...history, { role: 'user', text: q }]);
+    }
     else { reply.text = t('onlineBusy'); reply.failed = true; }
   }
   busy = false;
@@ -431,14 +468,21 @@ async function send(text: string, photo: P.Photo | null = null): Promise<Turn | 
 // ---------------------------------------------------------------- photo
 
 let pending: P.Photo | null = null;
+let pendingDoc: D.Doc | null = null;
+let readingDoc = '';
+/** Most file text sent online with one question (the server allows 10,000). */
+const ONLINE_DOC_CHARS = 9000;
 
 function renderAtt() {
   const a = $('#att');
   if (!a) return;
-  a.innerHTML = pending ? `<div class="chip"><img src="${pending.thumb}" alt=""><span>${t('photoLabel')}</span><button type="button" id="attx" aria-label="${t('removePhoto')}">${svg(ic.x)}</button></div>` : '';
+  const x = `<button type="button" id="attx" aria-label="${t('removeFile')}">${svg(ic.x)}</button>`;
+  a.innerHTML = pending ? `<div class="chip"><img src="${pending.thumb}" alt=""><span>${t('photoLabel')}</span>${x}</div>`
+    : pendingDoc ? `<div class="chip doc"><span class="di">📄</span><span class="dn">${esc(pendingDoc.name)}</span><span>${pendingDoc.pages > 1 ? t('docPages', { n: String(pendingDoc.pages) }) : ''}</span>${x}</div>`
+    : readingDoc ? `<div class="chip doc"><span class="di">📄</span><span class="dn">${esc(readingDoc)}</span><span>${t('docReading')}</span></div>` : '';
   const input = $<HTMLTextAreaElement>('#input');
-  if (input) input.placeholder = t(pending ? 'photoHint' : 'composerHint');
-  if (pending) $('#attx').onclick = () => { pending = null; renderAtt(); };
+  if (input) input.placeholder = t(pending ? 'photoHint' : pendingDoc ? 'docHint' : 'composerHint');
+  if (pending || pendingDoc) $('#attx').onclick = () => { pending = null; pendingDoc = null; renderAtt(); };
 }
 
 /** Photos are read online; explains (with a way to turn it on) when Online answers can't be used. */
@@ -452,18 +496,46 @@ function photoOk(): boolean {
   return true;
 }
 
-function pickPhoto() {
-  if (talk || !photoOk()) return;
+function openPicker(accept: string) {
   const f = $<HTMLInputElement>('#file');
+  f.accept = accept;
   f.value = '';
   f.click();
+}
+
+function pickPhoto() {
+  if (talk || !photoOk()) return;
+  openPicker('image/*');
+}
+
+/** Attach (camera button): photo or PDF/text file. Files work offline too; photos need Online answers. */
+function pickAttach() {
+  if (talk) return;
+  if (O.isOn() && O.ready()) { openPicker(`image/*,${D.DOC_ACCEPT}`); return; }
+  sheet(`<h3>${t('attachTitle')}</h3><p>${t(O.isOn() ? 'photoUnavailable' : 'attachOfflineBody')}</p>`
+    + `<button class="primary" id="pfile">📄 ${t('attachFile')}</button>`
+    + (O.isOn() ? '' : `<button class="ghost" id="pon">${t('turnOnOnline')}</button>`));
+  $('#pfile').onclick = () => { $('#sheet').innerHTML = ''; openPicker(D.DOC_ACCEPT); };
+  const on = document.getElementById('pon');
+  if (on) on.onclick = () => { $('#sheet').innerHTML = ''; toggleOnline(); };
 }
 
 async function onPhotoPicked() {
   const f = $<HTMLInputElement>('#file');
   const file = f.files?.[0];
   if (!file) return;
-  try { pending = await P.prepare(file); renderAtt(); }
+  if (D.isDocFile(file)) {
+    pending = null; pendingDoc = null; readingDoc = file.name; renderAtt();
+    try { pendingDoc = await D.readDoc(file); }
+    catch (e: any) {
+      const k = e?.message === 'too_large' ? 'docTooLarge' : e?.message === 'no_text' ? 'docNoText' : 'docError';
+      sheet(`<h3>${t('attachFile')}</h3><p>${t(k)}</p>`);
+    }
+    readingDoc = ''; renderAtt();
+    return;
+  }
+  if (!photoOk()) return;
+  try { pending = await P.prepare(file); pendingDoc = null; renderAtt(); }
   catch { sheet(`<h3>${t('photoLabel')}</h3><p>${t('photoError')}</p>`); }
 }
 
@@ -703,7 +775,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.6';
+const APP_VERSION = '0.4.7';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
@@ -711,6 +783,8 @@ const LICENSES = [
   ['MediaPipe / LiteRT web runtime', 'Apache License 2.0', 'https://github.com/google-ai-edge/mediapipe/blob/master/LICENSE'],
   ['Elric AI (this app)', 'Apache License 2.0', 'https://github.com/sbreddy-111/Elric-ai/blob/main/LICENSE'],
   ['Vite (build tool)', 'MIT License', 'https://github.com/vitejs/vite/blob/main/LICENSE'],
+  ['Mermaid (diagrams)', 'MIT License', 'https://github.com/mermaid-js/mermaid/blob/develop/LICENSE'],
+  ['PDF.js (reads PDF files)', 'Apache License 2.0', 'https://github.com/mozilla/pdf.js/blob/master/LICENSE'],
 ];
 
 // ---------------------------------------------------------------- drawer + profile
