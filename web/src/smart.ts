@@ -10,3 +10,14 @@ export function isHard(q: string): boolean {
   const nums = (q.match(/\d+(\.\d+)?/g) || []).length;
   return (nums >= 2 && MATH.test(q)) || REASON.test(q) || RECENT.test(q);
 }
+
+// "Make an image of …" (pictures, not diagrams: those are drawn in the chat as Mermaid).
+const IMG_EN = /\b(make|create|generate|draw|paint|design|show me|give me)\b[^.?!]{0,25}?\b(an? |the |some )?(image|picture|photo|pic|illustration|drawing|painting|artwork|wallpaper|poster)s?\b|^\s*(an? )?(image|picture|photo|illustration) of\b/i;
+const IMG_HI = /(तस्वीर|चित्र|फ़ोटो|फोटो|इमेज|पिक्चर)[^.?!।]{0,20}(बनाओ|बनाइए|बनाइये|बनाएं|बनाएँ|बना दो|बना दीजिए|दिखाओ)|(बनाओ|बनाइए|बनाएं|बनाएँ)[^.?!।]{0,25}(तस्वीर|चित्र|इमेज)/;
+const IMG_HINGLISH = /\b(image|photo|tasveer|tasvir|chitra|pic|picture)\b[^.?!]{0,20}\b(bana|banao|bana do|banado|banaiye|banaye)\b/i;
+const NOT_IMG = /\b(diagram|flow ?chart|chart|graph|mind ?map|timeline|table|map of the process)\b|आरेख|फ्लोचार्ट/i;
+
+export function isImageRequest(q: string): boolean {
+  if (q.length > 500 || NOT_IMG.test(q)) return false;
+  return IMG_EN.test(q) || IMG_HI.test(q) || IMG_HINGLISH.test(q);
+}

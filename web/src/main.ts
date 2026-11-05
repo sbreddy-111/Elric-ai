@@ -6,15 +6,16 @@ import * as V from './voice';
 import * as P from './photo';
 import * as F from './feedback';
 import * as D from './file';
-import { isHard } from './smart';
+import { isHard, isImageRequest } from './smart';
 import { drawDiagrams } from './diagram';
+import { generateWithCalc, showCalc } from './calcloop';
 
 type Mode = 'study' | 'shopping' | 'general';
 const defaultMode = (): Mode => { const m = localStorage.getItem('elric.mode'); return m === 'shopping' || m === 'study' ? m : 'general'; };
 let mode: Mode = defaultMode();
 let short = localStorage.getItem('elric.length') !== 'long';
 /** A chat turn; photo and file text live only in memory, never in saved chats. */
-type Turn = E.Turn & { photo?: P.Photo; doc?: D.Doc; reported?: boolean; sources?: O.Src[]; hard?: boolean };
+type Turn = E.Turn & { photo?: P.Photo; doc?: D.Doc; image?: string; reported?: boolean; sources?: O.Src[]; hard?: boolean };
 let turns: Turn[] = [];
 interface Chat { id: string; title: string; mode: Mode; turns: Turn[]; at: number }
 const CHATS_KEY = 'elric.chats';
@@ -28,7 +29,7 @@ function saveChats(cs: Chat[]) {
 }
 function persist() {
   // Saved chats keep a placeholder instead of the photo (browser storage is small).
-  const done = turns.filter((x) => x.text).map(({ photo, doc, ...x }) => (photo ? { ...x, text: `📷 ${t('photoLabel')} · ${x.text}` } : doc ? { ...x, text: `📄 ${doc.name} · ${x.text}` } : x));
+  const done = turns.filter((x) => x.text).map(({ photo, doc, image, ...x }) => (image ? { ...x, text: `🖼 ${x.text} (${t('imageNotSaved')})` } : photo ? { ...x, text: `📷 ${t('photoLabel')} · ${x.text}` } : doc ? { ...x, text: `📄 ${doc.name} · ${x.text}` } : x));
   if (!done.length) return;
   if (!chatId) { chatId = Date.now().toString(36); localStorage.setItem(CUR_KEY, chatId); }
   const cs = loadChats().filter((c) => c.id !== chatId);
@@ -89,7 +90,7 @@ function md(src: string): string {
   close();
   return out.join('');
 }
-const body = (x: Turn) => (x.role === 'model' ? md(x.text) : (x.photo ? `<img class="ph" src="${x.photo.thumb}" alt="${t('photoLabel')}">` : '') + (x.doc ? `<span class="dq">📄 ${esc(x.doc.name)}</span>` : '') + esc(x.text));
+const body = (x: Turn) => (x.role === 'model' ? (x.image ? `<img class="gen" src="${x.image}" alt="${t('imageAlt')}"><a class="gsave" href="${x.image}" download="elric-image.jpg">${t('imageSave')}</a>` : '') + md(x.text) : (x.photo ? `<img class="ph" src="${x.photo.thumb}" alt="${t('photoLabel')}">` : '') + (x.doc ? `<span class="dq">📄 ${esc(x.doc.name)}</span>` : '') + esc(x.text));
 const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 /** Small source links under an answer that used the web, and a tip under a hard question answered offline. */
 function extras(x: Turn, i: number): string {
@@ -318,6 +319,7 @@ async function startLoad() {
 
 function system(): string {
   let s = E.SYSTEM_PROMPT;
+  if (E.CALC_TAGS) s += E.CALC_PROMPT;
   if (mode === 'study') s += ' Mode: Study. Be a patient tutor for Indian students.';
   if (mode === 'shopping') s += ' Mode: Shopping. You have NO access to live prices, stock or offers. Never state or guess specific prices. Help compare features and explain what to look for, and say live prices are coming soon.';
   if (getLang() === 'hi') s += ' The user prefers Hindi.';
@@ -347,7 +349,7 @@ function submit() {
 
 /** Turns that can be sent to a model as history (no notices, no empty replies). */
 function historyOf(list: Turn[]): E.Turn[] {
-  return list.filter((x) => !x.failed && x.text.trim()).map(({ photo, doc, sources, hard, reported, ...x }) => (photo ? { ...x, text: `[${t('photoLabel')}] ${x.text}` } : doc ? { ...x, text: `[📄 ${doc.name}] ${x.text}` } : x));
+  return list.filter((x) => !x.failed && x.text.trim()).map(({ photo, doc, image, sources, hard, reported, ...x }) => (photo ? { ...x, text: `[${t('photoLabel')}] ${x.text}` } : doc ? { ...x, text: `[📄 ${doc.name}] ${x.text}` } : x));
 }
 
 let frame = 0;
@@ -366,8 +368,9 @@ function paint(reply: E.Turn) {
 function flush() { if (frame) { cancelAnimationFrame(frame); frame = 0; } }
 
 let onlineWaiting = false;
+let waitLabel: keyof Strings = 'gettingOnline';
 function waitDots(): string {
-  return onlineWaiting ? `<span class="dots">•••</span> <span class="wait">${t('gettingOnline')}</span>` : '<span class="dots">•••</span>';
+  return onlineWaiting ? `<span class="dots">•••</span> <span class="wait">${t(waitLabel)}</span>` : '<span class="dots">•••</span>';
 }
 
 /** Online answer. Returns true when the reply is final (answered or stopped), false to answer on the device. */
@@ -413,11 +416,18 @@ async function answerOnline(reply: Turn, question: string, history: E.Turn[], ph
 async function answerOffline(reply: E.Turn, history: E.Turn[]) {
   const t0 = performance.now();
   try {
-    reply.text = await E.generate(system(), history, (txt) => {
-      if (!reply.firstMs && txt.trim()) reply.firstMs = Math.round(performance.now() - t0);
-      reply.text = txt;
-      paint(reply);
-    });
+    // Calculator steps: <calc>…</calc> is worked out by the app (see calcloop.ts); shown as "a = b".
+    const raw = await generateWithCalc(
+      (prefix, on) => E.generate(system(), history, on, prefix),
+      () => E.stop(),
+      (txt) => {
+        if (!reply.firstMs && txt.trim()) reply.firstMs = Math.round(performance.now() - t0);
+        reply.text = showCalc(txt);
+        paint(reply);
+      },
+      () => stopRequested,
+    );
+    reply.text = showCalc(raw).trim();
     flush();
     reply.ms = Math.round(performance.now() - t0);
     reply.src = 'offline';
@@ -427,6 +437,19 @@ async function answerOffline(reply: E.Turn, history: E.Turn[]) {
     reply.text = t('errorAnswer', { err: String(e?.message || e) });
     reply.failed = true;
   }
+}
+
+/** "Make an image of …": one picture from the server (Online answers only). */
+async function answerImage(reply: Turn, text: string) {
+  if (!O.isOn() || !O.ready()) { reply.text = t(O.isOn() ? 'imageUnavailable' : 'imageNeedsOnline'); reply.failed = true; return; }
+  const t0 = performance.now();
+  waitLabel = 'makingImage'; onlineWaiting = true; paint(reply);
+  const end = await O.makeImage(text, getLang());
+  onlineWaiting = false; waitLabel = 'gettingOnline';
+  flush();
+  if (end.kind === 'ok') { reply.image = end.url; reply.text = t('imageDone'); reply.src = 'online'; reply.ms = Math.round(performance.now() - t0); return; }
+  reply.failed = true;
+  reply.text = t(end.kind === 'blocked' ? 'imageBlocked' : end.kind === 'limit' ? 'imageLimit' : end.kind === 'stopped' ? 'stopped' : 'imageFailed');
 }
 
 let stopRequested = false;
@@ -440,14 +463,16 @@ async function send(text: string, photo: P.Photo | null = null, newDoc: D.Doc | 
   const hard = !photo && isHard(text);
   turns.push(photo ? { role: 'user', text, photo } : newDoc ? { role: 'user', text, doc: newDoc } : { role: 'user', text });
   const online = O.ready();
-  if (!E.isLoaded() && !online) { renderMain(); return null; } // status card explains what's needed; never fake an answer
+  const wantsImage = !photo && !newDoc && !talk && isImageRequest(text);
+  if (!E.isLoaded() && !online && !wantsImage) { renderMain(); return null; } // status card explains what's needed; never fake an answer
   busy = true;
   stopRequested = false;
   const reply: Turn = { role: 'model', text: '', ...(hard ? { hard: true } : {}) };
   turns.push(reply);
   shell();
   let final = false;
-  if (online) final = await answerOnline(reply, text, history, photo, doc, hard);
+  if (!photo && !doc && !talk && isImageRequest(text)) { await answerImage(reply, text); final = true; }
+  if (!final && online) final = await answerOnline(reply, text, history, photo, doc, hard);
   // Photos can't fall back to the device, and hard questions are much better online: try online once more first.
   if (!final && (photo || hard) && online && !stopRequested && O.ready()) final = await answerOnline(reply, text, history, photo, doc, hard);
   if (!final) {

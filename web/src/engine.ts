@@ -559,9 +559,17 @@ function clean(text: string): string {
     .replace(/<(start|end)_of_turn>(model|user)?/g, '');
 }
 
-export async function generate(system: string, turns: Turn[], onText: (text: string) => void): Promise<string> {
+/**
+ * Whether the loaded model was trained to write <calc>expr</calc> for arithmetic (Elric Lite Round 6+;
+ * see model/data/CALC_FORMAT.md). The app parses <calc> in every offline answer either way.
+ */
+export const CALC_TAGS = false;
+export const CALC_PROMPT = ' For every arithmetic step write <calc>expression</calc> (numbers and + - * / ^ ( ) % only) and wait: the app adds <result>value</result>. Use that value; never guess numbers.';
+
+/** prefix = the start of the answer already written (continues after a calculator step). */
+export async function generate(system: string, turns: Turn[], onText: (text: string) => void, prefix = ''): Promise<string> {
   if (!llm) throw new Error('not loaded');
-  const prompt = buildPrompt(system, turns);
+  const prompt = buildPrompt(system, turns) + prefix;
   let acc = '';
   await llm.generateResponse(prompt, (partial: string) => {
     acc += partial;

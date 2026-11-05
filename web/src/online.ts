@@ -5,6 +5,7 @@
 
 export const SB_URL = 'https://hqsqpiwmozgsxiizhaml.supabase.co';
 const CHAT_URL = `${SB_URL}/functions/v1/ai-chat`;
+const IMAGE_URL = `${SB_URL}/functions/v1/ai-image`;
 /** Public by design (the same publishable key the Android app ships). */
 export const CHAT_KEY = 'sb_publishable_Yv1D_ZUk38W3-ZvYdoAD8A_-fx5gPCT';
 
@@ -189,6 +190,44 @@ export async function ask(body: Body, onText: (piece: string) => void, opts: { f
     return { kind: 'failed', reason: why || String(e?.name || e) };
   } finally {
     clearInterval(dog);
+    if (current === me) current = null;
+  }
+}
+
+// ---------- one image ("make an image of …"), Online answers only
+
+export type ImageEnd =
+  | { kind: 'ok'; url: string }
+  | { kind: 'blocked' }
+  | { kind: 'limit'; retryAfter: number }
+  | { kind: 'stopped' }
+  | { kind: 'failed'; reason: string };
+
+/** Asks the server to make one picture. Nothing is stored there; the image comes back as a data URL. */
+export async function makeImage(prompt: string, lang: 'en' | 'hi'): Promise<ImageEnd> {
+  const me = { ctrl: new AbortController(), cancelled: false };
+  current = me;
+  const dog = setTimeout(() => me.ctrl.abort(), 60000);
+  try {
+    const res = await fetch(IMAGE_URL, {
+      method: 'POST',
+      headers: { apikey: CHAT_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device: deviceId(), prompt: prompt.slice(0, 500), lang }),
+      signal: me.ctrl.signal,
+      cache: 'no-store',
+    });
+    let o: any = {};
+    try { o = await res.json(); } catch { /* not json */ }
+    if (res.status === 422) return { kind: 'blocked' };
+    if (res.status === 429) return { kind: 'limit', retryAfter: typeof o.retry_after === 'number' ? o.retry_after : 3600 };
+    if (!res.ok || typeof o.data !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(o.data.slice(0, 200))) return { kind: 'failed', reason: `http ${res.status}` };
+    const mime = /^image\/(jpeg|png|webp)$/.test(o.mime) ? o.mime : 'image/jpeg';
+    return { kind: 'ok', url: `data:${mime};base64,${o.data}` };
+  } catch (e: any) {
+    if (me.cancelled) return { kind: 'stopped' };
+    return { kind: 'failed', reason: String(e?.name || e) };
+  } finally {
+    clearTimeout(dog);
     if (current === me) current = null;
   }
 }

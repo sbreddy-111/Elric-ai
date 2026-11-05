@@ -154,11 +154,12 @@ function confirmBox(title: string, body: string, okLabel = 'Delete', danger = tr
 }
 
 // ---------- app state ----------
-type View = 'overview' | 'review' | 'facts' | 'reports' | 'automations';
+type View = 'overview' | 'review' | 'facts' | 'cache' | 'reports' | 'automations';
 const VIEWS: { id: View; label: string; short: string; ic: keyof typeof I; sub: string }[] = [
   { id: 'overview', label: 'Overview', short: 'Home', ic: 'overview', sub: 'How Elric AI is doing today' },
   { id: 'review', label: 'Review', short: 'Review', ic: 'inbox', sub: 'Reports that need your decision' },
   { id: 'facts', label: 'Facts', short: 'Facts', ic: 'book', sub: 'What every app knows and uses' },
+  { id: 'cache', label: 'Cache', short: 'Cache', ic: 'bolt', sub: 'Ready answers for common questions' },
   { id: 'reports', label: 'Reports', short: 'Reports', ic: 'feedback', sub: 'Every report from users, newest first' },
   { id: 'automations', label: 'Automations', short: 'Auto', ic: 'bolt', sub: 'Jobs that run by themselves every hour' },
 ];
@@ -166,6 +167,7 @@ const hashView = () => { const h = location.hash.replace('#/', '').split('?')[0]
 let view: View = hashView() || 'overview';
 if (!VIEWS.some((v) => v.id === view)) view = 'overview';
 let reviewCount: number | null = null;
+let cacheCount: number | null = null;
 let checking = false;
 const app = document.getElementById('app')!;
 
@@ -345,7 +347,10 @@ function wireShell() {
 }
 
 function renderChrome() {
-  const badge = (id: View) => id === 'review' && reviewCount ? `<span class="badge" aria-label="${reviewCount} waiting">${reviewCount > 99 ? '99+' : reviewCount}</span>` : '';
+  const badge = (id: View) => {
+    const n = id === 'review' ? reviewCount : id === 'cache' ? cacheCount : 0;
+    return n ? `<span class="badge" aria-label="${n} waiting">${n > 99 ? '99+' : n}</span>` : '';
+  };
   $('#nav').innerHTML = VIEWS.map((v) => `<a href="#/${v.id}" class="${v.id === view ? 'on' : ''}" ${v.id === view ? 'aria-current="page"' : ''}>${icon(v.ic)}<span>${v.label}</span>${badge(v.id)}</a>`).join('');
   $('#tabbar').innerHTML = VIEWS.map((v) => `<a href="#/${v.id}" class="${v.id === view ? 'on' : ''}" ${v.id === view ? 'aria-current="page"' : ''}><span class="tb-ic">${icon(v.ic)}${badge(v.id)}</span><span>${v.short}</span></a>`).join('');
   $('#crumb').innerHTML = `<span class="muted">Admin</span><span class="muted">/</span><b>${esc(VIEWS.find((v) => v.id === view)!.label)}</b>`;
@@ -372,12 +377,13 @@ function openMenu() {
 
 async function refreshBadge() {
   try { reviewCount = await countOf('ai_feedback', 'review_status=eq.needs_review'); renderChrome(); } catch { /* ignore */ }
+  try { cacheCount = await countOf('ai_answer_cache', 'status=eq.pending'); renderChrome(); } catch { cacheCount = null; /* table not there yet */ }
 }
 
 function renderView() {
   const el = $('#view');
   el.scrollTop = 0; window.scrollTo(0, 0);
-  ({ overview: viewOverview, review: viewReview, facts: viewFacts, reports: viewReports, automations: viewAutomations })[view]();
+  ({ overview: viewOverview, review: viewReview, facts: viewFacts, cache: viewCache, reports: viewReports, automations: viewAutomations })[view]();
 }
 
 // global click handling (actions are data-act attributes)
@@ -1058,3 +1064,94 @@ function startApp() {
   });
 }
 boot();
+
+// ---------- 6. Answer cache ----------
+type CacheRow = {
+  id: number; question_norm: string; lang: string; mode: string; short: boolean; question: string; answer: string;
+  kind: 'general' | 'search'; ttl_days: number; devices: number; hits: number; approved: boolean;
+  status: 'pending' | 'approved' | 'rejected'; created_at: string; approved_at: string | null; expires_at: string | null;
+};
+let cacheFilter: 'pending' | 'approved' | 'rejected' = 'pending';
+const approveBody = (r: CacheRow, answer?: string) => ({
+  ...(answer !== undefined ? { answer } : {}),
+  approved: true, status: 'approved', approved_at: new Date().toISOString(),
+  expires_at: new Date(Date.now() + Math.max(1, r.ttl_days) * 86400000).toISOString(),
+});
+async function viewCache() {
+  const el = $('#view');
+  el.innerHTML = pageHead() + loading(4);
+  let rows: CacheRow[];
+  try { rows = (await rest<CacheRow[]>('ai_answer_cache?select=*&order=created_at.desc&limit=500')).data; }
+  catch (e) { if (view === 'cache') el.innerHTML = pageHead() + errorBox(e, 'cache'); return; }
+  if (view !== 'cache') return;
+  cacheCount = rows.filter((r) => r.status === 'pending').length; renderChrome();
+  el.innerHTML = `${pageHead()}
+    <p class="muted small">Common questions asked by 3 or more devices. Approved answers are shown instantly to everyone who asks the same question, without using the online AI, until they expire (news-type 1 day, others 30 days).</p>
+    <div class="toolbar"><div class="seg" role="tablist" aria-label="Show" id="cseg"></div></div>
+    <div id="clist" class="clist"></div>`;
+  const live = (r: CacheRow) => r.status === 'approved' && !!r.expires_at && new Date(r.expires_at).getTime() > Date.now();
+  const draw = () => {
+    const counts = { pending: 0, approved: 0, rejected: 0 } as Record<CacheRow['status'], number>;
+    rows.forEach((r) => counts[r.status]++);
+    $('#cseg').innerHTML = (['pending', 'approved', 'rejected'] as const).map((f) => `<button role="tab" data-cf="${f}" class="${cacheFilter === f ? 'on' : ''}" aria-selected="${cacheFilter === f}">${{ pending: 'To approve', approved: 'Approved', rejected: 'Rejected' }[f]} <span class="cnt">${counts[f]}</span></button>`).join('');
+    $$<HTMLButtonElement>('[data-cf]', el).forEach((b) => b.onclick = () => { cacheFilter = b.dataset.cf as typeof cacheFilter; draw(); });
+    const list = rows.filter((r) => r.status === cacheFilter);
+    $('#clist').innerHTML = list.length ? list.map((r) => `
+      <article class="card crow" data-id="${r.id}">
+        <div class="cq"><b>${esc(r.question)}</b></div>
+        <div class="fmeta">
+          <span class="chip">${r.lang === 'hi' ? 'हिंदी' : 'English'}</span><span class="chip">${esc(r.mode)}</span><span class="chip">${r.short ? 'Short' : 'Detailed'}</span>
+          ${r.kind === 'search' ? `<span class="chip c-news">${icon('calendar')}News · 1 day</span>` : ''}
+          <span class="chip">${icon('users')}${plural(r.devices, 'device')}</span>
+          ${r.status === 'approved' ? `<span class="chip ${live(r) ? 'c-man' : 'c-err'}">${live(r) ? `Until ${esc(fmt(r.expires_at, false))}` : 'Expired'}</span><span class="chip">${plural(r.hits, 'use')}</span>` : ''}
+          <span class="muted small">${esc(ago(r.created_at))}</span>
+        </div>
+        <div class="ca">${esc(r.answer)}</div>
+        <div class="cbtns">
+          ${r.status !== 'approved' || !live(r) ? `<button class="btn primary" data-c="approve">${icon('check')} Approve</button>` : ''}
+          <button class="btn" data-c="edit">${icon('edit')} Edit</button>
+          ${r.status !== 'rejected' ? `<button class="btn" data-c="reject">${icon('x')} ${r.status === 'approved' ? 'Stop using' : 'Reject'}</button>` : ''}
+          <button class="btn ghost danger-t" data-c="delete" aria-label="Delete">${icon('trash')}</button>
+        </div>
+      </article>`).join('') : empty(cacheFilter === 'pending' ? 'Nothing to approve' : 'Nothing here', cacheFilter === 'pending' ? 'When 3 or more devices ask the same general question, it shows here for one-tap approval.' : 'Nothing in this list yet.', cacheFilter === 'pending' ? 'check' : 'inbox');
+    $$<HTMLElement>('.crow', el).forEach((card) => {
+      const r = rows.find((x) => x.id === Number(card.dataset.id))!;
+      const patch = async (body: Record<string, unknown>, msg: string) => {
+        $$<HTMLButtonElement>('button', card).forEach((b) => (b.disabled = true));
+        try {
+          await rest(`ai_answer_cache?id=eq.${r.id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(body) });
+          Object.assign(r, body); toast(msg, 'ok'); cacheCount = rows.filter((x) => x.status === 'pending').length; renderChrome(); draw();
+        } catch (e) { toast((e as Error).message, 'err'); $$<HTMLButtonElement>('button', card).forEach((b) => (b.disabled = false)); }
+      };
+      $$<HTMLButtonElement>('[data-c]', card).forEach((b) => b.onclick = async () => {
+        const a = b.dataset.c;
+        if (a === 'approve') patch(approveBody(r), 'Approved. Everyone asking this now gets this answer.');
+        else if (a === 'reject') patch({ approved: false, status: 'rejected' }, r.status === 'approved' ? 'Stopped. This answer is no longer used.' : 'Rejected.');
+        else if (a === 'delete') {
+          if (!(await confirmBox('Delete this cached answer?', 'If devices keep asking it, it can come back here for approval.'))) return;
+          try { await rest(`ai_answer_cache?id=eq.${r.id}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }); rows = rows.filter((x) => x.id !== r.id); toast('Deleted.', 'ok'); draw(); }
+          catch (e) { toast((e as Error).message, 'err'); }
+        } else if (a === 'edit') {
+          openDrawer(`${drawerHead('Edit answer')}
+            <form class="d-body form" id="cform" novalidate>
+              <div><label>Question</label><p>${esc(r.question)}</p></div>
+              <div><div class="lbl-row"><label for="cans">Answer</label><span class="counter" id="cct">${r.answer.length}/6000</span></div>
+              <textarea id="cans" rows="12" maxlength="6000">${esc(r.answer)}</textarea></div>
+              <div class="d-foot"><span class="grow"></span><button type="button" class="btn" data-act="close-drawer">Cancel</button>
+                <button type="submit" class="btn primary" id="csave">${icon('check')} Save and approve</button></div>
+            </form>`, (d) => {
+            const ta = $<HTMLTextAreaElement>('#cans', d);
+            ta.oninput = () => { $('#cct', d).textContent = `${ta.value.length}/6000`; };
+            $('#cform', d).onsubmit = async (e) => {
+              e.preventDefault();
+              const v = ta.value.trim();
+              if (v.length < 5) { toast('Please write the answer.', 'err'); return; }
+              closeDrawer(); patch(approveBody(r, v), 'Saved and approved.');
+            };
+          });
+        }
+      });
+    });
+  };
+  draw();
+}
