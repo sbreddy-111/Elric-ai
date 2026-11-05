@@ -20,7 +20,7 @@
   <main id="main">
     <section class="hero" id="hero">
       <h1>Type it or say it.</h1>
-      <p>Telugu, Hindi or English — typed or spoken, it works the same. I fill the form, you say yes.</p>
+      <p>English, Telugu or Hindi — typed or spoken. I reply in your language, fill the form, and you say yes.</p>
       <div class="chips">
         <button class="chip" data-t="Check my APCPDCL current bill">⚡ Power bill</button>
         <button class="chip" data-t="Bus from Narasaraopet to Hyderabad tomorrow">🚌 Bus search</button>
@@ -31,13 +31,9 @@
   </main>
 
   <footer class="bar">
-    <div class="langs" role="radiogroup" aria-label="Language">
-      <button class="lg on" data-l="te-IN">తెలుగు</button>
-      <button class="lg" data-l="hi-IN">हिंदी</button>
-      <button class="lg" data-l="en-IN">English</button>
-    </div>
     <form id="f" class="inrow" autocomplete="off">
       <input id="q" maxlength="400" placeholder="Message Elric Agent…" enterkeyhint="send">
+      <button type="button" id="ml" class="ml" title="Mic language (optional)" aria-label="Mic language: English">EN</button>
       <button type="button" id="mic" class="mic" aria-label="Speak">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
       </button>
