@@ -3,9 +3,11 @@
 // POST JSON (apikey header = the app's publishable/anon key):
 //   { device, question, history?: [{role:'user'|'model', text}], image?: {mime, data(base64)},
 //     mode?: 'study'|'shopping'|'general', short?: bool, lang?: 'en'|'hi', talk?: bool,
-//     name?, study?, memory? }
+//     name?, study?, memory?, doc?: {name, text}, hard?: bool }
+//   doc = text the app took from a PDF/TXT file on the phone (trimmed there; never stored here).
 // Response:
 //   200 text/event-stream:  data: {"t":"..."}  (text pieces)
+//                           data: {"src":[{"t":title,"u":url}]}   (web pages the answer used, when it searched)
 //                           data: {"done":true,"m":"g"|"a"|"b"}   (finished; g = Groq, a/b = Gemini primary/fallback)
 //                           data: {"error":"failed"|"limit"|"blocked"}   (stream broke; app answers offline)
 //   400 {status:'bad_request'} · 401 {status:'unauthorized'} · 413 {status:'too_large'}
@@ -15,10 +17,13 @@
 //
 // Privacy: no question, answer, photo or memory text is stored or logged. Only a salted
 // SHA-256 of the device id and of the IP, with hourly counters (table ai_usage).
-// Models: text questions → Groq openai/gpt-oss-20b first (web search only for time-sensitive questions),
+// Models: text questions → Groq openai/gpt-oss-20b first, with a calculator tool for maths and web search for
+// questions that need facts (global search budget; skipped for maths, chit-chat and files),
 // then, if Groq has no first word within a few seconds, errors or is rate limited (or GROQ_API_KEY is
 // not set), gemini-3.5-flash-lite hedged with gemini-3.1-flash-lite. Photos always go to Gemini.
-// Response header x-elric-src: g1 = Groq, g2 = Groq + web search, gem = Gemini.
+// Answer cache: approved answers for common general questions (table ai_answer_cache) are served first
+// (x-elric-src: cache, done m "c"); candidates are recorded only after 3+ devices ask (hashes until then).
+// Response header x-elric-src: g1 = Groq, g2 = Groq + web search, gc = Groq + calculator, g3 = both, gem = Gemini.
 
 const MODELS = (Deno.env.get("AI_CHAT_MODELS") ?? "gemini-3.5-flash-lite,gemini-3.1-flash-lite")
   .split(",").map((s) => s.trim()).filter(Boolean);
@@ -46,6 +51,12 @@ const MAX_TURN = 4000;
 const MAX_HISTORY_TURNS = 12;
 const MAX_HISTORY_CHARS = 12000;
 const MAX_MEMORY = 450;
+const MAX_DOC = 10_000;                // chars of file text per question
+/** Web searches (about 8.5k Groq tokens each, of 8000/min shared) for all users together. */
+const SEARCH_HOUR = 50, SEARCH_DAY = 300;
+/** Tool rounds per answer (each is one Groq request; 1000 requests/day shared). */
+const MAX_TOOL_ROUNDS = 4;
+const GROQ_FIRST_TOOL_MS = 12_000;
 const CALL_TIMEOUT_MS = 60_000;
 /** Start the next model too if the first has not begun answering by then. */
 const HEDGE_MS = 4_000;
@@ -164,12 +175,20 @@ const BUILTIN_FACTS =
 type Req = {
   question: string; history: { role: string; text: string }[]; image?: { mime: string; data: string };
   mode: string; short: boolean; lang: string; talk: boolean; name: string; study: string; memory: string;
+  doc?: { name: string; text: string }; hard: boolean;
 };
+
+/** The user's message as sent to the model: the question, with the file's text before it when one is attached. */
+function userText(r: Req): string {
+  if (!r.doc) return r.question;
+  return `Attached file "${r.doc.name}" (text taken from it on the user's phone; may be trimmed):\n<<<\n${r.doc.text}\n>>>\n\n` +
+    `Question about the file: ${r.question}`;
+}
 
 const clean = (s: unknown, max: number) =>
   typeof s === "string" ? s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, max) : "";
 
-function systemPrompt(r: Req, facts: Fact[], search = false): string {
+function systemPrompt(r: Req, facts: Fact[], search = false, calcTool = false): string {
   const today = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" })
     .format(new Date());
   let s = search
@@ -180,6 +199,19 @@ function systemPrompt(r: Req, facts: Fact[], search = false): string {
   s += "You are Elric AI. Do not introduce yourself or mention who made you unless the user asks. Answer reliably in the user's language (English or " +
     "Hindi). If unsure, say so. If asked which model or company you are, say you are Elric AI. " +
     "Write maths in plain text (like 17 × 24 = 408), never LaTeX. Keep answers clear and not too long.";
+  if (calcTool) {
+    s += " For every arithmetic step (including unit, percent and time-difference sums) call the calculator tool " +
+      "and use its exact results; never work numbers out in your head. Show the steps with the computed numbers " +
+      "and give the final answer clearly (with units, and clock times as AM/PM).";
+  }
+  if (!r.talk) {
+    s += " If the user asks for a diagram, flowchart, mind map, timeline or process chart, draw it as Mermaid in a " +
+      "```mermaid code block (flowchart TD or LR, short node labels in double quotes, no special characters " +
+      "outside quotes), with one or two lines of explanation; otherwise do not add diagrams.";
+  }
+  s += " You cannot create pictures or photos. If asked to make, draw or generate an image or picture, say image " +
+    "making is not available yet, and offer a short description or a diagram instead.";
+  if (r.doc) s += " The user attached a file; answer from its text, and say so if the answer is not in it.";
   s += " If asked who made, built or founded you, say Elric AI was founded by Brahma Reddy Suravarapu; " +
     "never say Google, Gemma, Gemini, OpenAI or Qwen made you, and never mention Google, Gemini or Gemma " +
     "as your model, provider or maker (do not name them at all, not even to deny it; just say you are Elric AI). For any small or local business or person you have no facts about, " +
@@ -215,6 +247,111 @@ function systemPrompt(r: Req, facts: Fact[], search = false): string {
   return s;
 }
 
+// ---------------------------------------------------------------- calculator tool (safe: own parser, no eval)
+
+/** Evaluates an arithmetic expression. Supports + - * / ^ ** % (as percent or mod), parentheses, unary -,
+ *  x (as times), constants pi/e and functions sqrt cbrt abs round floor ceil ln log log10
+ *  log2 exp sin cos tan asin acos atan (radians) sind cosd tand (degrees) min max pow factorial / n!.
+ *  Throws on anything else. */
+function calc(expr: string): number {
+  const src = String(expr).slice(0, 300)
+    .replace(/[×✕✖]/g, "*").replace(/[÷]/g, "/").replace(/[−–—]/g, "-").replace(/π/g, "pi")
+    .replace(/\*\*/g, "^").replace(/₹|\$|rs\.?/gi, "");
+  let i = 0;
+  const peek = () => { while (src[i] === " " || src[i] === "\t") i++; return src[i] ?? ""; };
+  const fail = (m: string): never => { throw new Error(m); };
+  const FN: Record<string, (...a: number[]) => number> = {
+    sqrt: Math.sqrt, cbrt: Math.cbrt, abs: Math.abs, floor: Math.floor, ceil: Math.ceil, exp: Math.exp,
+    ln: Math.log, log: Math.log10, log10: Math.log10, log2: Math.log2,
+    sin: Math.sin, cos: Math.cos, tan: Math.tan, asin: Math.asin, acos: Math.acos, atan: Math.atan,
+    sind: (x) => Math.sin(x * Math.PI / 180), cosd: (x) => Math.cos(x * Math.PI / 180), tand: (x) => Math.tan(x * Math.PI / 180),
+    round: (x, d = 0) => { const k = 10 ** Math.max(0, Math.min(12, Math.trunc(d))); return Math.round(x * k) / k; },
+    min: Math.min, max: Math.max, pow: Math.pow, factorial: (x) => fact(x),
+  };
+  const fact = (n: number) => {
+    if (!Number.isInteger(n) || n < 0 || n > 170) fail("factorial");
+    let r = 1; for (let k = 2; k <= n; k++) r *= k; return r;
+  };
+  const primary = (): number => {
+    const c = peek();
+    if (c === "(") { i++; const v = expr0(); if (peek() !== ")") fail(")"); i++; return v; }
+    if (c === "-") { i++; return -unary(); }
+    if (c === "+") { i++; return unary(); }
+    const num = /^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i.exec(src.slice(i));
+    if (num) { i += num[0].length; return parseFloat(num[0]); }
+    const id = /^[a-z][a-z0-9]*/i.exec(src.slice(i));
+    if (id) {
+      const name = id[0].toLowerCase(); i += id[0].length;
+      if (name === "pi") return Math.PI;
+      if (name === "e") return Math.E;
+      const f = FN[name];
+      if (!f) fail("name");
+      if (peek() !== "(") fail("(");
+      i++;
+      const args: number[] = [];
+      if (peek() !== ")") { args.push(expr0()); while (peek() === ",") { i++; args.push(expr0()); } }
+      if (peek() !== ")") fail(")");
+      i++;
+      if (args.length > 10) fail("args");
+      return f(...args);
+    }
+    return fail("token");
+  };
+  const postfix = (): number => {
+    let v = primary();
+    for (;;) {
+      const c = peek();
+      if (c === "!") { i++; v = fact(v); continue; }
+      if (c === "%") {
+        // "20%" is percent unless followed by an operand (then it's modulo).
+        const save = i; i++;
+        const nx = peek();
+        if (nx && /[\d.(a-z]/i.test(nx)) { i = save; break; }
+        v = v / 100; continue;
+      }
+      break;
+    }
+    return v;
+  };
+  const unary = (): number => postfix();
+  const power = (): number => {
+    const b = unary();
+    if (peek() === "^") { i++; const e = power0(); return Math.pow(b, e); }
+    return b;
+  };
+  const power0 = (): number => { const c = peek(); if (c === "-") { i++; return -power(); } return power(); };
+  const term = (): number => {
+    let v = power0();
+    for (;;) {
+      const c = peek();
+      if (c === "*" || (c === "x" && /^x\s*[\d(.]/.test(src.slice(i)))) { i++; v *= power0(); }
+      else if (c === "/") { i++; v /= power0(); }
+      else if (c === "%") { i++; v %= power0(); }
+      else if (c === "(" ) { v *= power0(); } // implicit: 2(3+4)
+      else return v;
+    }
+  };
+  const expr0 = (): number => {
+    let v = term();
+    for (;;) {
+      const c = peek();
+      if (c === "+") { i++; v += term(); } else if (c === "-") { i++; v -= term(); } else return v;
+    }
+  };
+  if (!src.trim()) fail("empty");
+  const v = expr0();
+  if (peek() !== "") fail("trailing");
+  if (!Number.isFinite(v)) fail("not finite");
+  return v;
+}
+
+/** Number as text: exact integers as is, others to 10 significant digits without float noise. */
+function fmtNum(v: number): string {
+  if (Number.isInteger(v) && Math.abs(v) < 1e15) return String(v);
+  const s = Number(v.toPrecision(10));
+  return String(s);
+}
+
 // ---------------------------------------------------------------- request parsing
 
 function parse(body: any): Req | string {
@@ -242,8 +379,14 @@ function parse(body: any): Req | string {
     if (!data || data.length > MAX_IMAGE_B64 || !/^[A-Za-z0-9+/=\s]+$/.test(data.slice(0, 2000))) return "image";
     image = { mime, data: data.replace(/\s+/g, "") };
   }
+  let doc: Req["doc"];
+  if (body.doc && typeof body.doc === "object") {
+    const text = clean(body.doc.text, MAX_DOC);
+    if (text) doc = { name: clean(body.doc.name, 80).replace(/["<>\n\r]/g, "") || "file", text };
+  }
   const mode = ["study", "shopping", "general"].includes(body.mode) ? body.mode : "study";
   return {
+    doc, hard: body.hard === true,
     question, history: hist, image, mode,
     short: body.short !== false, lang: body.lang === "hi" ? "hi" : "en", talk: body.talk === true,
     name: clean(body.name, 40).replace(/[^\p{L}\p{M}\p{N} .'-]/gu, ""),
@@ -262,7 +405,7 @@ async function callGemini(r: Req, system: string, test: string, think = ""): Pro
   const contents = r.history.map((t) => ({ role: t.role, parts: [{ text: t.text }] }));
   const parts: unknown[] = [];
   if (r.image) parts.push({ inline_data: { mime_type: r.image.mime, data: r.image.data } });
-  parts.push({ text: r.question });
+  parts.push({ text: userText(r) });
   contents.push({ role: "user", parts } as any);
   const body = JSON.stringify({
     system_instruction: { parts: [{ text: system }] },
@@ -334,12 +477,13 @@ async function callGemini(r: Req, system: string, test: string, think = ""): Pro
 }
 
 // Re-emits Gemini's SSE as small Elric events. Never logs text.
-function relay(res: Response, model: number): ReadableStream<Uint8Array> {
+function relay(res: Response, model: number, onDone?: (text: string) => void): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
   const dec = new TextDecoder();
   const reader = res.body!.getReader();
   let buf = "";
   let sent = 0;
+  let all = "";
   let finish = "";
   let blocked = false;
   const send = (c: ReadableStreamDefaultController<Uint8Array>, o: unknown) =>
@@ -365,7 +509,7 @@ function relay(res: Response, model: number): ReadableStream<Uint8Array> {
             if (cand?.finishReason) finish = cand.finishReason;
             for (const p of cand?.content?.parts ?? []) {
               if (typeof p?.text === "string" && p.text && !p.thought) {
-                sent += p.text.length;
+                sent += p.text.length; all += p.text;
                 send(c, { t: p.text });
               }
             }
@@ -373,7 +517,10 @@ function relay(res: Response, model: number): ReadableStream<Uint8Array> {
         }
         if (blocked || (sent === 0 && /SAFETY|PROHIBITED|BLOCK|RECITATION/.test(finish))) send(c, { error: "blocked" });
         else if (sent === 0) send(c, { error: "failed" });
-        else send(c, { done: true, m: model === 0 ? "a" : "b", f: finish === "MAX_TOKENS" ? "length" : undefined });
+        else {
+          send(c, { done: true, m: model === 0 ? "a" : "b", f: finish === "MAX_TOKENS" ? "length" : undefined });
+          if (finish !== "MAX_TOKENS") onDone?.(all.trim());
+        }
       } catch {
         try { send(c, { error: "failed" }); } catch { /* closed */ }
       } finally {
@@ -386,10 +533,10 @@ function relay(res: Response, model: number): ReadableStream<Uint8Array> {
   });
 }
 
-// ---------------------------------------------------------------- Groq (OpenAI-compatible)
+// ---------------------------------------------------------------- what a question needs
 
-// Time-sensitive questions only (a search costs ~4000 of the 8000 tokens/min shared limit), so study
-// words like "current" (electricity) or "rate" (of reaction) do not trigger it on their own.
+// Time-sensitive questions (always worth a search), so study words like "current" (electricity) or
+// "rate" (of reaction) do not trigger it on their own.
 const SEARCH_RE = new RegExp(
   "\\b(today|today's|tonight|tomorrow|yesterday|right now|as of now|latest|currently|recent|recently|news|" +
   "breaking|headlines?|current (affairs|news|events|situation|status|cm|pm|president|chief minister|prime minister)|" +
@@ -398,46 +545,192 @@ const SEARCH_RE = new RegExp(
   "this week|this month|last week|202[5-9])\\b|\\baaj\\b|\\babhi\\b|taaza|\\btaza\\b|khabar|samachar|mausam|chunav|natija|" +
   "आज|अभी|ताज़ा|ताजा|खबर|ख़बर|समाचार|मौसम|चुनाव|नतीजा|परिणाम|स्कोर", "i");
 
-function needsSearch(q: string) { return SEARCH_RE.test(q); }
+// Fact look-ups that change or that a small model often gets wrong: office holders, prices, dates of things,
+// releases, rankings, specs, schedules, "who is <Name>", and places/organisations by name.
+const FACT_RE = new RegExp(
+  "\\b(who (is|are) (the )?(current |present |new )?(cm|pm|ceo|chief|captain|coach|president|prime|governor|minister|head|chairman|founder|owner|director)|" +
+  "who is [A-Z][a-z]+|price of|cost of|how much (is|does|do)|release date|launch(ed)? (date|in|on)|when (is|was|will|does|did)|" +
+  "how many (people|seats|countries|states|districts|members)|population of|ranking|rank of|top \\d+|best .{0,30} (in|under|for) |" +
+  "specs?|specifications|schedule|timetable of|fees? (of|for)|cut ?off|syllabus|notification|last date|admit card|" +
+  "exam date|vacancy|vacancies|scheme|yojana|launched|announced|new (phone|model|law|rule|policy))\\b|" +
+  "कौन है|कीमत|दाम|कब है|कब होगा|योजना|अंतिम तिथि", "i");
 
-type GroqLive = { reader: ReadableStreamDefaultReader<Uint8Array>; dec: TextDecoder; buf: string; pending: string[]; finish: string; ended: boolean };
+// No search for maths, code, writing, translation, greetings or explanations of a concept.
+const NO_SEARCH_RE = new RegExp(
+  "^\\s*(hi|hello|hey|thanks|thank you|ok|okay|good (morning|night|evening)|namaste|नमस्ते|धन्यवाद)\\b|" +
+  "\\b(write (a|an|me)|essay|poem|story|letter|translate|code|python|java|program|function|debug|explain (how|why|the concept)|" +
+  "meaning of|define|difference between|solve|calculate|prove|derive)\\b", "i");
+
+const MATH_WORDS = new RegExp(
+  "\\b(solve|calculate|compute|find (the|its)|how (many|much|long|far|fast)|what time|percent|percentage|profit|loss|" +
+  "discount|markup|interest|ratio|average|speed|km/h|kmph|distance|area|volume|perimeter|equation|probability|" +
+  "sum|product|square root|cube|factor|lcm|hcf|gcd|emi|gst|train|catch|overtake|marked price|cost price|selling price|" +
+  "original price|simple interest|compound interest)\\b|%|×|÷|\\d\\s*[-+*/^x]\\s*\\d|" +
+  "हल|गणना|प्रतिशत|लाभ|हानि|छूट|ब्याज|अनुपात|औसत|गति|दूरी|क्षेत्रफल|मूल्य|कितना|कितने|कितनी", "i");
+
+const REASON_WORDS = new RegExp(
+  "\\b(step by step|show steps|prove|derive|balance (the|this)? ?(chemical )?equation|why does|why do|explain why|" +
+  "acceleration|velocity|momentum|force|energy|circuit|resistance|reaction|molar|moles|logic|puzzle|riddle)\\b|" +
+  "चरणबद्ध|सिद्ध|क्यों", "i");
+
+/** Maths with numbers in it: give the model the calculator. */
+function needsCalc(q: string) {
+  return (q.match(/\d+(\.\d+)?/g) ?? []).length >= 2 && MATH_WORDS.test(q);
+}
+/** Multi-step reasoning: think a bit longer. */
+function isHard(r: Req) {
+  return r.hard || needsCalc(r.question) || REASON_WORDS.test(r.question);
+}
+function needsSearch(r: Req) {
+  if (r.doc || r.image) return false;
+  const q = r.question;
+  if (SEARCH_RE.test(q)) return true;
+  if (needsCalc(q) || NO_SEARCH_RE.test(q) || q.length < 12) return false;
+  return FACT_RE.test(q);
+}
+
+// ---------------------------------------------------------------- Groq (OpenAI-compatible)
+
+const CALC_TOOL = {
+  type: "function",
+  function: {
+    name: "calculator",
+    description: "Exact arithmetic. Pass one or more expressions; returns each result. Use + - * / ^ ( ), " +
+      "% for percent (20% = 0.2), sqrt(), round(x, digits), pi, sind/cosd/tand (degrees), sin/cos/tan (radians), " +
+      "log10, ln, n!. Plain numbers only: no commas, units or words.",
+    parameters: {
+      type: "object",
+      properties: {
+        expressions: { type: "array", items: { type: "string" }, description: "e.g. [\"72*1.5\", \"108/(90-72)\"]" },
+      },
+      required: ["expressions"],
+    },
+  },
+};
+
+function runCalc(args: string): string {
+  let list: unknown[] = [];
+  try {
+    const a = JSON.parse(args || "{}");
+    list = Array.isArray(a.expressions) ? a.expressions : typeof a.expression === "string" ? [a.expression] : [];
+  } catch { return JSON.stringify({ error: "arguments must be JSON {expressions: [..]}" }); }
+  const out = list.slice(0, 12).map((e) => {
+    const expr = String(e).slice(0, 300);
+    try { return { expression: expr, result: fmtNum(calc(expr)) }; } catch (x) { return { expression: expr, error: String((x as Error).message || "invalid") }; }
+  });
+  return JSON.stringify(out.length ? out : { error: "no expressions" });
+}
+
+/** Groq token budget seen in its last response headers (per isolate; best effort). */
+let groqTokRemain = 8000, groqTokResetAt = 0;
+function noteGroqLimits(res: Response) {
+  const rem = Number(res.headers.get("x-ratelimit-remaining-tokens") ?? "");
+  const reset = res.headers.get("x-ratelimit-reset-tokens") ?? "";
+  if (!Number.isFinite(rem)) return;
+  let ms = 0;
+  const m = /(?:(\d+)m)?([\d.]+)s/.exec(reset);
+  if (m) ms = (Number(m[1] ?? 0) * 60 + Number(m[2])) * 1000;
+  else if (/^[\d.]+ms$/.test(reset)) ms = parseFloat(reset);
+  groqTokRemain = rem;
+  groqTokResetAt = Date.now() + Math.min(ms || 60_000, 60_000);
+}
+/** A search needs about 8.5k tokens. Groq refills about 133 tokens/s: wait up to 12 s for room, else skip. */
+async function groqSearchRoom(): Promise<boolean> {
+  if (Date.now() >= groqTokResetAt || groqTokRemain >= 6000) return true;
+  const waitMs = Math.min(groqTokResetAt - Date.now(), ((6000 - groqTokRemain) / 133) * 1000);
+  if (waitMs > 12_000) return false;
+  await new Promise((r) => setTimeout(r, Math.max(0, waitMs)));
+  return true;
+}
+
+type Tools = { search: boolean; calc: boolean };
+type Source = { t: string; u: string };
+type ToolCall = { id: string; name: string; args: string };
+type GroqLive = {
+  reader: ReadableStreamDefaultReader<Uint8Array>; dec: TextDecoder; buf: string; pending: string[]; finish: string; ended: boolean;
+  messages: any[]; body: Record<string, unknown>; signal: AbortSignal; calls: ToolCall[]; rounds: number;
+  opened: Source[]; found: Source[]; content: string;
+};
+
+async function groqFetch(body: Record<string, unknown>, signal: AbortSignal): Promise<Response | null> {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_KEY}` },
+    body: JSON.stringify(body),
+    signal,
+  });
+  noteGroqLimits(res);
+  if (!res.ok || !res.body) {
+    console.log(`ai-chat groq status ${res.status}`); // status only, never content
+    groqLast = String(res.status);
+    if (res.status === 429) {
+      const ra = Number(res.headers.get("retry-after") ?? "");
+      groqCooldownUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 3600) : 60) * 1000;
+    }
+    await res.body?.cancel().catch(() => {});
+    return null;
+  }
+  return res;
+}
+
+/** Runs the tool calls of the round that just ended and starts the next round. false = cannot continue. */
+async function groqNextRound(live: GroqLive): Promise<boolean> {
+  if (!live.calls.length || live.rounds >= MAX_TOOL_ROUNDS) return false;
+  live.rounds++;
+  const calls = live.calls.splice(0);
+  live.messages.push({
+    role: "assistant", content: live.content || null,
+    tool_calls: calls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.args } })),
+  });
+  for (const c of calls) {
+    live.messages.push({
+      role: "tool", tool_call_id: c.id,
+      content: c.name === "calculator" ? runCalc(c.args) : JSON.stringify({ error: "unknown tool" }),
+    });
+  }
+  live.content = "";
+  const body = { ...live.body, messages: live.messages };
+  // Last round: no more tools, so the model must answer.
+  if (live.rounds >= MAX_TOOL_ROUNDS) delete (body as any).tools;
+  const res = await groqFetch(body, live.signal);
+  if (!res) return false;
+  live.reader = res.body!.getReader(); live.buf = ""; live.finish = ""; live.ended = false;
+  return true;
+}
 
 /** Starts a streamed Groq answer and waits for its first word. null = use Gemini instead. Never logs text. */
-async function startGroq(r: Req, system: string, search: boolean): Promise<GroqLive | null> {
+async function startGroq(r: Req, system: string, tools: Tools): Promise<GroqLive | null> {
   if (!GROQ_KEY || r.image || Date.now() < groqCooldownUntil) return null;
-  const messages = [
+  const messages: any[] = [
     { role: "system", content: system },
     ...r.history.map((t) => ({ role: t.role === "model" ? "assistant" : "user", content: t.text })),
-    { role: "user", content: r.question },
+    { role: "user", content: userText(r) },
   ];
   const body: Record<string, unknown> = {
-    model: GROQ_MODEL, messages, stream: true, temperature: 0.4,
-    reasoning_effort: "low", include_reasoning: false,
-    max_completion_tokens: r.short || r.talk ? 900 : 2600,
+    model: GROQ_MODEL, stream: true, temperature: tools.calc ? 0.2 : 0.4,
+    reasoning_effort: isHard(r) ? "medium" : "low", include_reasoning: false,
+    max_completion_tokens: r.short || r.talk ? (isHard(r) ? 1600 : 900) : 2600,
   };
-  if (search) body.tools = [{ type: "browser_search" }];
+  const t: unknown[] = [];
+  if (tools.search) t.push({ type: "browser_search" });
+  if (tools.calc) t.push(CALC_TOOL);
+  if (t.length) body.tools = t;
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), search ? GROQ_FIRST_SEARCH_MS : GROQ_FIRST_MS);
+  const timer = setTimeout(() => ctrl.abort(), tools.calc ? GROQ_FIRST_TOOL_MS : tools.search ? GROQ_FIRST_SEARCH_MS : GROQ_FIRST_MS);
+  const signal = AbortSignal.any([ctrl.signal, AbortSignal.timeout(CALL_TIMEOUT_MS)]);
   try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_KEY}` },
-      body: JSON.stringify(body),
-      signal: AbortSignal.any([ctrl.signal, AbortSignal.timeout(CALL_TIMEOUT_MS)]),
-    });
-    if (!res.ok || !res.body) {
-      console.log(`ai-chat groq status ${res.status}`); // status only, never content
-      groqLast = String(res.status);
-      if (res.status === 429) {
-        const ra = Number(res.headers.get("retry-after") ?? "");
-        groqCooldownUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 3600) : 60) * 1000;
-      }
-      await res.body?.cancel().catch(() => {});
-      clearTimeout(timer);
-      return null;
+    const res = await groqFetch({ ...body, messages }, signal);
+    if (!res) { clearTimeout(timer); return null; }
+    const live: GroqLive = {
+      reader: res.body!.getReader(), dec: new TextDecoder(), buf: "", pending: [], finish: "", ended: false,
+      messages, body, signal, calls: [], rounds: 0, opened: [], found: [], content: "",
+    };
+    for (;;) {
+      while (!live.pending.length && !live.ended) await groqRead(live);
+      if (live.pending.length) break;
+      if (live.finish === "tool_calls" && await groqNextRound(live)) continue;
+      break;
     }
-    const live: GroqLive = { reader: res.body.getReader(), dec: new TextDecoder(), buf: "", pending: [], finish: "", ended: false };
-    while (!live.pending.length && !live.ended) await groqRead(live);
     clearTimeout(timer);
     if (!live.pending.length) { console.log("ai-chat groq empty"); return null; }
     return live;
@@ -449,7 +742,13 @@ async function startGroq(r: Req, system: string, search: boolean): Promise<GroqL
   }
 }
 
-/** Reads one network chunk; only delta.content is kept (never reasoning or tool output). */
+function addSource(list: Source[], u: string, t: string) {
+  if (!/^https?:\/\//.test(u) || /exa\.ai\/search|google\.[a-z.]+\/search|bing\.com\/search/.test(u)) return;
+  if (list.some((s) => s.u === u) || list.length >= 8) return;
+  list.push({ u: u.slice(0, 500), t: (t || "").replace(/\s+/g, " ").trim().slice(0, 120) });
+}
+
+/** Reads one network chunk; keeps delta.content (never reasoning), tool calls and the pages search used. */
 async function groqRead(live: GroqLive) {
   const { value, done } = await live.reader.read();
   if (done) { live.ended = true; return; }
@@ -466,8 +765,24 @@ async function groqRead(live: GroqLive) {
     if (ev?.error) { live.ended = true; live.finish = "error"; return; }
     const ch = ev?.choices?.[0];
     if (ch?.finish_reason) live.finish = ch.finish_reason;
-    const t = ch?.delta?.content;
-    if (typeof t === "string" && t) live.pending.push(t);
+    const d = ch?.delta ?? {};
+    const t = d.content;
+    if (typeof t === "string" && t) { live.pending.push(t); live.content += t; }
+    for (const tc of d.tool_calls ?? []) {
+      const i = typeof tc.index === "number" ? tc.index : live.calls.length;
+      const c = live.calls[i] ?? (live.calls[i] = { id: "", name: "", args: "" });
+      if (tc.id) c.id = tc.id;
+      if (tc.function?.name) c.name = tc.function.name;
+      if (tc.function?.arguments) c.args += tc.function.arguments;
+    }
+    for (const et of d.executed_tools ?? []) {
+      for (const x of et?.search_results?.results ?? []) addSource(live.found, String(x?.url ?? ""), String(x?.title ?? ""));
+      if (et?.name === "browser.open" && typeof et.output === "string") {
+        const u = /URL:\s*(\S+)/.exec(et.output)?.[1] ?? "";
+        const title = /^L2:\s*(.+)$/m.exec(et.output)?.[1] ?? "";
+        addSource(live.opened, u, title);
+      }
+    }
   }
 }
 
@@ -484,27 +799,49 @@ function citeFilter() {
   };
 }
 
-function relayGroq(live: GroqLive): ReadableStream<Uint8Array> {
+/** Up to 3 pages: the ones the model opened first, then top search results. */
+function pickSources(live: GroqLive): Source[] {
+  const out: Source[] = [];
+  for (const s of [...live.opened, ...live.found]) {
+    if (out.length >= 3) break;
+    const host = (() => { try { return new URL(s.u).hostname; } catch { return ""; } })();
+    if (!host || out.some((o) => { try { return new URL(o.u).hostname === host; } catch { return false; } })) continue;
+    const title = live.found.find((f) => f.u === s.u)?.t || s.t;
+    out.push({ u: s.u, t: title || host.replace(/^www\./, "") });
+  }
+  return out;
+}
+
+function relayGroq(live: GroqLive, onDone?: (text: string, searched: boolean) => void): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
   const send = (c: ReadableStreamDefaultController<Uint8Array>, o: unknown) =>
     c.enqueue(enc.encode(`data: ${JSON.stringify(o)}\n\n`));
   const filter = citeFilter();
   let sent = 0;
+  let all = "";
   return new ReadableStream({
     async start(c) {
       try {
         while (true) {
           for (const p of live.pending.splice(0)) {
             const t = filter(p);
-            if (t) { sent += t.length; send(c, { t }); }
+            if (t) { sent += t.length; all += t; send(c, { t }); }
           }
-          if (live.ended) break;
+          if (live.ended) {
+            if (live.finish === "tool_calls" && await groqNextRound(live)) { if (sent) { sent++; send(c, { t: "\n\n" }); } continue; }
+            break;
+          }
           await groqRead(live);
         }
         const tail = filter("", true);
-        if (tail) { sent += tail.length; send(c, { t: tail }); }
+        if (tail) { sent += tail.length; all += tail; send(c, { t: tail }); }
         if (sent === 0 || live.finish === "error") send(c, { error: "failed" });
-        else send(c, { done: true, m: "g", f: live.finish === "length" ? "length" : undefined });
+        else {
+          const src = pickSources(live);
+          if (src.length) send(c, { src });
+          send(c, { done: true, m: "g", f: live.finish === "length" ? "length" : undefined });
+          if (live.finish !== "length") onDone?.(all.trim(), live.found.length + live.opened.length > 0);
+        }
       } catch {
         try { send(c, { error: "failed" }); } catch { /* closed */ }
       } finally {
@@ -513,6 +850,63 @@ function relayGroq(live: GroqLive): ReadableStream<Uint8Array> {
     },
     cancel() {
       live.reader.cancel().catch(() => {});
+    },
+  });
+}
+
+// ---------------------------------------------------------------- answer cache (owner-approved)
+
+// Never cached: personal questions, private numbers/ids, links, names of people, news.
+const PERSONAL_RE = /\b(i|i'm|im|i've|me|my|mine|myself|we|our|ours|us|mera|meri|mere|mujhe|mujhko|hum|hamara|hamari|humara)\b|मेरा|मेरी|मेरे|मुझे|मुझको|मैं|हम|हमारा|हमारी/i;
+const PRIVATE_RE = /\d[\d\s-]{4,}\d|@|https?:|www\.|aadhaa?r|\bpan\b|password|\botp\b|\bupi\b|account|bank|phone number|mobile number|address|आधार|पासवर्ड|खाता/i;
+/** Two Capitalised words after the first word (like a person's name). */
+const NAME_RE = /[A-Z][a-z]+\s+[A-Z][a-z]+/;
+
+function normQ(q: string) {
+  return q.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Whether this question may be answered from / recorded into the cache. */
+function cacheable(r: Req): boolean {
+  const q = r.question;
+  if (r.image || r.doc || r.talk || r.history.length || r.memory || r.study) return false;
+  if (q.length < 6 || q.length > 300) return false;
+  if (PERSONAL_RE.test(q) || PRIVATE_RE.test(q) || SEARCH_RE.test(q)) return false;
+  if (NAME_RE.test(q.replace(/^\s*\S+/, ""))) return false;
+  return normQ(q).length >= 4;
+}
+const cacheKey = (r: Req) => ({ p_norm: normQ(r.question), p_lang: r.lang, p_mode: r.mode, p_short: r.short });
+
+async function cacheGet(r: Req): Promise<string | null> {
+  try {
+    const a = await rpc("ai_cache_get", cacheKey(r));
+    return typeof a === "string" && a ? a : null;
+  } catch { return null; }
+}
+
+/** Counts this device for the question; the answer is kept only when 3+ devices asked (owner approves it later). */
+function cacheNote(r: Req, device: string, answer: string, kind: "general" | "search") {
+  if (r.name && answer.toLowerCase().includes(r.name.toLowerCase())) return;
+  if (PRIVATE_RE.test(answer.slice(0, 200)) && /\d{6,}/.test(answer)) return;
+  const k = cacheKey(r);
+  const p = (async () => {
+    await rpc("ai_cache_note", {
+      p_qhash: await sha(`q:${k.p_norm}|${k.p_lang}|${k.p_mode}|${k.p_short}`), p_dhash: await sha("d:" + device),
+      ...k, p_question: r.question.slice(0, 300), p_answer: answer.slice(0, 6000), p_kind: kind,
+    });
+  })().catch(() => {});
+  try { (globalThis as any).EdgeRuntime?.waitUntil?.(p); } catch { /* not on Supabase */ }
+}
+
+/** Streams a cached answer in a few pieces, like a model would. */
+function relayCached(answer: string): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  return new ReadableStream({
+    start(c) {
+      const parts = answer.match(/[\s\S]{1,400}(\s|$)|[\s\S]+$/g) ?? [answer];
+      for (const t of parts) if (t) c.enqueue(enc.encode(`data: ${JSON.stringify({ t })}\n\n`));
+      c.enqueue(enc.encode(`data: ${JSON.stringify({ done: true, m: "c" })}\n\n`));
+      c.close();
     },
   });
 }
@@ -604,16 +998,45 @@ async function handle(req: Request): Promise<Response> {
     "Access-Control-Expose-Headers": "x-elric-src",
   };
 
+  // 0) Owner-approved answer for a common general question: no model call.
+  const canCache = cacheable(parsed) && test !== "no-cache";
+  if (canCache) {
+    const hit = await cacheGet(parsed);
+    marks.cache = Date.now() - t0;
+    if (hit) {
+      return new Response(relayCached(hit), {
+        headers: { ...sse, "x-elric-src": "cache", "Server-Timing": `limit;dur=${marks.limit}, cache;dur=${marks.cache}` },
+      });
+    }
+  }
+
   // 1) Groq for text questions (skipped when no key, photo, cooldown, or test header no-groq).
   if (!parsed.image && test !== "no-groq" && test !== "limit" && test !== "fail-primary") {
-    const search = needsSearch(parsed.question);
-    const live = await startGroq(parsed, systemPrompt(parsed, facts, search), search);
+    const wantSearch = needsSearch(parsed) && test !== "no-search";
+    let search = wantSearch && await groqSearchRoom();
+    if (search) {
+      // Shared budget for all users (searches use most of Groq's per-minute tokens).
+      try {
+        const hit = await rpc("ai_usage_hit", { p_keys: ["g:search"], p_hour_caps: [SEARCH_HOUR], p_day_caps: [SEARCH_DAY] });
+        if (!hit?.ok) search = false;
+      } catch { search = false; }
+    }
+    const calcTool = needsCalc(parsed.question) && !parsed.talk;
+    let system = systemPrompt(parsed, facts, search, calcTool);
+    if (wantSearch && !search) {
+      system += " IMPORTANT: you cannot check current information for this question right now. Begin by saying " +
+        "your information may be out of date and the user should check a trusted source; do not state recent " +
+        "office holders, results or prices as certain.";
+    }
+    const live = await startGroq(parsed, system, { search, calc: calcTool });
     marks.groq = Date.now() - t0;
     if (live) {
-      return new Response(relayGroq(live), {
+      const onDone = canCache ? (text: string, searched: boolean) => cacheNote(parsed, device, text, searched ? "search" : "general") : undefined;
+      return new Response(relayGroq(live, onDone), {
         headers: {
           ...sse,
-          "x-elric-src": search ? "g2" : "g1",
+          "x-elric-src": search ? (calcTool ? "g3" : "g2") : calcTool ? "gc" : "g1",
+          ...(wantSearch && !search ? { "x-elric-ns": "1" } : {}),
           "Server-Timing": `limit;dur=${marks.limit}, facts;dur=${marks.facts}, model;dur=${marks.groq}`,
         },
       });
@@ -628,7 +1051,7 @@ async function handle(req: Request): Promise<Response> {
   if (a.kind === "limit") return json(429, { status: "limit", scope: "provider", retry_after: 600 });
   if (a.kind === "fail") return json(503, { status: "unavailable", code: a.status });
   if (a.kind === "blocked") return json(422, { status: "blocked" });
-  return new Response(relay(a.res, a.model), {
+  return new Response(relay(a.res, a.model, canCache ? (text) => cacheNote(parsed, device, text, "general") : undefined), {
     headers: {
       ...sse,
       "x-elric-src": "gem", "x-elric-gs": groqLast,
