@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0F0F12">
+<meta name="robots" content="noindex">
+<title>Elric Agent · Prototype</title>
+<link rel="icon" href="/icons/favicon-32.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <img class="mark" src="/icons/mark.png" alt="">
+    <div class="brand">Elric <b>Agent</b></div>
+    <span class="proto">Prototype</span>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="hero">
+      <h1>Just say it.</h1>
+      <p>Telugu, Hindi or English. I fill the form, you say yes.</p>
+      <div class="chips">
+        <button class="chip" data-t="Check my APCPDCL current bill">⚡ Power bill</button>
+        <button class="chip" data-t="Bus from Narasaraopet to Hyderabad tomorrow">🚌 Bus search</button>
+        <button class="chip" data-t="PM Kisan status check">🌾 PM-Kisan status</button>
+      </div>
+    </section>
+    <div id="log"></div>
+  </main>
+
+  <footer class="bar">
+    <div class="langs" role="radiogroup" aria-label="Speaking language">
+      <button class="lg on" data-l="te-IN">తెలుగు</button>
+      <button class="lg" data-l="hi-IN">हिंदी</button>
+      <button class="lg" data-l="en-IN">English</button>
+    </div>
+    <form id="f" class="inrow" autocomplete="off">
+      <input id="q" maxlength="400" placeholder="Type or tap the mic…" enterkeyhint="send">
+      <button type="button" id="mic" class="mic" aria-label="Speak">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      </button>
+      <button type="submit" class="send" aria-label="Send">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+    </form>
+    <div class="note">Test version. No real payments.</div>
+  </footer>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
