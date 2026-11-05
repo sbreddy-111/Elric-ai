@@ -415,3 +415,10 @@ a.kpi:active{transform:scale(.99)}
 .auto-h h3 .chip{margin-left:6px;vertical-align:2px}
 .bulkbar .grow{white-space:nowrap}
 @media (max-width:640px){.bulkbar{gap:8px;padding:8px 10px}.bulkbar .btn{padding:0 12px}.bulkbar .btn svg{display:none}}
+/* Cache tab */
+.clist{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.crow .cq{font-size:15.5px;margin-bottom:8px}
+.crow .fmeta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
+.crow .ca{white-space:pre-wrap;word-wrap:break-word;font-size:14px;line-height:1.55;background:var(--s2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;max-height:260px;overflow:auto}
+.crow .cbtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.crow .cbtns .btn{min-height:44px}

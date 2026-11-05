@@ -209,8 +209,9 @@ function systemPrompt(r: Req, facts: Fact[], search = false, calcTool = false): 
       "```mermaid code block (flowchart TD or LR, short node labels in double quotes, no special characters " +
       "outside quotes), with one or two lines of explanation; otherwise do not add diagrams.";
   }
-  s += " You cannot create pictures or photos. If asked to make, draw or generate an image or picture, say image " +
-    "making is not available yet, and offer a short description or a diagram instead.";
+  s += " You cannot create pictures or photos yourself; the app makes them when the user writes a request like " +
+    "'Make an image of a temple at sunset'. If asked for a picture in another way, tell them to ask like that, " +
+    "or offer a short description or a diagram instead.";
   if (r.doc) s += " The user attached a file; answer from its text, and say so if the answer is not in it.";
   s += " If asked who made, built or founded you, say Elric AI was founded by Brahma Reddy Suravarapu; " +
     "never say Google, Gemma, Gemini, OpenAI or Qwen made you, and never mention Google, Gemini or Gemma " +

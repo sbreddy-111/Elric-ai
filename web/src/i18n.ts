@@ -57,7 +57,7 @@ const en = {
   aboutBody: 'Elric AI is an offline-first study and shopping assistant. AI you can rely on: answers are generated on your device (or by our server if you turn on Online answers), and if Elric is unsure it will say so.',
   linkPrivacy: 'Privacy Policy',
   linkTerms: 'Terms of Use',
-  privacyBody: 'With Online answers off (the default), your messages in Study and General mode never leave this device; the only network use is the one-time download of the Elric model and app files. Online answers are optional and for users 18 or older: when you turn them on, your question and recent messages of the chat are sent to our server and an AI provider to answer. A photo is sent only with Online answers on, together with your question; it is not kept. A PDF or text file you attach is read on this device; with Online answers on, a trimmed part of its text is sent with your question and is not kept. Answers that used the web show their source links. Voice input and Talk use your browser’s speech recognition, which may be processed by your browser or phone maker (for example Apple on iPhone); answers are read aloud by your device. No accounts, no tracking.',
+  privacyBody: 'With Online answers off (the default), your messages in Study and General mode never leave this device; the only network use is the one-time download of the Elric model and app files. Online answers are optional and for users 18 or older: when you turn them on, your question and recent messages of the chat are sent to our server and an AI provider to answer. A photo is sent only with Online answers on, together with your question; it is not kept. A PDF or text file you attach is read on this device; with Online answers on, a trimmed part of its text is sent with your question and is not kept. Answers that used the web show their source links. When you ask Elric to make an image, your request is sent to our server and an image AI provider to make it; it is not kept. Voice input and Talk use your browser’s speech recognition, which may be processed by your browser or phone maker (for example Apple on iPhone); answers are read aloud by your device. No accounts, no tracking.',
   licensesIntro: 'Elric AI is built on open models and open-source software. Thank you to these projects:',
   close: 'Close',
   // Model
@@ -192,6 +192,16 @@ const en = {
   docTooLarge: 'This file is too big (max 25 MB).',
   docNoText: 'No text found in this file. Scanned PDFs can’t be read yet — try a photo of the page instead.',
   docError: 'Couldn’t read this file. Try another PDF or text file.',
+  makingImage: 'Making your image…',
+  imageDone: 'Here’s your image.',
+  imageAlt: 'Image made by Elric AI',
+  imageSave: 'Save image',
+  imageNotSaved: 'image not saved in chat history',
+  imageNeedsOnline: 'Making images needs Online answers (18+). Turn them on in your profile (☰ › avatar), then ask again.',
+  imageUnavailable: 'Images can’t be made right now. Check your internet and try again in a few minutes.',
+  imageBlocked: 'Elric can’t make that image. Try describing something else.',
+  imageLimit: 'You’ve reached today’s image limit. Try again later.',
+  imageFailed: 'Couldn’t make the image right now. Tap ✎ to try again.',
 };
 
 export type Strings = typeof en;
@@ -253,7 +263,7 @@ const hi: Strings = {
   aboutBody: 'Elric AI एक ऑफ़लाइन-फ़र्स्ट पढ़ाई और शॉपिंग असिस्टेंट है। ऐसा AI जिस पर आप भरोसा कर सकें: जवाब आपके डिवाइस पर बनते हैं (या ऑनलाइन जवाब चालू करने पर हमारे सर्वर से), और अगर Elric को पक्का पता नहीं है तो वह साफ़ बता देगा।',
   linkPrivacy: 'गोपनीयता नीति',
   linkTerms: 'उपयोग की शर्तें',
-  privacyBody: 'ऑनलाइन जवाब बंद होने पर (डिफ़ॉल्ट), पढ़ाई और सामान्य मोड में आपके मैसेज इस डिवाइस से बाहर नहीं जाते; नेटवर्क का इस्तेमाल सिर्फ़ Elric मॉडल और ऐप फ़ाइलों को एक बार डाउनलोड करने के लिए होता है। ऑनलाइन जवाब वैकल्पिक हैं और 18 साल या उससे ज़्यादा उम्र वालों के लिए हैं: इन्हें चालू करने पर आपका सवाल और चैट के हाल के मैसेज जवाब के लिए हमारे सर्वर और एक AI प्रदाता को भेजे जाते हैं। फ़ोटो सिर्फ़ ऑनलाइन जवाब चालू होने पर आपके सवाल के साथ भेजी जाती है; उसे रखा नहीं जाता। आपकी जोड़ी गई PDF या टेक्स्ट फ़ाइल इसी डिवाइस पर पढ़ी जाती है; ऑनलाइन जवाब चालू होने पर उसके टेक्स्ट का छोटा हिस्सा आपके सवाल के साथ भेजा जाता है और रखा नहीं जाता। जिन जवाबों में वेब का इस्तेमाल हुआ, उनके नीचे स्रोत के लिंक दिखते हैं। बोलकर पूछना और बातचीत आपके ब्राउज़र की स्पीच रिकग्निशन इस्तेमाल करते हैं, जिसे आपका ब्राउज़र या फ़ोन बनाने वाली कंपनी (जैसे iPhone पर Apple) प्रोसेस कर सकती है; जवाब आपका डिवाइस पढ़कर सुनाता है। कोई अकाउंट नहीं, कोई ट्रैकिंग नहीं।',
+  privacyBody: 'ऑनलाइन जवाब बंद होने पर (डिफ़ॉल्ट), पढ़ाई और सामान्य मोड में आपके मैसेज इस डिवाइस से बाहर नहीं जाते; नेटवर्क का इस्तेमाल सिर्फ़ Elric मॉडल और ऐप फ़ाइलों को एक बार डाउनलोड करने के लिए होता है। ऑनलाइन जवाब वैकल्पिक हैं और 18 साल या उससे ज़्यादा उम्र वालों के लिए हैं: इन्हें चालू करने पर आपका सवाल और चैट के हाल के मैसेज जवाब के लिए हमारे सर्वर और एक AI प्रदाता को भेजे जाते हैं। फ़ोटो सिर्फ़ ऑनलाइन जवाब चालू होने पर आपके सवाल के साथ भेजी जाती है; उसे रखा नहीं जाता। आपकी जोड़ी गई PDF या टेक्स्ट फ़ाइल इसी डिवाइस पर पढ़ी जाती है; ऑनलाइन जवाब चालू होने पर उसके टेक्स्ट का छोटा हिस्सा आपके सवाल के साथ भेजा जाता है और रखा नहीं जाता। जिन जवाबों में वेब का इस्तेमाल हुआ, उनके नीचे स्रोत के लिंक दिखते हैं। तस्वीर बनाने को कहने पर आपका अनुरोध हमारे सर्वर और एक इमेज AI प्रदाता को भेजा जाता है; उसे रखा नहीं जाता। बोलकर पूछना और बातचीत आपके ब्राउज़र की स्पीच रिकग्निशन इस्तेमाल करते हैं, जिसे आपका ब्राउज़र या फ़ोन बनाने वाली कंपनी (जैसे iPhone पर Apple) प्रोसेस कर सकती है; जवाब आपका डिवाइस पढ़कर सुनाता है। कोई अकाउंट नहीं, कोई ट्रैकिंग नहीं।',
   licensesIntro: 'Elric AI ओपन मॉडल और ओपन-सोर्स सॉफ़्टवेयर पर बना है। इन प्रोजेक्ट्स का धन्यवाद:',
   close: 'बंद करें',
   modelLite: 'Elric Lite',
@@ -385,6 +395,16 @@ const hi: Strings = {
   docTooLarge: 'यह फ़ाइल बहुत बड़ी है (अधिकतम 25 MB)।',
   docNoText: 'इस फ़ाइल में टेक्स्ट नहीं मिला। स्कैन की हुई PDF अभी नहीं पढ़ी जा सकती — पेज की फ़ोटो आज़माएँ।',
   docError: 'यह फ़ाइल नहीं पढ़ी जा सकी। कोई दूसरी PDF या टेक्स्ट फ़ाइल आज़माएँ।',
+  makingImage: 'आपकी तस्वीर बन रही है…',
+  imageDone: 'यह रही आपकी तस्वीर।',
+  imageAlt: 'Elric AI की बनाई तस्वीर',
+  imageSave: 'तस्वीर सेव करें',
+  imageNotSaved: 'तस्वीर चैट हिस्ट्री में सेव नहीं होती',
+  imageNeedsOnline: 'तस्वीर बनाने के लिए ऑनलाइन जवाब (18+) चाहिए। प्रोफ़ाइल (☰ › अवतार) में चालू करें, फिर दोबारा पूछें।',
+  imageUnavailable: 'अभी तस्वीर नहीं बन सकती। इंटरनेट जाँचें और कुछ मिनट बाद फिर कोशिश करें।',
+  imageBlocked: 'Elric यह तस्वीर नहीं बना सकता। कुछ और बताकर देखें।',
+  imageLimit: 'आज की तस्वीरों की सीमा पूरी हो गई। बाद में फिर कोशिश करें।',
+  imageFailed: 'अभी तस्वीर नहीं बन सकी। फिर से कोशिश करने के लिए ✎ दबाएँ।',
 };
 
 const tables: Record<Lang, Strings> = { en, hi };
