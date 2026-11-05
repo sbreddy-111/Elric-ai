@@ -1,8 +1,8 @@
 // Elric Agent (prototype) — Supabase Edge Function `ai-agent` (Deno), verify_jwt false.
 //
-// POST JSON { text, ui_lang?: 'te'|'hi'|'en', prev?: {task, fields} }  (apikey header = publishable key)
+// POST JSON { text, ui_lang?: 'te'|'hi'|'en' (default en), prev?: {task, fields, lang, script} }  (apikey header = publishable key)
 //   prev = the task card from the last turn, so a follow-up ("1234 ane number") can fill missing fields.
-// 200 { task, lang, fields, missing, confirm_text }
+// 200 { task, lang, script: 'native'|'latn', fields, missing, confirm_text }  (lang/script = how the user wrote)
 //   task: electricity_bill | bus_search | pm_kisan_status | unknown
 // 400 bad_request · 401 unauthorized · 429 limit · 503 unavailable
 //
@@ -88,7 +88,8 @@ Tasks:
 
 Rules:
 - NEVER invent a value. If the user did not say it, the field is null.
-- "lang": the language the user spoke: "te", "hi", or "en" (Tenglish counts as "te", Hinglish as "hi"). If unclear use "${uiLang}".
+- "lang": the language the user wrote/spoke: "te", "hi", or "en". Telugu words in Latin letters (Tenglish: repu, nunchi, kavali, cheppu, chudu, ekkada) = "te"; Hindi words in Latin letters (Hinglish: kal, se, chahiye, batao, mera, dikhao) = "hi". Plain English = "en". If the message has no language of its own (only numbers/codes/names) use "${uiLang}".
+- confirm_text MUST be in that same language.
 - "missing": names of required fields that are still null.
 - "confirm_text": ONE short sentence in the user's language and script style (Telugu script for Telugu, Devanagari for Hindi, unless they typed in Latin letters — then reply in the same romanised style).
   If nothing is missing, restate the key values and ask to proceed. Examples:
@@ -144,6 +145,33 @@ async function callGemini(system: string, text: string): Promise<string | null> 
   return null;
 }
 
+// Fixed "ready to go" sentences, used for follow-up turns and when the model's sentence is in the wrong language.
+function readyText(task: string, f: Record<string, string | null>, key: string): string {
+  const d = f.date ? new Date(f.date + "T00:00:00Z").toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" }) : "";
+  const R: Record<string, Record<string, string>> = {
+    en: { electricity_bill: `${f.biller} bill, service no. ${f.service_number}. Check it?`, bus_search: `Bus from ${f.from} to ${f.to} on ${d}. Search?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check it?` },
+    te: { electricity_bill: `${f.biller} బిల్లు, సర్వీస్ నంబర్ ${f.service_number}. చెక్ చేయాలా?`, bus_search: `${f.from} నుంచి ${f.to} బస్, ${d}. వెతకాలా?`, pm_kisan_status: `PM-కిసాన్ స్టేటస్, చివరి 4 అంకెలు ${f.aadhaar_or_mobile_last4}. చెక్ చేయాలా?` },
+    hi: { electricity_bill: `${f.biller} बिल, सर्विस नंबर ${f.service_number}. चेक करें?`, bus_search: `${f.from} से ${f.to} बस, ${d}. खोजें?`, pm_kisan_status: `PM-किसान स्टेटस, आखिरी 4 अंक ${f.aadhaar_or_mobile_last4}. चेक करें?` },
+    "te-latn": { electricity_bill: `${f.biller} bill, service number ${f.service_number}. Check cheyyamantara?`, bus_search: `${f.from} nunchi ${f.to} bus, ${d}. Vetakamantara?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check cheyyamantara?` },
+    "hi-latn": { electricity_bill: `${f.biller} bill, service number ${f.service_number}. Check karein?`, bus_search: `${f.from} se ${f.to} bus, ${d}. Dhoondhein?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check karein?` },
+  };
+  return R[key]?.[task] ?? R.en[task] ?? "";
+}
+
+// Destination words right after a city name ("Vijayawada jaana", "Hyderabad ki", "హైదరాబాద్ కి").
+const DEST_AFTER = /^\s*(jaana|jaane|jana|jaani|jaa|jaata|vellali|velli|velle|ki|ku|ke|tak|kosam|కి|కు|కోసం|వెళ్ళాలి|వెళ్లాలి|को|जाना|जाने|तक)\b/iu;
+const SRC_AFTER = /^\s*(se|nunchi|nundi|నుంచి|నుండి|से)\b/iu;
+function cityRole(text: string, city: string): "to" | "from" | "" {
+  const i = text.toLowerCase().indexOf(city.toLowerCase());
+  if (i < 0) return "";
+  const after = text.slice(i + city.length);
+  if (SRC_AFTER.test(after)) return "from";
+  if (DEST_AFTER.test(after)) return "to";
+  if (/\b(to)\s*$/i.test(text.slice(0, i))) return "to";
+  if (/\b(from)\s*$/i.test(text.slice(0, i))) return "from";
+  return "";
+}
+
 // Accepts YYYY-MM-DD, or "7 Nov" / "Nov 7" (next such date from today, IST). Else null.
 function isoDate(v: string): string | null {
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
@@ -158,11 +186,17 @@ function isoDate(v: string): string | null {
 }
 
 // Validate the model's JSON. Values that are not plausible or not grounded in the text are dropped (no invented values).
-function normalize(raw: string, text: string, prevFields: Record<string, string>, uiLang: string) {
+function normalize(raw: string, text: string, prevFields: Record<string, string>, uiLang: string, prevScript = "") {
   let o: any;
   try { o = JSON.parse(raw.replace(/^```(json)?|```$/g, "").trim()); } catch { return null; }
   const task = TASKS.includes(o?.task) ? o.task : "unknown";
-  const lang = ["te", "hi", "en"].includes(o?.lang) ? o.lang : uiLang;
+  // Script decides when it is clear; romanised text trusts the model (Tenglish/Hinglish vs English).
+  const hasTe = /[\u0C00-\u0C7F]/.test(text), hasHi = /[\u0900-\u097F]/.test(text);
+  const words = (text.match(/[A-Za-z\u0900-\u0C7F]{2,}/g) ?? []).length;
+  let lang = hasTe ? "te" : hasHi ? "hi" : ["te", "hi", "en"].includes(o?.lang) ? o.lang : uiLang;
+  // Very short follow-ups with no own language (codes, numbers, city names) keep the last turn's language.
+  if (!hasTe && !hasHi && prevScript && words <= 3) lang = uiLang;
+  const script = hasTe || hasHi ? "native" : lang === "en" ? "native" : (prevScript && words <= 3 ? prevScript : "latn");
   const f: Record<string, string | null> = {};
   let dropped = false;
   const src = o?.fields && typeof o.fields === "object" ? o.fields : {};
@@ -179,14 +213,23 @@ function normalize(raw: string, text: string, prevFields: Record<string, string>
     if (!v && prevFields[k]) v = prevFields[k]; // keep what the user gave in an earlier turn
     f[k] = v;
   }
+  // Fix a swapped city when only one is given and the words clearly say the direction.
+  if (task === "bus_search") {
+    if (f.from && !f.to && !prevFields.from && cityRole(text, f.from) === "to") { f.to = f.from; f.from = null; }
+    else if (f.to && !f.from && !prevFields.to && cityRole(text, f.to) === "from") { f.from = f.to; f.to = null; }
+  }
   const missing = FIELDS[task].filter((k) => !f[k]);
   let confirm = clean(o?.confirm_text, 200);
-  if (missing.length) {
-    const native = lang === "te" ? /[\u0C00-\u0C7F]/.test(text) : lang === "hi" ? /[\u0900-\u097F]/.test(text) : true;
-    confirm = ASK[native ? lang : lang + "-latn"][missing[0]];
+  const key = script === "latn" && lang !== "en" ? lang + "-latn" : lang;
+  if (missing.length) confirm = ASK[key][missing[0]];
+  else if (task !== "unknown") {
+    const hasIndic = /[\u0900-\u0C7F]/.test(confirm);
+    const wrongScript = (key === "te" && !/[\u0C00-\u0C7F]/.test(confirm)) || (key === "hi" && !/[\u0900-\u097F]/.test(confirm)) ||
+      ((key === "en" || key.endsWith("-latn")) && hasIndic);
+    if (prevScript || wrongScript || !confirm) confirm = readyText(task, f, key);
   }
   void dropped;
-  return { task, lang, fields: f, missing, confirm_text: confirm };
+  return { task, lang, script, fields: f, missing, confirm_text: confirm };
 }
 
 const CORS_ORIGINS = new Set(["https://elricai.sbs", "https://www.elricai.sbs"]);
@@ -226,6 +269,10 @@ Deno.serve(async (req) => {
     for (const k of FIELDS[body.prev.task]) { const v = clean(body.prev.fields?.[k], 40); if (v) pf[k] = v; }
     prev = { task: body.prev.task, fields: pf };
   }
+  // Language of the last turn, used when this message has no clear language (e.g. just "APCPDCL 4455667").
+  const prevLang = ["te", "hi", "en"].includes(body?.prev?.lang) ? body.prev.lang : "";
+  const prevScript = body?.prev?.script === "latn" ? "latn" : "native";
+  const fallbackLang = prevLang || uiLang;
 
   const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
   try {
@@ -239,13 +286,13 @@ Deno.serve(async (req) => {
     if (!hit?.ok) return json(429, { status: "limit", retry_after: hit?.retry_after ?? 3600 }, cors);
   } catch { return json(503, { status: "unavailable" }, cors); }
 
-  const system = systemPrompt(uiLang, prev);
+  const system = systemPrompt(fallbackLang, prev);
   let out = null;
   const g = await callGroq(system, text);
-  if (g) out = normalize(g, text, prev?.fields ?? {}, uiLang);
+  if (g) out = normalize(g, text, prev?.fields ?? {}, fallbackLang, prevLang ? prevScript : "");
   if (!out) {
     const b = await callGemini(system, text);
-    if (b) out = normalize(b, text, prev?.fields ?? {}, uiLang);
+    if (b) out = normalize(b, text, prev?.fields ?? {}, fallbackLang, prevLang ? prevScript : "");
   }
   if (!out) return json(503, { status: "unavailable" }, cors);
   return json(200, out, cors);

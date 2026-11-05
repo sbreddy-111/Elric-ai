@@ -12,8 +12,11 @@ Separate page, **not linked from the Elric AI app**.
 - `run_tests.py` — runs 12 sample sentences against the live function and writes `TESTS.md`.
 
 ## Function
-POST `{ text, ui_lang?: "te"|"hi"|"en", prev?: {task, fields} }` with header `apikey: <publishable key>`.
-Returns `{ task, lang, fields, missing, confirm_text }`.
+POST `{ text, ui_lang?: "te"|"hi"|"en" (default en), prev?: {task, fields, lang, script} }` with header `apikey: <publishable key>`.
+Returns `{ task, lang, script, fields, missing, confirm_text }`. `lang` + `script` (native / latn) = how the user wrote; the page shows the card in that language.
+- Language: Telugu or Devanagari script decides directly; romanised text is judged by the model (Tenglish → te, Hinglish → hi). A short follow-up with no language of its own ("APCPDCL 4455667") keeps the last turn's language.
+- Ready-to-go and "which X?" sentences on follow-ups use fixed templates in 5 styles (en, te, hi, Tenglish, Hinglish), so the language never drifts.
+- Bus: if only one city is given and the words say the direction ("Vijayawada jaana", "Hyderabad se", "to X"), the server puts it in the right field.
 - Tasks: `electricity_bill` (biller, service_number), `bus_search` (from, to, date YYYY-MM-DD), `pm_kisan_status` (aadhaar_or_mobile_last4), `unknown`.
 - `prev` = last card, so a follow-up ("4455667") fills missing fields and keeps the rest.
 - Model: Groq `openai/gpt-oss-20b` in JSON mode (secret `GROQ_API_KEY`), Gemini flash-lite backup (`GEMINI_API_KEY`).
@@ -32,7 +35,8 @@ cd function && curl -X POST "https://api.supabase.com/v1/projects/hqsqpiwmozgsxi
 
 ## Page
 - Chat screen: text box always visible with a mic button beside it. Typed and spoken messages go through the same path (same card, same follow-ups).
-- Mic uses the Web Speech API in the chosen language (te-IN / hi-IN / en-IN); the spoken words appear in the text box and send when you stop. If a browser has no speech support, only the mic hides.
+- Language: English by default (page text and mic en-IN). If the user types or speaks Telugu or Hindi (or Tenglish/Hinglish), the reply and the whole task card switch to that language by themselves; no picking needed.
+- A small optional mic-language switch beside the mic (EN → తె → हि) only helps speech recognition; default EN. If a browser has no speech support, the mic and switch hide.
 - "Yes" on a power bill shows a **TEST — NOT REAL** sample bill (fake amount). Bus and PM-Kisan show "Coming soon".
 - No payments, no Razorpay. Nothing saved in the browser. No model/provider names in the UI.
 

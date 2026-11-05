@@ -6,14 +6,14 @@ today=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5,minutes
 tm=str(today+datetime.timedelta(days=1))
 # (lang, text, ui_lang, expected task, expected fields subset (None = must be missing), expected missing)
 T=[
- ('te','నా కరెంట్ బిల్లు చూడు, APCPDCL సర్వీస్ నంబర్ 1234567','te','electricity_bill',{'biller':'APCPDCL','service_number':'1234567'},[]),
- ('te','repu Guntur nunchi Hyderabad ki bus kavali','te','bus_search',{'from':'Guntur','to':'Hyderabad','date':tm},[]),
- ('te','నా కరెంట్ బిల్లు ఎంత ఉందో చెప్పు','te','electricity_bill',{'biller':None,'service_number':None},['biller','service_number']),
- ('te','PM కిసాన్ డబ్బులు వచ్చాయా చూడు','te','pm_kisan_status',{'aadhaar_or_mobile_last4':None},['aadhaar_or_mobile_last4']),
- ('hi','मेरा बिजली बिल चेक करो, APSPDCL, सर्विस नंबर 556677','hi','electricity_bill',{'biller':'APSPDCL','service_number':'556677'},[]),
- ('hi','kal Hyderabad se Vijayawada bus chahiye','hi','bus_search',{'from':'Hyderabad','to':'Vijayawada','date':tm},[]),
- ('hi','PM Kisan ka status batao, aadhaar last 4 digit 4321','hi','pm_kisan_status',{'aadhaar_or_mobile_last4':'4321'},[]),
- ('hi','Bangalore jaane wali bus dikhao','hi','bus_search',{'to':'Bangalore','from':None,'date':None},['from','date']),
+ ('te','నా కరెంట్ బిల్లు చూడు, APCPDCL సర్వీస్ నంబర్ 1234567','en','electricity_bill',{'biller':'APCPDCL','service_number':'1234567'},[]),
+ ('te','repu Guntur nunchi Hyderabad ki bus kavali','en','bus_search',{'from':'Guntur','to':'Hyderabad','date':tm},[]),
+ ('te','నా కరెంట్ బిల్లు ఎంత ఉందో చెప్పు','en','electricity_bill',{'biller':None,'service_number':None},['biller','service_number']),
+ ('te','PM కిసాన్ డబ్బులు వచ్చాయా చూడు','en','pm_kisan_status',{'aadhaar_or_mobile_last4':None},['aadhaar_or_mobile_last4']),
+ ('hi','मेरा बिजली बिल चेक करो, APSPDCL, सर्विस नंबर 556677','en','electricity_bill',{'biller':'APSPDCL','service_number':'556677'},[]),
+ ('hi','kal Hyderabad se Vijayawada bus chahiye','en','bus_search',{'from':'Hyderabad','to':'Vijayawada','date':tm},[]),
+ ('hi','PM Kisan ka status batao, aadhaar last 4 digit 4321','en','pm_kisan_status',{'aadhaar_or_mobile_last4':'4321'},[]),
+ ('hi','Bangalore jaane wali bus dikhao','en','bus_search',{'to':'Bangalore','from':None,'date':None},['from','date']),
  ('en','Check my APEPDCL electricity bill, service number 9988776655','en','electricity_bill',{'biller':'APEPDCL','service_number':'9988776655'},[]),
  ('en','I need a bus from Narasaraopet to Chennai tomorrow','en','bus_search',{'from':'Narasaraopet','to':'Chennai','date':tm},[]),
  ('en','Pay my current bill','en','electricity_bill',{'biller':None,'service_number':None},['biller','service_number']),
@@ -45,7 +45,7 @@ for i,(lg,text,ui,task,exp,miss) in enumerate(T,1):
     time.sleep(1)
 esc=lambda s:str(s).replace('|','\\|')
 md=[f"# Elric Agent — function tests\n",f"Function: `ai-agent` (Supabase project hqsqpiwmozgsxiizhaml). Run {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5,minutes=30))):%Y-%m-%d %H:%M} IST. \"Tomorrow\" = {tm}.\n",
-    f"**Result: {passed}/12 pass.** Script: `run_tests.py`.\n",
+    f"**Result: {passed}/12 pass.** Script: `run_tests.py`. Every request sends ui_lang=en (the page default); the reply language must follow the user's words.\n",
     "| # | Lang | Said | Task | Fields | Missing | Reply (confirm_text) | Time | Result |","|---|---|---|---|---|---|---|---|---|"]
 for r in rows: md.append('| '+' | '.join(esc(x) for x in r)+' |')
 open('TESTS.md','w').write('\n'.join(md)+'\n')
