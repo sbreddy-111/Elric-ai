@@ -91,6 +91,18 @@
     if (res.task === 'unknown') { pending = null; return; }
     if (res.missing && res.missing.length) {
       pending = res;
+      if (res.missing[0] === 'biller') {
+        // Tap a company instead of typing or saying the hard name.
+        const row = el('div', 'picks');
+        for (const b of ['APCPDCL', 'APSPDCL', 'APEPDCL']) {
+          const btn = el('button', 'pick', b);
+          btn.type = 'button';
+          btn.onclick = () => { if (busy) return; row.querySelectorAll('button').forEach((x) => x.disabled = true); btn.classList.add('on'); send(b); };
+          row.append(btn);
+        }
+        c.append(row);
+        return;
+      }
       c.append(el('div', 'hint', L.fill));
       q.focus({ preventScroll: true });
       return;
