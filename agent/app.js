@@ -103,7 +103,7 @@
     edit.onclick = () => {
       yes.disabled = edit.disabled = true;
       pending = { ...res, missing: [] }; // keep the card so the edit message only changes what is said
-      q.value = ''; q.focus();
+      q.value = ''; sync(); q.focus();
     };
   }
 
@@ -137,13 +137,16 @@
     mlBtn.classList.toggle('set', i !== 0);
   };
   document.querySelectorAll('.chip').forEach((b) => b.onclick = () => send(b.dataset.t));
-  $('#f').onsubmit = (e) => { e.preventDefault(); const v = q.value; q.value = ''; send(v); };
+  let rec = null;
+  const form = $('#f');
+  const sync = () => form.classList.toggle('typed', !!q.value.trim() && !rec);
+  q.addEventListener('input', sync);
+  form.onsubmit = (e) => { e.preventDefault(); const v = q.value; q.value = ''; sync(); send(v); };
 
   // ---- voice (Web Speech API): spoken text goes through the same send() as typed text
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec = null;
   if (!SR) {
-    mic.style.display = 'none'; mlBtn.style.display = 'none';
+    mic.style.display = 'none'; mlBtn.style.display = 'none'; form.classList.add('nomic');
   } else {
     mic.onclick = () => {
       if (rec) { rec.stop(); return; }
@@ -161,6 +164,7 @@
         mic.classList.remove('live'); rec = null;
         const v = (finalText || q.value).trim();
         if (v) { q.value = ''; send(v); }
+        sync();
       };
       try { rec.start(); } catch { mic.classList.remove('live'); rec = null; }
     };
