@@ -63,3 +63,5 @@ svg{width:22px;height:22px}
 .pick{flex:1;padding:12px 4px;border-radius:12px;border:1px solid var(--line);background:var(--s2);font-weight:600;font-size:14.5px}
 .pick.on{background:var(--gold);color:#1a1405;border-color:var(--gold)}
 .pick:disabled:not(.on){opacity:.4}
+.paygo{display:block;text-align:center;text-decoration:none;margin-top:12px}
+.bill .sub+.sub{margin-top:6px}

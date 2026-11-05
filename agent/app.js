@@ -15,23 +15,23 @@
     'te-latn': { yes: 'Avunu', edit: 'Maarchu', need: 'kavali', soon: 'Tvaralo vastundi. Idi inka test maatrame.', fill: 'Paina adigindi type cheyandi leda cheppandi.', err: 'Connect kaledu. Malli try cheyandi.', limit: 'Ee ganta limit ayipoyindi. Konchem tarvata try cheyandi.',
       task: { electricity_bill: 'Current bill', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Inka teliyadu' },
       label: { biller: 'Company', service_number: 'Service number', from: 'Ekkada nunchi', to: 'Ekkadiki', date: 'Tedi', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
-      bill: ['Test bill — nijam kaadu', 'Due', 'Test kosam sample bill. Payment emi jaragadu.'] },
+      bill: ['Test bill — nijam kaadu', 'Due', 'Test kosam sample bill. Payment emi jaragadu.'], pay: ['Official site lo pay cheyandi', 'Mee service number copy ayindi. Site lo paste chesi, captcha vesi pay cheyandi.', 'Pay cheyadaniki open cheyandi', 'Copy ayindi'] },
     'hi-latn': { yes: 'Haan', edit: 'Badlein', need: 'chahiye', soon: 'Jald aa raha hai. Abhi sirf test hai.', fill: 'Upar ke sawaal ka jawab likhein ya bolein.', err: 'Connect nahi hua. Phir try karein.', limit: 'Is ghante ki limit poori. Thodi der baad try karein.',
       task: { electricity_bill: 'Bijli bill', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Abhi pata nahi' },
       label: { biller: 'Company', service_number: 'Service number', from: 'Kahan se', to: 'Kahan tak', date: 'Tareekh', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
-      bill: ['Test bill — asli nahi', 'Due', 'Test ke liye sample bill. Koi payment nahi hota.'] },
+      bill: ['Test bill — asli nahi', 'Due', 'Test ke liye sample bill. Koi payment nahi hota.'], pay: ['Official site par pay karein', 'Aapka service number copy ho gaya. Site par paste karke captcha bharein aur pay karein.', 'Pay karne ke liye kholein', 'Copy ho gaya'] },
     te: { yes: 'అవును', edit: 'మార్చు', need: 'కావాలి', soon: 'త్వరలో వస్తుంది. ఇది ఇంకా టెస్ట్ మాత్రమే.', fill: 'పై ప్రశ్నకు జవాబు టైప్ చేయండి లేదా చెప్పండి.', err: 'కనెక్ట్ కాలేదు. మళ్లీ ప్రయత్నించండి.', limit: 'ఈ గంటకు పరిమితి దాటింది. కొంచెం తర్వాత ప్రయత్నించండి.',
       task: { electricity_bill: 'కరెంట్ బిల్లు', bus_search: 'బస్ వెతుకు', pm_kisan_status: 'PM-కిసాన్ స్టేటస్', unknown: 'ఇంకా తెలియదు' },
       label: { biller: 'సంస్థ', service_number: 'సర్వీస్ నంబర్', from: 'ఎక్కడి నుంచి', to: 'ఎక్కడికి', date: 'తేదీ', aadhaar_or_mobile_last4: 'ఆధార్/మొబైల్ (చివరి 4)' },
-      bill: ['టెస్ట్ — నిజం కాదు', 'గడువు', 'టెస్ట్ కోసం నమూనా బిల్లు. ఎలాంటి చెల్లింపు జరగదు.'] },
+      bill: ['టెస్ట్ — నిజం కాదు', 'గడువు', 'టెస్ట్ కోసం నమూనా బిల్లు. ఎలాంటి చెల్లింపు జరగదు.'], pay: ['అధికారిక సైట్‌లో చెల్లించండి', 'మీ సర్వీస్ నంబర్ కాపీ అయింది. సైట్‌లో పేస్ట్ చేసి, క్యాప్చా వేసి చెల్లించండి.', 'చెల్లించడానికి ఓపెన్ చేయండి', 'కాపీ అయింది'] },
     hi: { yes: 'हाँ', edit: 'बदलें', need: 'चाहिए', soon: 'जल्द आ रहा है। अभी सिर्फ़ टेस्ट है।', fill: 'ऊपर के सवाल का जवाब लिखें या बोलें।', err: 'कनेक्ट नहीं हुआ। फिर से कोशिश करें।', limit: 'इस घंटे की सीमा पूरी हुई। थोड़ी देर बाद कोशिश करें।',
       task: { electricity_bill: 'बिजली बिल', bus_search: 'बस खोजें', pm_kisan_status: 'PM-किसान स्टेटस', unknown: 'अभी पता नहीं' },
       label: { biller: 'कंपनी', service_number: 'सर्विस नंबर', from: 'कहाँ से', to: 'कहाँ तक', date: 'तारीख', aadhaar_or_mobile_last4: 'आधार/मोबाइल (आखिरी 4)' },
-      bill: ['टेस्ट — असली नहीं', 'देय', 'टेस्ट के लिए नमूना बिल। कोई भुगतान नहीं होता।'] },
+      bill: ['टेस्ट — असली नहीं', 'देय', 'टेस्ट के लिए नमूना बिल। कोई भुगतान नहीं होता।'], pay: ['आधिकारिक साइट पर भुगतान करें', 'आपका सर्विस नंबर कॉपी हो गया। साइट पर पेस्ट करें, कैप्चा भरें और भुगतान करें।', 'भुगतान के लिए खोलें', 'कॉपी हो गया'] },
     en: { yes: 'Yes', edit: 'Edit', need: 'needed', soon: 'Coming soon. This is a test version.', fill: 'Type or say the answer to the question above.', err: 'Could not connect. Please try again.', limit: 'Hourly limit reached. Please try a bit later.',
       task: { electricity_bill: 'Power bill', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Not sure yet' },
       label: { biller: 'Company', service_number: 'Service no.', from: 'From', to: 'To', date: 'Date', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
-      bill: ['TEST — NOT REAL', 'Due', 'Sample bill for testing. No payment is made.'] },
+      bill: ['TEST — NOT REAL', 'Due', 'Sample bill for testing. No payment is made.'], pay: ['Pay on the official site', 'Your service number is copied. Paste it on the site, fill the captcha and pay.', 'Open to pay', 'Copied'] },
   };
   const uiLang = () => speechLang.slice(0, 2);
   let lastLang = 'en', lastScript = 'native';
@@ -122,17 +122,23 @@
   function done(res) {
     const L = t(res.lang, res.script);
     if (res.task === 'electricity_bill') {
-      // TEST MODE: fake numbers, nothing is fetched from any power company.
-      const seed = [...(res.fields.service_number || '0')].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) >>> 0;
-      const amt = 180 + (seed % 1400) + (seed % 100) / 100;
-      const due = new Date(Date.now() + 10 * 864e5).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+      // No BBPS access yet: hand off to the power company's own official pay page (it needs a captcha, so no prefill).
+      const PAY = {
+        APCPDCL: 'https://www.apcpdcl.in/ConsumerDashboard/KnownBillPay',
+        APSPDCL: 'https://apspdcl.in/ConsumerDashboard/serviceDetails.jsp',
+        APEPDCL: 'https://www.apeasternpower.com/payWithoutLogin',
+      };
+      const sn = res.fields.service_number || '';
       const b = el('div', 'bill');
-      b.append(el('div', 'tag', L.bill[0]));
-      if (L !== T.en) b.append(el('div', 'tag2', 'TEST — NOT REAL'));
-      b.append(el('div', 'sub', `${res.fields.biller} · ${L.label.service_number} ${res.fields.service_number}`));
-      b.append(el('div', 'amt', '₹' + amt.toFixed(2)));
-      b.append(el('div', 'sub', `${L.bill[1]} ${due} · ${L.bill[2]}`));
+      b.append(el('div', 'tag', L.pay[0]));
+      b.append(el('div', 'sub', `${res.fields.biller} · ${L.label.service_number} ${sn}`));
+      b.append(el('div', 'sub', L.pay[1]));
+      const go = el('a', 'yes paygo', L.pay[2]);
+      go.href = PAY[res.fields.biller] || PAY.APCPDCL; go.target = '_blank'; go.rel = 'noopener';
+      go.onclick = () => { try { navigator.clipboard && navigator.clipboard.writeText(sn); } catch {} };
+      b.append(go);
       log.append(b);
+      try { navigator.clipboard && navigator.clipboard.writeText(sn); } catch {}
     } else {
       log.append(el('div', 'soon', `${ICON[res.task] || ICON.unknown} ${L.soon}`));
     }
