@@ -31,7 +31,8 @@ cd function && curl -X POST "https://api.supabase.com/v1/projects/hqsqpiwmozgsxi
 ```
 
 ## Page
-- Mic button (Web Speech API, language te-IN / hi-IN / en-IN); typing always works. Mic hides if the browser has no speech support.
+- Chat screen: text box always visible with a mic button beside it. Typed and spoken messages go through the same path (same card, same follow-ups).
+- Mic uses the Web Speech API in the chosen language (te-IN / hi-IN / en-IN); the spoken words appear in the text box and send when you stop. If a browser has no speech support, only the mic hides.
 - "Yes" on a power bill shows a **TEST — NOT REAL** sample bill (fake amount). Bus and PM-Kisan show "Coming soon".
 - No payments, no Razorpay. Nothing saved in the browser. No model/provider names in the UI.
 

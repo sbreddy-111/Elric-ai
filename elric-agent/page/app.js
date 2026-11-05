@@ -123,7 +123,7 @@
   document.querySelectorAll('.chip').forEach((b) => b.onclick = () => send(b.dataset.t));
   $('#f').onsubmit = (e) => { e.preventDefault(); const v = q.value; q.value = ''; send(v); };
 
-  // ---- voice (Web Speech API); typed input stays as fallback
+  // ---- voice (Web Speech API): spoken text goes through the same send() as typed text
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   let rec = null;
   if (!SR) {
