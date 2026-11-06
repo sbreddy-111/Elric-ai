@@ -79,15 +79,15 @@ function blocked(p: string) { return BLOCK.test(p); }
 
 /** Turns a Hindi/Telugu/Hinglish prompt into a short English image prompt (best effort). */
 async function toEnglish(p: string): Promise<string> {
-  if ((!/[\u0900-\u0DFF]/.test(p) && !/\. Change: /.test(p)) || !GROQ_KEY) return p;
+  if (!GROQ_KEY) return p;
   try {
     const r = await fetch(GROQ_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_KEY}` },
       body: JSON.stringify({
-        model: "openai/gpt-oss-20b", temperature: 0, reasoning_effort: "low", include_reasoning: false, max_completion_tokens: 200,
+        model: "openai/gpt-oss-20b", temperature: 0, reasoning_effort: "low", include_reasoning: false, max_completion_tokens: 300,
         messages: [
-          { role: "system", content: "Turn the user's image request into one short English image description. If it has a 'Change:' part, apply that change to the earlier request (for example a village style means a rural Indian village scene). Reply with the description only." },
+          { role: "system", content: "Turn the user's image request into one clear English image description of at most 60 words for an image model. Keep every detail the user asked for. If it has a 'Change:' part, apply that change to the earlier request (for example village style means a rural Indian village scene). If a company, shop, brand or person's business name is mentioned, the picture must show that name written exactly and clearly on a sign, logo wall or board (for example: a large sign reading \"ELRIC\"). Anything named Elric (Elric AI, Elric Watches, Elric office) is an Indian startup brand with black and gold colours. Reply with the description only." },
           { role: "user", content: p },
         ],
       }),
