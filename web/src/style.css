@@ -199,3 +199,11 @@ html:not([data-theme="light"]) .mmd.ok{background:var(--s1);border:1px solid var
 .chip.doc{padding:6px 4px 6px 10px}.chip.doc .di{font-size:18px}.chip.doc .dn{color:var(--tx);max-width:46vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .msg.model img.gen{display:block;width:100%;max-width:360px;border-radius:14px;margin:2px 0 6px;background:var(--s1)}
 .msg.model a.gsave{display:inline-block;font-size:12.5px;color:var(--gold);margin:0 0 6px;text-decoration:none}
+
+.qact{align-self:flex-end;display:flex;gap:2px;margin:-6px 4px 0}.qact .edit{margin:0}
+.mmd.ok{cursor:zoom-in}
+.dview{position:fixed;inset:0;z-index:60;background:var(--bg,#0f0f14);display:flex;flex-direction:column}
+.dbar{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;border-bottom:1px solid var(--line)}
+.dbar button{font-size:15px;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:var(--s1);color:inherit}
+.dbody{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:16px;touch-action:pan-x pan-y pinch-zoom}
+.dbody svg{display:block;margin:0 auto;width:100% !important;max-width:none !important;height:auto}

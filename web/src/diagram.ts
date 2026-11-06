@@ -30,7 +30,7 @@ export function sized(svg: string): string {
   if (!vb) return svg;
   const w = Math.round(+vb[1]), h = Math.round(+vb[2]);
   return svg.replace(/<svg\b([^>]*)>/, (_m, a: string) =>
-    `<svg${a.replace(/\s(width|height)="[^"]*"/g, '').replace(/style="[^"]*max-width:[^";]*;?/, 'style="')} width="${w}" height="${h}">`);
+    `<svg${a.replace(/\s(width|height|style)="[^"]*"/g, '')} width="${w}" height="${h}" style="width:${Math.max(w, 260)}px;max-width:100%;height:auto;aspect-ratio:${w} / ${h}">`);
 }
 
 /** Small models often write flowchart nodes as bare "Label" strings, which Mermaid rejects: give each one an id. */

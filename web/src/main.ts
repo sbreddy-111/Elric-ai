@@ -111,13 +111,15 @@ function stats(x: Turn, i = -1): string {
     ? ` <button class="ra${reading === i ? ' on' : ''}" data-r="${i}" aria-label="${t('readAloud')}">🔊</button>` : '';
   const fb = x.text && !x.failed && i >= 0 && !(busy && i === turns.length - 1)
     ? ` <button class="fb${x.reported ? ' on' : ''}" data-fb="${i}" aria-label="${t(x.reported ? 'fbReported' : 'fbReport')}"${x.reported ? ' aria-disabled="true"' : ''}>👎</button>` : '';
-  const tag = ((x.src ? t(x.src === 'online' ? 'tagOnline' : 'tagOffline') : '') + ra + fb).trim();
+  const cp = x.text && !x.failed && i >= 0 && !(busy && i === turns.length - 1)
+    ? ` <button class="ra" data-cp="${i}" aria-label="${t('copy')}">⧉</button>` : '';
+  const tag = ((x.src ? t(x.src === 'online' ? 'tagOnline' : 'tagOffline') : '') + cp + ra + fb).trim();
   if (!x.ms) return tag ? `<div class="stat">${tag}</div>` : '';
   const words = x.text.trim().split(/\s+/).filter(Boolean).length;
   const gen = Math.max(1, x.ms - (x.firstMs || 0));
   const parts = [`⏱ ${t('statTime', { s: secs(x.ms) })}`];
   if (x.firstMs) parts.push(t('statFirst', { s: secs(x.firstMs) }));
-  if (words > 3) parts.push(t('statSpeed', { n: (words / (gen / 1000)).toFixed(1) }));
+  if (words > 3 && words / (gen / 1000) < 150) parts.push(t('statSpeed', { n: (words / (gen / 1000)).toFixed(1) }));
   if (tag) parts.push(tag);
   return `<div class="stat">${parts.join(' · ')}</div>`;
 }
@@ -201,7 +203,7 @@ function renderMain() {
     renderStatus();
     return;
   }
-  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || waitDots()}</div>${stats(x, i)}${extras(x, i)}${x.role === 'user' && !busy ? `<button class="edit" data-e="${i}">✎ ${t('editQ')}</button>` : ''}`).join('')}
+  m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || waitDots()}</div>${stats(x, i)}${extras(x, i)}${x.role === 'user' && !busy ? `<div class="qact"><button class="edit" data-cp="${i}">⧉ ${t('copy')}</button><button class="edit" data-e="${i}">✎ ${t('editQ')}</button></div>` : ''}`).join('')}
     ${mode === 'shopping' ? `<div class="note">${t('shoppingNote')}</div>` : ''}${showStatusInChat() ? '<div id="status"></div>' : ''}</div>`;
   renderStatus();
   m.scrollTop = m.scrollHeight;
@@ -215,6 +217,8 @@ function renderMain() {
   }));
   m.querySelectorAll<HTMLButtonElement>('[data-r]').forEach((b) => (b.onclick = () => readAloud(+b.dataset.r!)));
   m.querySelectorAll<HTMLButtonElement>('[data-fb]').forEach((b) => (b.onclick = () => reportSheet(+b.dataset.fb!)));
+  m.querySelectorAll<HTMLButtonElement>('[data-cp]').forEach((b) => (b.onclick = () => copyText(turns[+b.dataset.cp!]?.text || '')));
+  m.querySelectorAll<HTMLElement>('.mmd').forEach((d) => (d.onclick = () => { if (d.classList.contains('ok')) viewDiagram(d); }));
 }
 
 /** In a chat, the model card shows when offline answers are on, or when a question still needs the model. */
@@ -639,6 +643,47 @@ function readAloud(i: number) {
 
 // ---------------------------------------------------------------- report a wrong answer
 
+async function copyText(s: string) {
+  const text = s.replace(/```mermaid[\s\S]*?```/g, '').trim() || s;
+  try { await navigator.clipboard.writeText(text); toast(t('copied')); }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove();
+    toast(t(ok ? 'copied' : 'copyFailed'), ok ? 'ok' : 'err');
+  }
+}
+
+/** Full-screen diagram: pinch to zoom, Save as a picture (share sheet on phones, download on PC). */
+function viewDiagram(d: HTMLElement) {
+  const svg = d.querySelector('svg'); if (!svg) return;
+  const ov = document.createElement('div'); ov.className = 'dview';
+  ov.innerHTML = `<div class="dbar"><button class="dsave">⤓ ${t('saveImage')}</button><button class="dclose" aria-label="${t('close')}">✕</button></div><div class="dbody">${svg.outerHTML}</div>`;
+  document.body.appendChild(ov);
+  const close = () => { ov.remove(); document.removeEventListener('keydown', key); };
+  const key = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', key);
+  ov.querySelector<HTMLButtonElement>('.dclose')!.onclick = close;
+  ov.querySelector<HTMLButtonElement>('.dsave')!.onclick = () => saveDiagram(svg as SVGSVGElement);
+}
+async function saveDiagram(svg: SVGSVGElement) {
+  try {
+    const w = +(svg.getAttribute('width') || 600), h = +(svg.getAttribute('height') || 400);
+    const clone = svg.cloneNode(true) as SVGSVGElement; clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(clone));
+    const img = new Image(); img.decoding = 'sync';
+    await new Promise<void>((ok, bad) => { img.onload = () => ok(); img.onerror = () => bad(new Error('img')); img.src = url; });
+    const k = Math.min(3, 4000 / Math.max(w, h)), pad = 24;
+    const c = document.createElement('canvas'); c.width = Math.round((w + pad * 2) * k); c.height = Math.round((h + pad * 2) * k);
+    const g = c.getContext('2d')!; g.fillStyle = getComputedStyle(document.body).backgroundColor || '#111'; g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(img, pad * k, pad * k, w * k, h * k);
+    const blob: Blob = await new Promise((ok, bad) => c.toBlob((b) => (b ? ok(b) : bad(new Error('blob'))), 'image/png'));
+    const file = new File([blob], 'elric-diagram.png', { type: 'image/png' });
+    if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch { /* user closed the sheet */ } return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'elric-diagram.png'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  } catch { toast(t('saveFailed'), 'err'); }
+}
+
 let toastTimer = 0;
 function toast(msg: string, kind: 'ok' | 'err' = 'ok') {
   let el = document.getElementById('toast');
@@ -808,7 +853,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.11';
+const APP_VERSION = '0.4.12';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
