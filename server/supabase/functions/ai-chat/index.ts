@@ -208,8 +208,9 @@ function systemPrompt(r: Req, facts: Fact[], search = false, calcTool = false): 
   }
   if (!r.talk) {
     s += " If the user asks for a diagram, flowchart, mind map, timeline or process chart, draw it as Mermaid in a " +
-      "```mermaid code block (flowchart TD or LR, short node labels in double quotes, no special characters " +
-      "outside quotes), with one or two lines of explanation; otherwise do not add diagrams.";
+      "```mermaid code block (flowchart TD or LR). Every node needs a short id and a quoted label, exactly like: " +
+      "A[\"Evaporation\"] --> B[\"Condensation\"], then reuse the id (B --> C[\"Rain\"]). Never write a bare " +
+      "quoted label as a node. Add one or two lines of explanation; otherwise do not add diagrams.";
   }
   s += IMAGES_ON
     ? " You cannot create pictures or photos yourself; the app makes them when the user writes a request like " +
