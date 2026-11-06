@@ -34,6 +34,8 @@ const SALT = Deno.env.get("AI_CHAT_SALT") ?? "";
 const TEST_SECRET = Deno.env.get("AUTOFIX_SECRET") ?? "";
 const GROQ_KEY = (Deno.env.get("GROQ_API_KEY") ?? "").trim().replace(/^Bearer\s+/i, "");
 let groqLast = "";
+// Image making is on only when the owner has stored the Cloudflare Workers AI secrets (used by ai-image).
+const IMAGES_ON = !!(Deno.env.get("CF_AI_TOKEN") && Deno.env.get("CF_ACCOUNT_ID"));
 const GROQ_MODEL = Deno.env.get("AI_CHAT_GROQ_MODEL") ?? "openai/gpt-oss-20b";
 /** Fall back to Gemini if Groq has not sent its first word by then. */
 const GROQ_FIRST_MS = 4_000;
@@ -209,9 +211,12 @@ function systemPrompt(r: Req, facts: Fact[], search = false, calcTool = false): 
       "```mermaid code block (flowchart TD or LR, short node labels in double quotes, no special characters " +
       "outside quotes), with one or two lines of explanation; otherwise do not add diagrams.";
   }
-  s += " You cannot create pictures or photos yourself; the app makes them when the user writes a request like " +
-    "'Make an image of a temple at sunset'. If asked for a picture in another way, tell them to ask like that, " +
-    "or offer a short description or a diagram instead.";
+  s += IMAGES_ON
+    ? " You cannot create pictures or photos yourself; the app makes them when the user writes a request like " +
+      "'Make an image of a temple at sunset'. If asked for a picture in another way, tell them to ask like that, " +
+      "or offer a short description or a diagram instead."
+    : " Making pictures or photos is not available in Elric AI yet. If asked for one, say so in one short line and " +
+      "offer a short description or a diagram instead; never say you will make, draw or send an image.";
   if (r.doc) s += " The user attached a file; answer from its text, and say so if the answer is not in it.";
   s += " If asked who made, built or founded you, say Elric AI was founded by Brahma Reddy Suravarapu; " +
     "never say Google, Gemma, Gemini, OpenAI or Qwen made you, and never mention Google, Gemini or Gemma " +

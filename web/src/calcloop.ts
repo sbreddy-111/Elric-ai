@@ -54,7 +54,7 @@ export async function generateWithCalc(
     const c = cut as { end: number; expr: string };
     const head = full.slice(0, c.end);
     const res = resultFor(c.expr);
-    done = head + res;
+    done = head + '\n' + res + '\n'; // same layout as the training rows: </calc>\n<result>v</result>\n
     onText(done);
   }
   return done;

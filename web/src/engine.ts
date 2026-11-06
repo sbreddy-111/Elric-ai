@@ -36,7 +36,8 @@ export type Reason =
   | { kind: 'smallGpu'; limit: number }
   | { kind: 'storage'; need: number; have: number }
   | { kind: 'crashed' }
-  | { kind: 'loadFailed'; err: string };
+  | { kind: 'loadFailed'; err: string }
+  | { kind: 'iosTooBig' };
 
 export interface DeviceReport {
   ok: boolean; // false = hard block (no WebGPU / no adapter)

@@ -6,6 +6,14 @@ const MATH = /\b(solve|calculate|compute|how (many|much|long|far|fast)|what time
 const REASON = /\b(step by step|show steps|prove|derive|balance (the |this )?(chemical )?equation|explain why|why does|why do|acceleration|velocity|momentum|circuit|molar|moles|logic|puzzle|riddle)\b|चरणबद्ध|सिद्ध/i;
 const RECENT = /\b(today|latest|current(ly)?|recent(ly)?|news|this (week|month|year)|who won|winner|results?|score|price|rate|election|20[2-9]\d)\b|आज|ताज़ा|ताजा|खबर|समाचार|चुनाव|नतीजा|कीमत/i;
 
+const MATH_TE = /శాతం|లాభం|నష్టం|వడ్డీ|సగటు|వేగం|దూరం|ధర|బిల్లు|మొత్తం|తగ్గింపు|ఎంత/;
+
+/** Arithmetic questions: the on-device model then writes <calc> steps for the app to work out. */
+export function isMath(q: string): boolean {
+  const nums = (q.match(/\d+(\.\d+)?/g) || []).length;
+  return nums >= 2 && (MATH.test(q) || MATH_TE.test(q) || /kitn|kitna|kitne|ek piece|bachat|munafa|ghata/i.test(q));
+}
+
 export function isHard(q: string): boolean {
   const nums = (q.match(/\d+(\.\d+)?/g) || []).length;
   return (nums >= 2 && MATH.test(q)) || REASON.test(q) || RECENT.test(q);

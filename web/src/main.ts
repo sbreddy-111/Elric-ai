@@ -6,7 +6,7 @@ import * as V from './voice';
 import * as P from './photo';
 import * as F from './feedback';
 import * as D from './file';
-import { isHard, isImageRequest } from './smart';
+import { isHard, isImageRequest, isMath } from './smart';
 import { drawDiagrams } from './diagram';
 import { generateWithCalc, showCalc } from './calcloop';
 
@@ -230,6 +230,7 @@ function reasonText(r: E.Reason): string {
     case 'storage': return t('reasonStorage', { need: gb(r.need), have: gb(r.have) });
     case 'crashed': return t('reasonCrashed');
     case 'loadFailed': return t('reasonLoadFailed', { err: r.err });
+    case 'iosTooBig': return t('reasonIosTooBig');
   }
 }
 
@@ -317,9 +318,9 @@ async function startLoad() {
   renderMain();
 }
 
-function system(): string {
+function system(q = ''): string {
   let s = E.SYSTEM_PROMPT;
-  if (E.CALC_TAGS) s += E.CALC_PROMPT;
+  if (E.CALC_TAGS && isMath(q)) s += E.CALC_PROMPT;
   if (mode === 'study') s += ' Mode: Study. Be a patient tutor for Indian students.';
   if (mode === 'shopping') s += ' Mode: Shopping. You have NO access to live prices, stock or offers. Never state or guess specific prices. Help compare features and explain what to look for, and say live prices are coming soon.';
   if (getLang() === 'hi') s += ' The user prefers Hindi.';
@@ -413,12 +414,15 @@ async function answerOnline(reply: Turn, question: string, history: E.Turn[], ph
   return false;
 }
 
+const IMAGE_PROMISE = /^\s*(I['’]ll make (that|an|the|this) (image|picture)|मैं (वह|यह) तस्वीर बना|Main (wo|woh|ye|yeh) (image|photo|tasveer) bana|ఆ చిత్రాన్ని తయారు చేస్తాను)/i;
+
 async function answerOffline(reply: E.Turn, history: E.Turn[]) {
   const t0 = performance.now();
+  const lastQ = [...history].reverse().find((x) => x.role === 'user')?.text ?? '';
   try {
     // Calculator steps: <calc>…</calc> is worked out by the app (see calcloop.ts); shown as "a = b".
     const raw = await generateWithCalc(
-      (prefix, on) => E.generate(system(), history, on, prefix),
+      (prefix, on) => E.generate(system(lastQ), history, on, prefix),
       () => E.stop(),
       (txt) => {
         if (!reply.firstMs && txt.trim()) reply.firstMs = Math.round(performance.now() - t0);
@@ -428,6 +432,8 @@ async function answerOffline(reply: E.Turn, history: E.Turn[]) {
       () => stopRequested,
     );
     reply.text = showCalc(raw).trim();
+    // Image making is off: never let an offline answer promise a picture.
+    if (!O.IMAGES_ON && IMAGE_PROMISE.test(reply.text)) reply.text = t('imageSoon');
     flush();
     reply.ms = Math.round(performance.now() - t0);
     reply.src = 'offline';
@@ -441,6 +447,7 @@ async function answerOffline(reply: E.Turn, history: E.Turn[]) {
 
 /** "Make an image of …": one picture from the server (Online answers only). */
 async function answerImage(reply: Turn, text: string) {
+  if (!O.IMAGES_ON) { reply.text = t('imageSoon'); reply.failed = true; return; }
   if (!O.isOn() || !O.ready()) { reply.text = t(O.isOn() ? 'imageUnavailable' : 'imageNeedsOnline'); reply.failed = true; return; }
   const t0 = performance.now();
   waitLabel = 'makingImage'; onlineWaiting = true; paint(reply);
