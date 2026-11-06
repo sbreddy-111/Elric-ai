@@ -20,19 +20,44 @@ export function listen(lang: string, on: { interim(text: string): void; end(text
   if (!C) return null;
   const r = new C();
   r.lang = lang; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
-  let fin = ''; let inter = ''; let err = ''; let done = false;
+  let text = ''; let err = ''; let done = false; let quiet: any = 0; let cap: any = 0; let dog: any = 0;
+  const finish = () => {
+    if (done) return; done = true;
+    clearTimeout(quiet); clearTimeout(cap); clearTimeout(dog);
+    on.end(text.trim(), err || undefined);
+  };
+  // iPhone Safari sometimes keeps listening after you stop talking, or never sends 'end':
+  // stop after a short silence, cap the length, and finish ourselves if 'end' never comes.
+  const stopSoon = () => { try { r.stop(); } catch { /* ended */ } clearTimeout(dog); dog = setTimeout(finish, 1500); };
+  const arm = (ms: number) => { clearTimeout(quiet); quiet = setTimeout(stopSoon, ms); };
   r.onresult = (e: any) => {
-    fin = ''; inter = '';
-    for (let i = 0; i < e.results.length; i++) { const x = e.results[i]; if (x.isFinal) fin += x[0].transcript; else inter += x[0].transcript; }
-    on.interim((fin + inter).trim());
+    text = joinResults(e.results);
+    on.interim(text);
+    arm(2200);
   };
-  r.onerror = (e: any) => { err = e?.error || 'error'; };
-  r.onend = () => { if (done) return; done = true; on.end((fin + inter).trim(), err || undefined); };
-  try { r.start(); } catch { done = true; setTimeout(() => on.end('', 'start')); }
+  r.onerror = (e: any) => { const c = e?.error || 'error'; if (c !== 'aborted' || !text) err = c; };
+  r.onend = finish;
+  try { r.start(); arm(8000); cap = setTimeout(stopSoon, 60000); } catch { done = true; setTimeout(() => on.end('', 'start')); }
   return {
-    stop: () => { try { r.stop(); } catch { /* ended */ } },
-    abort: () => { done = true; try { r.abort(); } catch { /* ended */ } },
+    stop: stopSoon,
+    abort: () => { done = true; clearTimeout(quiet); clearTimeout(cap); clearTimeout(dog); try { r.abort(); } catch { /* ended */ } },
   };
+}
+
+/** Joins recognition results. iPhone Safari repeats earlier words in later results ("hello", "hello how",
+ *  "hello how are you"), which made the text come out doubled; keep only the newest version of each phrase. */
+export function joinResults(results: ArrayLike<any>): string {
+  const parts: string[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const s = String(results[i]?.[0]?.transcript || '').trim();
+    if (!s) continue;
+    const last = parts[parts.length - 1];
+    const a = (x: string) => x.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '');
+    if (last !== undefined && a(s).startsWith(a(last))) parts[parts.length - 1] = s;
+    else if (last !== undefined && a(last).startsWith(a(s))) continue;
+    else parts.push(s);
+  }
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
 
 /** iOS Safari only plays speech started from a tap: call this inside the tap that opens Talk. */

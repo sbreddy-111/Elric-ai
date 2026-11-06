@@ -207,3 +207,6 @@ html:not([data-theme="light"]) .mmd.ok{background:var(--s1);border:1px solid var
 .dbar button{font-size:15px;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:var(--s1);color:inherit}
 .dbody{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:16px;touch-action:pan-x pan-y pinch-zoom}
 .dbody svg{display:block;margin:0 auto;width:100% !important;max-width:none !important;height:auto}
+
+.hero-study h1{background-image:linear-gradient(90deg,var(--gold),#5FB4F0)}
+.hero-shopping h1{background-image:linear-gradient(90deg,var(--gold),#3DBE7A)}

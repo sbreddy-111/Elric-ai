@@ -190,13 +190,17 @@ function shell() {
 function renderMain() {
   const m = $('#main');
   if (!turns.length) {
-    const cards: [keyof Strings, () => void][] = [
-      ['sugQuiz', () => send(t('promptQuiz'))],
-      ['sugPhoto', () => $('#snap').click()],
-      ['sugLecture', () => { const i = $<HTMLTextAreaElement>('#input'); i.value = t('promptLecture'); i.focus(); }],
-      ['sugWatch', () => { mode = 'shopping'; shell(); send(t('promptWatch')); }],
-    ];
-    m.innerHTML = `<section class="hero"><img src="icons/mark.png" alt="" class="mark"><h1>${t('greeting')}${getProfile().name ? ', ' + esc(getProfile().name.split(' ')[0]) : ''}</h1><p>${t('subtitle')}</p>
+    const ask = (k: keyof Strings) => () => send(t(k));
+    const fill = (k: keyof Strings) => () => { const i = $<HTMLTextAreaElement>('#input'); i.value = t(k); i.focus(); i.dispatchEvent(new Event('input')); };
+    // Each mode has its own suggestions and line under the greeting.
+    const byMode: Record<Mode, [keyof Strings, () => void][]> = {
+      general: [['sugExplain', fill('promptExplain')], ['sugPhotoAny', () => $('#snap').click()], ['sugWrite', fill('promptWrite')], ['sugPlan', ask('promptPlan')]],
+      study: [['sugQuiz', ask('promptQuiz')], ['sugPhoto', () => $('#snap').click()], ['sugLecture', fill('promptLecture')], ['sugChart', ask('promptChart')]],
+      shopping: [['sugWatch', ask('promptWatch')], ['sugPhones', fill('promptPhones')], ['sugGift', ask('promptGift')], ['sugDeal', () => $('#snap').click()]],
+    };
+    const cards = byMode[mode] || byMode.general;
+    const sub: Record<Mode, keyof Strings> = { general: 'subtitle', study: 'subStudy', shopping: 'subShop' };
+    m.innerHTML = `<section class="hero hero-${mode}"><img src="icons/mark.png" alt="" class="mark"><h1>${t('greeting')}${getProfile().name ? ', ' + esc(getProfile().name.split(' ')[0]) : ''}</h1><p>${t(sub[mode] || 'subtitle')}</p>
       <div class="cards">${cards.map(([k], i) => `<button class="card" data-i="${i}">${t(k)}</button>`).join('')}</div>
       <div id="status"></div></section>`;
     m.querySelectorAll<HTMLButtonElement>('.card').forEach((b) => (b.onclick = cards[+b.dataset.i!][1]));
@@ -853,7 +857,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.13';
+const APP_VERSION = '0.4.14';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
