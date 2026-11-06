@@ -7,7 +7,7 @@ import * as P from './photo';
 import * as F from './feedback';
 import * as D from './file';
 import { isHard, isImageRequest, isMath } from './smart';
-import { drawDiagrams } from './diagram';
+import { drawDiagrams, diag } from './diagram';
 import { generateWithCalc, showCalc } from './calcloop';
 
 type Mode = 'study' | 'shopping' | 'general';
@@ -808,7 +808,8 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.9';
+const APP_VERSION = '0.4.10';
+diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],

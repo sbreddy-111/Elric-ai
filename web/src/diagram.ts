@@ -1,7 +1,12 @@
 // Draws ```mermaid diagrams in answers. Mermaid is loaded only when a diagram first appears;
 // if it can't draw one, the code stays visible instead.
 
+import * as F from './feedback';
+
 let lib: Promise<any> | null = null;
+let reported = 0;
+/** Version is passed in by main.ts so this file has no import cycle. */
+export const diag = { version: '' };
 let n = 0;
 
 function load(): Promise<any> {
@@ -53,8 +58,11 @@ export async function drawDiagrams(root: ParentNode): Promise<void> {
       cache.set(code, html);
       el.innerHTML = html;
       el.classList.add('ok');
-    } catch {
+    } catch (e: any) {
       el.classList.add('bad'); // keep showing the code
+      // One silent error row per session (no chat text: only the diagram code and the error), so we can fix it.
+      if (reported++ < 1) F.send({ kind: 'crash', app_version: diag.version, platform: `web ${F.shortUA()}`, device: F.device(),
+        backend: 'diagram', note: `diagram: ${String(e?.message || e).slice(0, 600)}`, answer: code.slice(0, 2000) });
       document.getElementById(`delric-mmd-${n}`)?.remove(); // mermaid's leftover error box
     }
   }
