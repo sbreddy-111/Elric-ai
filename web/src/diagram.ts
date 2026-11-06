@@ -23,6 +23,16 @@ function load(): Promise<any> {
 
 const cache = new Map<string, string>();
 
+/** Safari draws an SVG with width="100%" and no height at 150 px tall, so the diagram came out tiny.
+ *  Give it its real size from the viewBox; CSS then shrinks it to fit the screen. */
+export function sized(svg: string): string {
+  const vb = svg.match(/viewBox="[\d.\-]+\s+[\d.\-]+\s+([\d.]+)\s+([\d.]+)"/);
+  if (!vb) return svg;
+  const w = Math.round(+vb[1]), h = Math.round(+vb[2]);
+  return svg.replace(/<svg\b([^>]*)>/, (_m, a: string) =>
+    `<svg${a.replace(/\s(width|height)="[^"]*"/g, '').replace(/style="[^"]*max-width:[^";]*;?/, 'style="')} width="${w}" height="${h}">`);
+}
+
 /** Small models often write flowchart nodes as bare "Label" strings, which Mermaid rejects: give each one an id. */
 export function repair(code: string): string {
   if (!/^\s*(flowchart|graph)\b/i.test(code)) return code;
@@ -54,7 +64,7 @@ export async function drawDiagrams(root: ParentNode): Promise<void> {
         ({ svg } = await mm.render(`elric-mmd-${++n}`, fixed));
       }
       if (!el.isConnected) continue;
-      const html = `<div class="mmd-svg">${svg}</div>`;
+      const html = `<div class="mmd-svg">${sized(svg)}</div>`;
       cache.set(code, html);
       el.innerHTML = html;
       el.classList.add('ok');
