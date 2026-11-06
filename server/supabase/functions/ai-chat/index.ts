@@ -172,7 +172,7 @@ function pickFacts(facts: Fact[], question: string): string[] {
 // ---------------------------------------------------------------- prompt (mirrors the app)
 
 const BUILTIN_FACTS =
-  ' Facts: Elric AI is an offline-first study and shopping assistant for India, founded by Brahma Reddy Suravarapu (elricai.sbs, "AI you can rely on."). Elric Watches is an official Titan watch store founded and owned by Brahma Reddy Suravarapu (elricwatches.in, Instagram @elricwatches). Brahma Reddy Suravarapu is the founder of the Elric brands: Elric Watches, Elric AI and Elric Next (give no details about Elric Next). Being built: Student OS, Elric Fit (a fitness and diet tracker) and Elric AI Watch; say they are being built and do not describe features.';
+  ' Facts: Elric AI is an offline-first study and shopping assistant for India, founded by Brahma Reddy Suravarapu (elricai.sbs, "AI you can rely on."). Elric Watches is an official Titan watch store founded and owned by Brahma Reddy Suravarapu (elricwatches.shop, Instagram @elricwatches). Brahma Reddy Suravarapu is the founder of the Elric brands: Elric Watches, Elric AI and Elric Next (give no details about Elric Next). Being built: Student OS, Elric Fit (a fitness and diet tracker) and Elric AI Watch; say they are being built and do not describe features.';
 
 type Req = {
   question: string; history: { role: string; text: string }[]; image?: { mime: string; data: string };
@@ -190,7 +190,103 @@ function userText(r: Req): string {
 const clean = (s: unknown, max: number) =>
   typeof s === "string" ? s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, max) : "";
 
-function systemPrompt(r: Req, facts: Fact[], search = false, calcTool = false): string {
+// ---------------------------------------------------------------- Elric Watches catalogue (owner's own store)
+
+export interface Product { title: string; brand: string; price: number; mrp?: number; url: string; img: string; tags: string; }
+const STORE = "https://elricwatches.shop";
+let catalog: { at: number; items: Product[] } | null = null;
+
+/** Live in-stock watches from the public Shopify catalogue, cached 6 h per server instance. */
+async function storeCatalog(): Promise<Product[]> {
+  if (catalog && Date.now() - catalog.at < 6 * 3600_000) return catalog.items;
+  const items: Product[] = [];
+  try {
+    for (let page = 1; page <= 6; page++) {
+      const res = await fetch(`${STORE}/products.json?limit=250&page=${page}`, { signal: AbortSignal.timeout(4000) });
+      if (!res.ok) break;
+      const list = (await res.json())?.products ?? [];
+      for (const p of list) {
+        const v = (p.variants ?? []).find((x: any) => x.available) ?? null;
+        if (!v) continue;
+        const price = Number(v.price);
+        if (!(price > 0)) continue;
+        items.push({
+          title: String(p.title || "").slice(0, 140), brand: String(p.vendor || "").slice(0, 40), price,
+          mrp: Number(v.compare_at_price) > price ? Number(v.compare_at_price) : undefined,
+          url: `${STORE}/products/${encodeURIComponent(p.handle)}`,
+          img: String(p.images?.[0]?.src || "").replace(/^http:/, "https:"),
+          tags: [p.product_type, ...(p.tags ?? [])].join(" ").toLowerCase(),
+        });
+      }
+      if (list.length < 250) break;
+    }
+  } catch { /* use what we have */ }
+  if (items.length) catalog = { at: Date.now(), items };
+  return catalog?.items ?? items;
+}
+
+const WATCH_RE = /\b(watch(es)?|wrist ?watch|smart ?watch|chronograph|timepiece|ghadi|ghadiyan|titan|fastrack|sonata|fossil|casio|timex|tommy|kenneth cole|guess|maxima)\b|घड़ी|घडी|वॉच/i;
+export function wantsWatch(r: { question: string; history: { text: string }[]; mode: string }): boolean {
+  if (WATCH_RE.test(r.question)) return true;
+  return r.mode === "shopping" && r.history.slice(-4).some((t) => WATCH_RE.test(t.text));
+}
+
+/** Picks up to 3 in-stock watches that fit the budget, who it is for and the style asked. */
+export function pickWatches(items: Product[], text: string): { list: Product[]; budget: number } {
+  const q = text.toLowerCase().replace(/,/g, "");
+  let budget = 0;
+  const k = q.match(/(\d+(?:\.\d+)?)\s*(k\b|thousand|hazaar|hazar|हज़ार|हजार)/);
+  const n = q.match(/(?:₹|rs\.?|inr|rupees?)\s*(\d{3,6})|(\d{3,6})\s*(?:₹|rs\b|rupees?|inr)|(?:under|below|within|upto|up to|around|budget|less than)\s*(\d{3,6})/);
+  if (k) budget = Math.round(Number(k[1]) * 1000);
+  else if (n) budget = Number(n[1] || n[2] || n[3]);
+  const who = /\b(kids?|child|children|son|daughter|boy'?s school|baccha)\b/.test(q) ? "kid"
+    : /\b(women|woman|ladies|lady|girl|girls|wife|mother|mom|sister|her|female|girlfriend)\b|महिला|लड़की/.test(q) ? "women"
+    : /\b(men|man|gents|male|boy|boys|husband|father|dad|brother|him|boyfriend)\b|पुरुष|लड़के/.test(q) ? "men" : "";
+  const words = ["digital", "smart", "analog", "leather", "metal", "steel", "chronograph", "automatic", "sports", "gold", "rose gold",
+    "black", "blue", "silver", "green", "brown", "white", "square", "skeleton", "multifunction", "solar", "couple"];
+  const want = words.filter((w) => q.includes(w));
+  const brands = [...new Set(items.map((p) => p.brand.toLowerCase()))].filter((b) => b && q.includes(b));
+  const scored = items.map((p) => {
+    const t = (p.title + " " + p.tags).toLowerCase();
+    if (budget && p.price > budget * 1.05) return null;
+    const isKid = /kids'?|for-kids/.test(t), isW = /women'?s|ladies/.test(t), isM = /\bmen'?s/.test(t);
+    if (who === "kid" && !isKid) return null;
+    if (who === "women" && !(isW || /unisex|couple/.test(t))) return null;
+    if (who === "men" && !(isM || /unisex/.test(t))) return null;
+    if (who !== "kid" && isKid) return null;
+    if (brands.length && !brands.includes(p.brand.toLowerCase())) return null;
+    let s = 0;
+    for (const w of want) if (t.includes(w)) s += 3;
+    if (budget) s += 4 * (p.price / budget); else s += p.price >= 2000 && p.price <= 8000 ? 2 : 0;
+    if (p.mrp) s += 0.5;
+    return { p, s };
+  }).filter(Boolean) as { p: Product; s: number }[];
+  scored.sort((a, b) => b.s - a.s);
+  const out: Product[] = [];
+  for (const x of scored) {
+    if (out.length >= 3) break;
+    // Variety: at most two from one brand.
+    if (out.filter((o) => o.brand === x.p.brand).length >= 2) continue;
+    if (x.p.img) out.push(x.p);
+  }
+  return { list: out, budget };
+}
+
+const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
+function storeNote(list: Product[], budget: number): string {
+  if (!list.length) {
+    return " Elric Watches (elricwatches.shop, the founder's own watch store) has no in-stock watch matching this request right now; say so briefly, " +
+      "suggest changing the budget or style, and do not invent products or prices.";
+  }
+  return " Elric Watches (elricwatches.shop) is Elric AI's own sister store, run by the same founder. These in-stock watches from it fit the request " +
+    `(current store prices${budget ? `, budget ${inr(budget)}` : ""}): ` +
+    list.map((p, i) => `${i + 1}. ${p.title} — ${p.brand} — ${inr(p.price)}${p.mrp ? ` (MRP ${inr(p.mrp)})` : ""}.`).join(" ") +
+    " Recommend exactly these, one short line each on why it suits the user, with its price. Say once, plainly, that they are from Elric Watches, our own store, " +
+    "and that the Buy buttons below open the store. Never invent other products, prices, discounts or delivery promises. If the user has not said a budget " +
+    "or who it is for, also ask that in one short line.";
+}
+
+function systemPrompt(r: Req, facts: Fact[], search = false, calcTool = false, store = ""): string {
   const today = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" })
     .format(new Date());
   let s = search
@@ -231,10 +327,10 @@ function systemPrompt(r: Req, facts: Fact[], search = false, calcTool = false): 
   else if (rel.length) s += " Facts (use exactly when relevant): " + rel.join(" ");
   if (r.mode === "study") s += " Mode: Study. Be a patient tutor for Indian students.";
   else if (r.mode === "shopping") {
-    s += " Mode: Shopping. You have NO access to live prices, stock or offers. Never state or " +
-      "guess specific prices, and never invent products, shops or links. Help compare " +
-      "features and explain what to look for, and say live prices are coming soon.";
+    s += " Mode: Shopping. Apart from Elric Watches store data given below, you have NO live prices, stock or offers: never state or " +
+      "guess other prices, and never invent products, shops or links. Help compare features and explain what to look for.";
   }
+  if (store) s += store;
   const mem = r.memory;
   if (r.lang === "hi" && !/hindi|हिन्दी|हिंदी/i.test(mem)) s += " The user prefers Hindi.";
   if (r.name) s += ` The user's name is ${r.name}.`;
@@ -487,7 +583,7 @@ async function callGemini(r: Req, system: string, test: string, think = ""): Pro
 }
 
 // Re-emits Gemini's SSE as small Elric events. Never logs text.
-function relay(res: Response, model: number, onDone?: (text: string) => void): ReadableStream<Uint8Array> {
+function relay(res: Response, model: number, onDone?: (text: string) => void, prod: Product[] = []): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
   const dec = new TextDecoder();
   const reader = res.body!.getReader();
@@ -501,6 +597,7 @@ function relay(res: Response, model: number, onDone?: (text: string) => void): R
   return new ReadableStream({
     async start(c) {
       try {
+        if (prod.length) send(c, { prod });
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
@@ -822,7 +919,7 @@ function pickSources(live: GroqLive): Source[] {
   return out;
 }
 
-function relayGroq(live: GroqLive, onDone?: (text: string, searched: boolean) => void, prefix = ""): ReadableStream<Uint8Array> {
+function relayGroq(live: GroqLive, onDone?: (text: string, searched: boolean) => void, prefix = "", prod: Product[] = []): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
   const send = (c: ReadableStreamDefaultController<Uint8Array>, o: unknown) =>
     c.enqueue(enc.encode(`data: ${JSON.stringify(o)}\n\n`));
@@ -833,6 +930,7 @@ function relayGroq(live: GroqLive, onDone?: (text: string, searched: boolean) =>
     async start(c) {
       try {
         // Fixed caution line when a fresh-facts question could not be searched (the model alone may state old facts).
+        if (prod.length) send(c, { prod });
         if (prefix) send(c, { t: prefix });
         while (true) {
           for (const p of live.pending.splice(0)) {
@@ -1003,6 +1101,18 @@ async function handle(req: Request): Promise<Response> {
   marks.limit = Date.now() - t0;
   const facts = await factsP;
   marks.facts = Date.now() - t0;
+  let prod: Product[] = [];
+  let store = "";
+  if (!parsed.talk && !parsed.image && (parsed.mode === "shopping" || WATCH_RE.test(parsed.question)) && wantsWatch(parsed)) {
+    const items = await storeCatalog();
+    if (items.length) {
+      const ctx = [...parsed.history.filter((t) => t.role === "user").slice(-3).map((t) => t.text), parsed.question].join(" ");
+      const pick = pickWatches(items, ctx);
+      prod = pick.list.map((p) => ({ ...p, tags: "" }));
+      store = storeNote(pick.list, pick.budget);
+    }
+    marks.store = Date.now() - t0;
+  }
   const sse = {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-store",
@@ -1011,7 +1121,7 @@ async function handle(req: Request): Promise<Response> {
   };
 
   // 0) Owner-approved answer for a common general question: no model call.
-  const canCache = cacheable(parsed) && test !== "no-cache";
+  const canCache = cacheable(parsed) && test !== "no-cache" && !store;
   if (canCache) {
     const hit = await cacheGet(parsed);
     marks.cache = Date.now() - t0;
@@ -1024,7 +1134,7 @@ async function handle(req: Request): Promise<Response> {
 
   // 1) Groq for text questions (skipped when no key, photo, cooldown, or test header no-groq).
   if (!parsed.image && test !== "no-groq" && test !== "limit" && test !== "fail-primary") {
-    const wantSearch = needsSearch(parsed) && test !== "no-search";
+    const wantSearch = !store && needsSearch(parsed) && test !== "no-search";
     let search = wantSearch && await groqSearchRoom();
     if (search) {
       // Shared budget for all users (searches use most of Groq's per-minute tokens).
@@ -1034,7 +1144,7 @@ async function handle(req: Request): Promise<Response> {
       } catch { search = false; }
     }
     const calcTool = needsCalc(parsed.question) && !parsed.talk;
-    let system = systemPrompt(parsed, facts, search, calcTool);
+    let system = systemPrompt(parsed, facts, search, calcTool, store);
     if (wantSearch && !search) {
       system += " IMPORTANT: you cannot check current information for this question right now. Begin by saying " +
         "your information may be out of date and the user should check a trusted source; do not state recent " +
@@ -1049,7 +1159,7 @@ async function handle(req: Request): Promise<Response> {
           ? "⚠️ अभी ताज़ा जानकारी नहीं जाँच पाया, इसलिए यह पुराना हो सकता है। कृपया किसी भरोसेमंद स्रोत से जाँचें या थोड़ी देर बाद फिर पूछें।\n\n"
           : "⚠️ I couldn't check the latest information just now, so this may be out of date. Please confirm with a trusted source or ask again in a minute.\n\n")
         : "";
-      return new Response(relayGroq(live, caution ? undefined : onDone, caution), {
+      return new Response(relayGroq(live, caution ? undefined : onDone, caution, prod), {
         headers: {
           ...sse,
           "x-elric-src": search ? (calcTool ? "g3" : "g2") : calcTool ? "gc" : "g1",
@@ -1062,13 +1172,13 @@ async function handle(req: Request): Promise<Response> {
 
   // 2) Gemini (as before).
   if (!GEMINI_KEY) return json(503, { status: "unavailable" });
-  const system = systemPrompt(parsed, facts);
+  const system = systemPrompt(parsed, facts, false, false, store);
   const a = await callGemini(parsed, system, test, testAuth ? (req.headers.get("x-elric-think") ?? "") : "");
   marks.model = Date.now() - t0;
   if (a.kind === "limit") return json(429, { status: "limit", scope: "provider", retry_after: 600 });
   if (a.kind === "fail") return json(503, { status: "unavailable", code: a.status });
   if (a.kind === "blocked") return json(422, { status: "blocked" });
-  return new Response(relay(a.res, a.model, canCache ? (text) => cacheNote(parsed, device, text, "general") : undefined), {
+  return new Response(relay(a.res, a.model, canCache ? (text) => cacheNote(parsed, device, text, "general") : undefined, prod), {
     headers: {
       ...sse,
       "x-elric-src": "gem", "x-elric-gs": groqLast,

@@ -129,7 +129,8 @@ export function busy(): boolean {
 /** Hard questions (tools, web search) can take longer to start. */
 export const HARD_FIRST_TOKEN_MS = 25000;
 
-export async function ask(body: Body, onText: (piece: string) => void, opts: { firstMs?: number; onSources?: (s: Src[]) => void } = {}): Promise<End> {
+export interface Prod { title: string; brand: string; price: number; mrp?: number; url: string; img: string }
+export async function ask(body: Body, onText: (piece: string) => void, opts: { firstMs?: number; onSources?: (s: Src[]) => void; onProducts?: (p: Prod[]) => void } = {}): Promise<End> {
   const firstMs = opts.firstMs ?? (body.image ? PHOTO_FIRST_TOKEN_MS : FIRST_TOKEN_MS);
   const me = { ctrl: new AbortController(), cancelled: false };
   current = me;
@@ -173,6 +174,12 @@ export async function ask(body: Body, onText: (piece: string) => void, opts: { f
         try { o = JSON.parse(line.slice(5).trim()); } catch { continue; }
         if (typeof o.t === 'string') {
           if (o.t) { if (o.t.trim()) gotFirst = true; onText(o.t); }
+        } else if (Array.isArray(o.prod)) {
+          const ok = (u: unknown) => typeof u === 'string' && /^https:\/\/(elricwatches\.shop|cdn\.shopify\.com)\//.test(u);
+          const list = (o.prod as any[]).filter((x) => x && ok(x.url) && ok(x.img) && Number(x.price) > 0).slice(0, 3)
+            .map((x) => ({ title: String(x.title).slice(0, 140), brand: String(x.brand || '').slice(0, 40), price: Number(x.price),
+              mrp: Number(x.mrp) > Number(x.price) ? Number(x.mrp) : undefined, url: String(x.url), img: String(x.img) }));
+          if (list.length) opts.onProducts?.(list);
         } else if (Array.isArray(o.src)) {
           const list = (o.src as any[]).filter((x) => x && typeof x.u === 'string' && /^https?:\/\//.test(x.u))
             .slice(0, 3).map((x) => ({ u: String(x.u).slice(0, 500), t: String(x.t || '').slice(0, 120) }));

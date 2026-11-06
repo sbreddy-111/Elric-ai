@@ -15,7 +15,7 @@ const defaultMode = (): Mode => { const m = localStorage.getItem('elric.mode'); 
 let mode: Mode = defaultMode();
 let short = localStorage.getItem('elric.length') !== 'long';
 /** A chat turn; photo and file text live only in memory, never in saved chats. */
-type Turn = E.Turn & { photo?: P.Photo; doc?: D.Doc; image?: string; reported?: boolean; sources?: O.Src[]; hard?: boolean };
+type Turn = E.Turn & { photo?: P.Photo; doc?: D.Doc; image?: string; reported?: boolean; sources?: O.Src[]; products?: O.Prod[]; hard?: boolean };
 let turns: Turn[] = [];
 interface Chat { id: string; title: string; mode: Mode; turns: Turn[]; at: number }
 const CHATS_KEY = 'elric.chats';
@@ -99,6 +99,12 @@ function extras(x: Turn, i: number): string {
   let h = '';
   const src = (x.sources || []).filter((s) => /^https?:\/\//.test(s.u) && host(s.u));
   if (src.length && !x.failed) h += `<div class="srcs"><span>${t('sources')}</span>${src.map((s) => `<a href="${esc(s.u)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(s.t || host(s.u))}">${esc(host(s.u))}</a>`).join('')}</div>`;
+  if (x.products?.length && !x.failed) {
+    const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
+    h += `<div class="prods"><div class="prods-h">${t('fromStore')}</div><div class="prods-row">${x.products.map((p) => `<a class="prod" href="${esc(p.url)}" target="_blank" rel="noopener">
+      <img src="${esc(p.img.includes('?') ? p.img : p.img + '?width=360')}" alt="" loading="lazy"><span class="pt">${esc(p.title)}</span>
+      <span class="pp"><b>${inr(p.price)}</b>${p.mrp ? ` <s>${inr(p.mrp)}</s>` : ''}</span><span class="pb">${t('buy')}</span></a>`).join('')}</div></div>`;
+  }
   if (x.hard && x.src === 'offline' && O.age18()) h += `<div class="hint">${t(O.isOn() ? 'hardOfflineOn' : 'hardOfflineOff')}</div>`;
   return h;
 }
@@ -407,7 +413,7 @@ async function answerOnline(reply: Turn, question: string, history: E.Turn[], ph
     if (!reply.firstMs && raw.trim()) reply.firstMs = Math.round(performance.now() - t0);
     reply.text = raw;
     paint(reply);
-  }, { ...(hard && !photo ? { firstMs: O.HARD_FIRST_TOKEN_MS } : {}), onSources: (s) => { reply.sources = s; } });
+  }, { ...(hard && !photo ? { firstMs: O.HARD_FIRST_TOKEN_MS } : {}), onSources: (s) => { reply.sources = s; }, onProducts: (p) => { reply.products = p; } });
   onlineWaiting = false;
   flush();
   O.record(end);
@@ -419,7 +425,7 @@ async function answerOnline(reply: Turn, question: string, history: E.Turn[], ph
     return true;
   }
   // Limit, error, no first word in time or the connection dropped: answer on the device, from the start.
-  reply.text = ''; reply.firstMs = undefined; reply.sources = undefined;
+  reply.text = ''; reply.firstMs = undefined; reply.sources = undefined; reply.products = undefined;
   return false;
 }
 
@@ -857,7 +863,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.14';
+const APP_VERSION = '0.4.15';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
