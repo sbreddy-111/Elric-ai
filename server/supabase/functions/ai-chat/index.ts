@@ -210,7 +210,10 @@ function systemPrompt(r: Req, facts: Fact[], search = false, calcTool = false): 
     s += " If the user asks for a diagram, flowchart, mind map, timeline or process chart, draw it as Mermaid in a " +
       "```mermaid code block (flowchart TD or LR). Every node needs a short id and a quoted label, exactly like: " +
       "A[\"Evaporation\"] --> B[\"Condensation\"], then reuse the id (B --> C[\"Rain\"]). Never write a bare " +
-      "quoted label as a node. Add one or two lines of explanation; otherwise do not add diagrams.";
+      "quoted label as a node. For a timeline use flowchart TD with one box per date and event, never the timeline " +
+      "type. Keep it to 12 nodes or fewer. Add one or two lines of explanation; otherwise do not add diagrams. " +
+      "Never mention Mermaid, code or outside tools to the user; the app draws the diagram and the user can tap it " +
+      "to open it full screen and save it as a picture.";
   }
   s += IMAGES_ON
     ? " You cannot create pictures or photos yourself; the app makes them when the user writes a request like " +

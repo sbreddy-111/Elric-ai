@@ -30,7 +30,15 @@ export function sized(svg: string): string {
   if (!vb) return svg;
   const w = Math.round(+vb[1]), h = Math.round(+vb[2]);
   return svg.replace(/<svg\b([^>]*)>/, (_m, a: string) =>
-    `<svg${a.replace(/\s(width|height|style)="[^"]*"/g, '')} width="${w}" height="${h}" style="width:${Math.max(w, 260)}px;max-width:100%;height:auto;aspect-ratio:${w} / ${h}">`);
+    {
+      // Medium size: at most 360 px tall in the chat (tap opens it full screen). Very wide diagrams keep readable
+      // text and scroll sideways instead of shrinking to a strip.
+      let dw = Math.min(w, Math.round((360 * w) / h));
+      const wide = dw > 600;
+      if (wide) dw = Math.max(420, Math.round(dw * 0.6));
+      dw = Math.max(dw, Math.min(w, 160));
+      return `<svg${a.replace(/\s(width|height|style)="[^"]*"/g, '')} width="${w}" height="${h}" style="width:${dw}px;${wide ? 'max-width:none' : 'max-width:100%'};height:auto;aspect-ratio:${w} / ${h}">`;
+    });
 }
 
 /** Small models often write flowchart nodes as bare "Label" strings, which Mermaid rejects: give each one an id. */
