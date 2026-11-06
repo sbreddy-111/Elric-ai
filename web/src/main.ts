@@ -57,7 +57,8 @@ function md(src: string): string {
   src = src.replace(/(^|\n)[ \t]*```[ \t]*([\w+-]*)[^\n]*\n([\s\S]*?)(?:\n[ \t]*```[ \t]*(?=\n|$)|$)/g, (all, pre, lang, code) => {
     const closed = /```[ \t]*$/.test(all.trimEnd()) && all.trimEnd().length > all.indexOf('```') + 3 + lang.length;
     const c = esc(code.replace(/\n[ \t]*```[ \t]*$/, ''));
-    blocks.push(lang.toLowerCase() === 'mermaid' && closed
+    const isMmd = lang.toLowerCase() === 'mermaid' || (/^(|text|plain|mmd|code)$/i.test(lang) && /^\s*(flowchart|graph|sequenceDiagram|pie|mindmap|timeline|classDiagram|stateDiagram|erDiagram|journey)\b/.test(code));
+    blocks.push(isMmd && closed
       ? `<div class="mmd"><pre class="code"><code>${c}</code></pre></div>`
       : `<pre class="code"><code>${c}</code></pre>`);
     return `${pre}\u0003${blocks.length - 1}\u0003\n`;
@@ -807,7 +808,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.8';
+const APP_VERSION = '0.4.9';
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
   ['Elric Lite model weights (open model)', 'Apache License 2.0', 'https://www.apache.org/licenses/LICENSE-2.0'],
