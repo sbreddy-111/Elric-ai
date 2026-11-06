@@ -818,7 +818,7 @@ function pickSources(live: GroqLive): Source[] {
   return out;
 }
 
-function relayGroq(live: GroqLive, onDone?: (text: string, searched: boolean) => void): ReadableStream<Uint8Array> {
+function relayGroq(live: GroqLive, onDone?: (text: string, searched: boolean) => void, prefix = ""): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
   const send = (c: ReadableStreamDefaultController<Uint8Array>, o: unknown) =>
     c.enqueue(enc.encode(`data: ${JSON.stringify(o)}\n\n`));
@@ -828,6 +828,8 @@ function relayGroq(live: GroqLive, onDone?: (text: string, searched: boolean) =>
   return new ReadableStream({
     async start(c) {
       try {
+        // Fixed caution line when a fresh-facts question could not be searched (the model alone may state old facts).
+        if (prefix) send(c, { t: prefix });
         while (true) {
           for (const p of live.pending.splice(0)) {
             const t = filter(p);
@@ -1038,7 +1040,12 @@ async function handle(req: Request): Promise<Response> {
     marks.groq = Date.now() - t0;
     if (live) {
       const onDone = canCache ? (text: string, searched: boolean) => cacheNote(parsed, device, text, searched ? "search" : "general") : undefined;
-      return new Response(relayGroq(live, onDone), {
+      const caution = wantSearch && !search
+        ? (parsed.lang === "hi"
+          ? "⚠️ अभी ताज़ा जानकारी नहीं जाँच पाया, इसलिए यह पुराना हो सकता है। कृपया किसी भरोसेमंद स्रोत से जाँचें या थोड़ी देर बाद फिर पूछें।\n\n"
+          : "⚠️ I couldn't check the latest information just now, so this may be out of date. Please confirm with a trusted source or ask again in a minute.\n\n")
+        : "";
+      return new Response(relayGroq(live, caution ? undefined : onDone, caution), {
         headers: {
           ...sse,
           "x-elric-src": search ? (calcTool ? "g3" : "g2") : calcTool ? "gc" : "g1",
