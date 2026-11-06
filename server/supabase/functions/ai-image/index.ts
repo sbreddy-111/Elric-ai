@@ -79,7 +79,7 @@ function blocked(p: string) { return BLOCK.test(p); }
 
 /** Turns a Hindi/Telugu/Hinglish prompt into a short English image prompt (best effort). */
 async function toEnglish(p: string): Promise<string> {
-  if (!/[\u0900-\u0DFF]/.test(p) || !GROQ_KEY) return p;
+  if ((!/[\u0900-\u0DFF]/.test(p) && !/\. Change: /.test(p)) || !GROQ_KEY) return p;
   try {
     const r = await fetch(GROQ_URL, {
       method: "POST",
@@ -87,7 +87,7 @@ async function toEnglish(p: string): Promise<string> {
       body: JSON.stringify({
         model: "openai/gpt-oss-20b", temperature: 0, reasoning_effort: "low", include_reasoning: false, max_completion_tokens: 200,
         messages: [
-          { role: "system", content: "Translate the user's image request into one short English image description. Reply with the description only." },
+          { role: "system", content: "Turn the user's image request into one short English image description. If it has a 'Change:' part, apply that change to the earlier request (for example a village style means a rural Indian village scene). Reply with the description only." },
           { role: "user", content: p },
         ],
       }),
@@ -150,7 +150,11 @@ async function handle(req: Request): Promise<Response> {
     }
   } catch { return json(503, { status: "unavailable" }); }
 
-  const english = await toEnglish(prompt);
+  let english = await toEnglish(prompt);
+  // Elric AI is for India: scenes with people or places default to an Indian setting unless another place is named.
+  const PEOPLE = /\b(child|children|kid|kids|boy|girl|man|men|woman|women|people|person|family|student|teacher|farmer|school|village|street|market|city|town|house|home|classroom|festival|wedding|shop)s?\b/i;
+  const ELSEWHERE = /\b(america|american|usa|europe|european|england|london|paris|japan|japanese|china|chinese|africa|african|korea|russia|germany|france|italy|spain|canada|australia|mexico|arab|dubai|western|space|moon|mars|fantasy|cartoon of)\b/i;
+  if (PEOPLE.test(english) && !ELSEWHERE.test(english) && !/\bindia/i.test(english)) english += ", set in India with Indian people and surroundings, natural and realistic";
   if (blocked(english)) return json(422, { status: "blocked" });
   try {
     const r = await fetch(`${CF_BASE}/accounts/${CF_ACCOUNT}/ai/run/${MODEL}`, {

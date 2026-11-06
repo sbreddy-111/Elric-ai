@@ -15,7 +15,7 @@ const defaultMode = (): Mode => { const m = localStorage.getItem('elric.mode'); 
 let mode: Mode = defaultMode();
 let short = localStorage.getItem('elric.length') !== 'long';
 /** A chat turn; photo and file text live only in memory, never in saved chats. */
-type Turn = E.Turn & { photo?: P.Photo; doc?: D.Doc; image?: string; reported?: boolean; sources?: O.Src[]; products?: O.Prod[]; hard?: boolean };
+type Turn = E.Turn & { photo?: P.Photo; doc?: D.Doc; image?: string; reported?: boolean; sources?: O.Src[]; products?: O.Prod[]; imgPrompt?: string; hard?: boolean };
 let turns: Turn[] = [];
 interface Chat { id: string; title: string; mode: Mode; turns: Turn[]; at: number }
 const CHATS_KEY = 'elric.chats';
@@ -469,7 +469,7 @@ async function answerImage(reply: Turn, text: string) {
   const end = await O.makeImage(text, getLang());
   onlineWaiting = false; waitLabel = 'gettingOnline';
   flush();
-  if (end.kind === 'ok') { reply.image = end.url; reply.text = t('imageDone'); reply.src = 'online'; reply.ms = Math.round(performance.now() - t0); return; }
+  if (end.kind === 'ok') { reply.image = end.url; reply.imgPrompt = text.slice(0, 450); reply.text = t('imageDone'); reply.src = 'online'; reply.ms = Math.round(performance.now() - t0); return; }
   reply.failed = true;
   reply.text = t(end.kind === 'blocked' ? 'imageBlocked' : end.kind === 'limit' ? 'imageLimit' : end.kind === 'stopped' ? 'stopped' : 'imageFailed');
 }
@@ -485,7 +485,12 @@ async function send(text: string, photo: P.Photo | null = null, newDoc: D.Doc | 
   const hard = !photo && isHard(text);
   turns.push(photo ? { role: 'user', text, photo } : newDoc ? { role: 'user', text, doc: newDoc } : { role: 'user', text });
   const online = O.ready();
-  const wantsImage = !photo && !newDoc && !talk && isImageRequest(text);
+  // Right after a picture, a short change ("in village style", "make it night") makes a new picture with that change.
+  const lastModel = [...turns].reverse().find((x) => x.role === 'model');
+  const ASK_ABOUT = /^\s*(what|why|who|how|explain|describe|tell me|is |are |does |do |which|kya|kaun|kyun|क्या|कौन|क्यों)/i;
+  const imgEdit = !photo && !newDoc && !talk && !!lastModel?.image && !!lastModel.imgPrompt && text.length < 220 && !ASK_ABOUT.test(text)
+    && !isImageRequest(text) ? `${lastModel.imgPrompt}. Change: ${text}` : '';
+  const wantsImage = !photo && !newDoc && !talk && (isImageRequest(text) || !!imgEdit);
   if (!E.isLoaded() && !online && !wantsImage) { renderMain(); return null; } // status card explains what's needed; never fake an answer
   busy = true;
   stopRequested = false;
@@ -493,7 +498,8 @@ async function send(text: string, photo: P.Photo | null = null, newDoc: D.Doc | 
   turns.push(reply);
   shell();
   let final = false;
-  if (!photo && !doc && !talk && isImageRequest(text)) { await answerImage(reply, text); final = true; }
+  if (!photo && !talk && imgEdit) { await answerImage(reply, imgEdit.slice(0, 480)); final = true; }
+  else if (!photo && !doc && !talk && isImageRequest(text)) { await answerImage(reply, text); final = true; }
   if (!final && online) final = await answerOnline(reply, text, history, photo, doc, hard);
   // Photos can't fall back to the device, and hard questions are much better online: try online once more first.
   if (!final && (photo || hard) && online && !stopRequested && O.ready()) final = await answerOnline(reply, text, history, photo, doc, hard);
@@ -863,7 +869,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.16';
+const APP_VERSION = '0.4.17';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
