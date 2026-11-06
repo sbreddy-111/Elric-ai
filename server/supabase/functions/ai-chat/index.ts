@@ -232,7 +232,7 @@ export function wantsWatch(r: { question: string; history: { text: string }[]; m
 }
 
 /** Picks up to 3 in-stock watches that fit the budget, who it is for and the style asked. */
-export function pickWatches(items: Product[], text: string): { list: Product[]; budget: number } {
+export function pickWatches(items: Product[], text: string, skip: Set<string> = new Set()): { list: Product[]; budget: number } {
   const q = text.toLowerCase().replace(/,/g, "");
   let budget = 0;
   const k = q.match(/(\d+(?:\.\d+)?)\s*(k\b|thousand|hazaar|hazar|हज़ार|हजार)/);
@@ -248,6 +248,7 @@ export function pickWatches(items: Product[], text: string): { list: Product[]; 
   const brands = [...new Set(items.map((p) => p.brand.toLowerCase()))].filter((b) => b && q.includes(b));
   const scored = items.map((p) => {
     const t = (p.title + " " + p.tags).toLowerCase();
+    if (skip.has(p.url)) return null;
     if (budget && p.price > budget * 1.05) return null;
     const isKid = /kids'?|for-kids/.test(t), isW = /women'?s|ladies/.test(t), isM = /\bmen'?s/.test(t);
     if (who === "kid" && !isKid) return null;
@@ -273,7 +274,12 @@ export function pickWatches(items: Product[], text: string): { list: Product[]; 
 }
 
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
-function storeNote(list: Product[], budget: number): string {
+const MORE_RE = /\b(more|other|others|another|else|different|next|aur|dusra|dusre|doosre)\b|और|दूसरी|दूसरे/i;
+function storeNote(list: Product[], budget: number, more = false): string {
+  if (!list.length && more) {
+    return " The user asked for more watches, but Elric Watches has no other in-stock watch matching this request; say so briefly and suggest a " +
+      "different budget, style or brand. Do not invent products or prices.";
+  }
   if (!list.length) {
     return " Elric Watches (elricwatches.shop, the founder's own watch store) has no in-stock watch matching this request right now; say so briefly, " +
       "suggest changing the budget or style, and do not invent products or prices.";
@@ -282,8 +288,9 @@ function storeNote(list: Product[], budget: number): string {
     `(current store prices${budget ? `, budget ${inr(budget)}` : ""}): ` +
     list.map((p, i) => `${i + 1}. ${p.title} — ${p.brand} — ${inr(p.price)}${p.mrp ? ` (MRP ${inr(p.mrp)})` : ""}.`).join(" ") +
     " Recommend exactly these, one short line each on why it suits the user, with its price. Say once, plainly, that they are from Elric Watches, our own store, " +
-    "and that the Buy buttons below open the store. Never invent other products, prices, discounts or delivery promises. If the user has not said a budget " +
-    "or who it is for, also ask that in one short line.";
+    "and that the Buy buttons below open the store. Never invent other products, prices, discounts or delivery promises. " +
+    (more ? "The user asked for more options: these are new ones, different from before. Show them directly; do not ask questions again."
+      : "If the user has not said a budget or who it is for, add one short question about that at the end, after the watches.");
 }
 
 function systemPrompt(r: Req, facts: Fact[], search = false, calcTool = false, store = ""): string {
@@ -1107,9 +1114,12 @@ async function handle(req: Request): Promise<Response> {
     const items = await storeCatalog();
     if (items.length) {
       const ctx = [...parsed.history.filter((t) => t.role === "user").slice(-3).map((t) => t.text), parsed.question].join(" ");
-      const pick = pickWatches(items, ctx);
+      const more = MORE_RE.test(parsed.question) && parsed.history.some((t) => t.role === "model");
+      const said = parsed.history.filter((t) => t.role === "model").map((t) => t.text.toLowerCase()).join(" ");
+      const skip = new Set(more ? items.filter((p) => said.includes(p.title.toLowerCase().slice(0, 28))).map((p) => p.url) : []);
+      const pick = pickWatches(items, ctx, skip);
       prod = pick.list.map((p) => ({ ...p, tags: "" }));
-      store = storeNote(pick.list, pick.budget);
+      store = storeNote(pick.list, pick.budget, more);
     }
     marks.store = Date.now() - t0;
   }
