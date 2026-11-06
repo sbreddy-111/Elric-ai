@@ -7,7 +7,7 @@ export const SB_URL = 'https://hqsqpiwmozgsxiizhaml.supabase.co';
 const CHAT_URL = `${SB_URL}/functions/v1/ai-chat`;
 const IMAGE_URL = `${SB_URL}/functions/v1/ai-image`;
 /** Image making stays off until the owner stores CF_AI_TOKEN/CF_ACCOUNT_ID and ai-image is deployed (see server/SMART_FEATURES_DEPLOY.md). */
-export const IMAGES_ON = false;
+export const IMAGES_ON = true;
 /** Public by design (the same publishable key the Android app ships). */
 export const CHAT_KEY = 'sb_publishable_Yv1D_ZUk38W3-ZvYdoAD8A_-fx5gPCT';
 
