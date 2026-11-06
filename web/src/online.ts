@@ -213,15 +213,15 @@ export type ImageEnd =
   | { kind: 'failed'; reason: string };
 
 /** Asks the server to make one picture. Nothing is stored there; the image comes back as a data URL. */
-export async function makeImage(prompt: string, lang: 'en' | 'hi'): Promise<ImageEnd> {
+export async function makeImage(prompt: string, lang: 'en' | 'hi', ref?: { mime: string; data: string }): Promise<ImageEnd> {
   const me = { ctrl: new AbortController(), cancelled: false };
   current = me;
-  const dog = setTimeout(() => me.ctrl.abort(), 60000);
+  const dog = setTimeout(() => me.ctrl.abort(), 75000);
   try {
     const res = await fetch(IMAGE_URL, {
       method: 'POST',
       headers: { apikey: CHAT_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device: deviceId(), prompt: prompt.slice(0, 500), lang }),
+      body: JSON.stringify({ device: deviceId(), prompt: prompt.slice(0, 500), lang, ...(ref ? { image: ref.data, mime: ref.mime } : {}) }),
       signal: me.ctrl.signal,
       cache: 'no-store',
     });

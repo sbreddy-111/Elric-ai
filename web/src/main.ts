@@ -461,12 +461,12 @@ async function answerOffline(reply: E.Turn, history: E.Turn[]) {
 }
 
 /** "Make an image of …": one picture from the server (Online answers only). */
-async function answerImage(reply: Turn, text: string) {
+async function answerImage(reply: Turn, text: string, ref?: { mime: string; data: string }) {
   if (!O.IMAGES_ON) { reply.text = t('imageSoon'); reply.failed = true; return; }
   if (!O.isOn() || !O.ready()) { reply.text = t(O.isOn() ? 'imageUnavailable' : 'imageNeedsOnline'); reply.failed = true; return; }
   const t0 = performance.now();
   waitLabel = 'makingImage'; onlineWaiting = true; paint(reply);
-  const end = await O.makeImage(text, getLang());
+  const end = await O.makeImage(text, getLang(), ref);
   onlineWaiting = false; waitLabel = 'gettingOnline';
   flush();
   if (end.kind === 'ok') { reply.image = end.url; reply.imgPrompt = text.slice(0, 450); reply.text = t('imageDone'); reply.src = 'online'; reply.ms = Math.round(performance.now() - t0); return; }
@@ -490,7 +490,11 @@ async function send(text: string, photo: P.Photo | null = null, newDoc: D.Doc | 
   const ASK_ABOUT = /^\s*(what|why|who|how|explain|describe|tell me|is |are |does |do |which|kya|kaun|kyun|क्या|कौन|क्यों)/i;
   const imgEdit = !photo && !newDoc && !talk && !!lastModel?.image && !!lastModel.imgPrompt && text.length < 220 && !ASK_ABOUT.test(text)
     && !isImageRequest(text) ? `${lastModel.imgPrompt}. Change: ${text}` : '';
-  const wantsImage = !photo && !newDoc && !talk && (isImageRequest(text) || !!imgEdit);
+  // A photo plus "edit / change / make it …" edits that photo (Online only).
+  const PHOTO_EDIT = /\b(edit|change|turn|convert|transform|add|remove|replace|background|cartoon|anime|sketch|painting|style|make (this|it|him|her|me|us|them))\b|बदलो|बदल दो|हटाओ|जोड़ो/i;
+  const photoEdit = !!photo && !talk && (isImageRequest(text) || PHOTO_EDIT.test(text)) && !ASK_ABOUT.test(text);
+  const prevRef = imgEdit && lastModel?.image ? (() => { const mm = lastModel.image!.match(/^data:(image\/\w+);base64,(.+)$/); return mm ? { mime: mm[1], data: mm[2] } : undefined; })() : undefined;
+  const wantsImage = (!photo && !newDoc && !talk && (isImageRequest(text) || !!imgEdit)) || photoEdit;
   if (!E.isLoaded() && !online && !wantsImage) { renderMain(); return null; } // status card explains what's needed; never fake an answer
   busy = true;
   stopRequested = false;
@@ -498,7 +502,8 @@ async function send(text: string, photo: P.Photo | null = null, newDoc: D.Doc | 
   turns.push(reply);
   shell();
   let final = false;
-  if (!photo && !talk && imgEdit) { await answerImage(reply, imgEdit.slice(0, 480)); final = true; }
+  if (photoEdit && photo) { await answerImage(reply, text, { mime: photo.mime, data: photo.data }); final = true; }
+  else if (!photo && !talk && imgEdit) { await answerImage(reply, imgEdit.slice(0, 480), prevRef); final = true; }
   else if (!photo && !doc && !talk && isImageRequest(text)) { await answerImage(reply, text); final = true; }
   if (!final && online) final = await answerOnline(reply, text, history, photo, doc, hard);
   // Photos can't fall back to the device, and hard questions are much better online: try online once more first.
@@ -869,7 +874,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.17';
+const APP_VERSION = '0.4.18';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [

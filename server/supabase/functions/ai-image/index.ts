@@ -1,6 +1,6 @@
 // Elric AI image making (Supabase Edge Function, Deno). NOT DEPLOYED until the smart-features merge.
 //
-// POST JSON (apikey header = the app's publishable/anon key):  { device, prompt, lang?: 'en'|'hi' }
+// POST JSON (apikey header = the app's publishable/anon key):  { device, prompt, lang?: 'en'|'hi', image?: base64, mime? } (image = photo to edit)
 // 200 {status:'ok', mime:'image/jpeg', data:<base64>}          (nothing is stored)
 // 400 bad_request · 401 unauthorized · 422 {status:'blocked'} (prompt not allowed)
 // 429 {status:'limit', scope:'device'|'ip'|'daily', retry_after} · 503 {status:'unavailable'}
@@ -20,11 +20,13 @@ const CF_TOKEN = (Deno.env.get("CF_AI_TOKEN") ?? "").trim().replace(/^Bearer\s+/
 const CF_BASE = Deno.env.get("CF_API_BASE") ?? "https://api.cloudflare.com/client/v4";
 const GROQ_KEY = (Deno.env.get("GROQ_API_KEY") ?? "").trim().replace(/^Bearer\s+/i, "");
 const GROQ_URL = Deno.env.get("GROQ_API_URL") ?? "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "@cf/black-forest-labs/flux-1-schnell";
+const MODEL = "@cf/black-forest-labs/flux-2-klein-4b"; // better quality; can edit a given photo
+const FALLBACK = "@cf/black-forest-labs/flux-1-schnell";
+const MAX_REF = 1_600_000; // base64 of a reference photo
 
-const DEVICE_HOUR = 5, DEVICE_DAY = 10, IP_HOUR = 10, IP_DAY = 20, ALL_HOUR = 40, ALL_DAY = 100;
+const DEVICE_HOUR = 5, DEVICE_DAY = 10, IP_HOUR = 10, IP_DAY = 20, ALL_HOUR = 30, ALL_DAY = 70; // free daily allowance fits about 80 klein-4b pictures
 const MAX_PROMPT = 500;
-const TIMEOUT_MS = 45_000;
+const TIMEOUT_MS = 50_000;
 
 const PUBLIC_KEYS = (() => {
   const keys = new Set<string>();
@@ -87,7 +89,7 @@ async function toEnglish(p: string): Promise<string> {
       body: JSON.stringify({
         model: "openai/gpt-oss-20b", temperature: 0, reasoning_effort: "low", include_reasoning: false, max_completion_tokens: 300,
         messages: [
-          { role: "system", content: "Turn the user's image request into one clear English image description of at most 60 words for an image model. Keep every detail the user asked for. If it has a 'Change:' part, apply that change to the earlier request (for example village style means a rural Indian village scene). If a company, shop, brand or person's business name is mentioned, the picture must show that name written exactly and clearly on a sign, logo wall or board (for example: a large sign reading \"ELRIC\"). Anything named Elric (Elric AI, Elric Watches, Elric office) is an Indian startup brand with black and gold colours. Reply with the description only." },
+          { role: "system", content: "Turn the user's image request into one clear English image description of at most 60 words for an image model. Keep every detail the user asked for. If it has a 'Change:' part, apply that change to the earlier request (for example village style means a rural Indian village scene). If a company, shop, brand or person's business name is mentioned, the picture must show that name written exactly and clearly on a sign, logo wall or board (for example: a large sign reading \"ELRIC\"). Anything named Elric (Elric AI, Elric Watches, Elric office) is an Indian startup brand with black and gold colours. If it starts with EDIT, the user has given a picture to change: write only a short instruction for the edit (for example: Change the background to a beach at sunset, keep the person the same). Reply with the description only." },
           { role: "user", content: p },
         ],
       }),
@@ -128,7 +130,7 @@ async function handle(req: Request): Promise<Response> {
   let body: any;
   try {
     const raw = await req.text();
-    if (raw.length > 8000) return json(413, { status: "too_large" });
+    if (raw.length > MAX_REF + 8000) return json(413, { status: "too_large" });
     body = JSON.parse(raw);
   } catch { return json(400, { status: "bad_request" }); }
   const device = clean(body?.device, 128);
@@ -137,6 +139,8 @@ async function handle(req: Request): Promise<Response> {
   if (prompt.length < 3) return json(400, { status: "bad_request", field: "prompt" });
   if (blocked(prompt)) return json(422, { status: "blocked" });
   if (!CF_ACCOUNT || !CF_TOKEN) return json(503, { status: "unavailable" });
+  const ref = typeof body?.image === "string" && body.image.length > 100 && body.image.length <= MAX_REF && /^[A-Za-z0-9+/=]+$/.test(body.image.slice(0, 400))
+    ? { data: body.image as string, mime: /^image\/(jpeg|png|webp)$/.test(body?.mime) ? body.mime as string : "image/jpeg" } : null;
 
   const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
   try {
@@ -150,19 +154,21 @@ async function handle(req: Request): Promise<Response> {
     }
   } catch { return json(503, { status: "unavailable" }); }
 
-  let english = await toEnglish(prompt);
+  let english = await toEnglish(ref ? `EDIT the given picture. ${prompt}` : prompt);
   // Elric AI is for India: scenes with people or places default to an Indian setting unless another place is named.
   const PEOPLE = /\b(child|children|kid|kids|boy|girl|man|men|woman|women|people|person|family|student|teacher|farmer|school|village|street|market|city|town|house|home|classroom|festival|wedding|shop)s?\b/i;
   const ELSEWHERE = /\b(america|american|usa|europe|european|england|london|paris|japan|japanese|china|chinese|africa|african|korea|russia|germany|france|italy|spain|canada|australia|mexico|arab|dubai|western|space|moon|mars|fantasy|cartoon of)\b/i;
-  if (PEOPLE.test(english) && !ELSEWHERE.test(english) && !/\bindia/i.test(english)) english += ", set in India with Indian people and surroundings, natural and realistic";
+  if (!ref && PEOPLE.test(english) && !ELSEWHERE.test(english) && !/\bindia/i.test(english)) english += ", set in India with Indian people and surroundings, natural and realistic";
   if (blocked(english)) return json(422, { status: "blocked" });
   try {
-    const r = await fetch(`${CF_BASE}/accounts/${CF_ACCOUNT}/ai/run/${MODEL}`, {
+    const run = (model: string) => fetch(`${CF_BASE}/accounts/${CF_ACCOUNT}/ai/run/${model}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${CF_TOKEN}` },
-      body: JSON.stringify({ prompt: english, steps: 4 }),
+      body: JSON.stringify({ prompt: english, steps: 4, ...(ref ? { image: ref.data, mime: ref.mime } : {}) }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
+    let r = await run(MODEL);
+    if (!r.ok && !ref && r.status !== 400) { console.log(`ai-image main status ${r.status}, trying fallback`); r = await run(FALLBACK); }
     if (!r.ok) {
       console.log(`ai-image provider status ${r.status}`); // status only, never the prompt
       if (r.status === 429) return json(429, { status: "limit", scope: "daily", retry_after: 3600 });
