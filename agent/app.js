@@ -198,6 +198,11 @@
     mlBtn.classList.toggle('set', i !== 0);
   };
   document.querySelectorAll('.chip').forEach((b) => b.onclick = () => send(b.dataset.t));
+  // Opened from the Elric AI app: ?lang=hi|te sets the mic language, ?q= starts that task.
+  const qs = new URLSearchParams(location.search);
+  const ql = ML.findIndex((x) => x[0].startsWith(qs.get('lang') || '-'));
+  if (ql > 0) { speechLang = ML[ql][0]; mlBtn.textContent = ML[ql][1]; mlBtn.classList.add('set'); }
+  if (qs.get('q')) setTimeout(() => send(qs.get('q').slice(0, 200)), 50);
   let rec = null;
   const form = $('#f');
   const sync = () => form.classList.toggle('typed', !!q.value.trim() && !rec);
