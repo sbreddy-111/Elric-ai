@@ -274,7 +274,7 @@ html.pwa .composer{margin-bottom:6px}
 html.narrow .tile{font-size:14.5px;min-height:64px;padding:12px 10px}
 
 /* Keyboard open (any browser mode): pin the app to the visible area so the composer stays above the keyboard */
-html.kb #app{position:fixed;top:0;left:0;right:0;bottom:auto;height:var(--app-h);margin:0 auto;padding-bottom:0}
+html.kb #app,html.pwa.kb #app{position:fixed;top:var(--app-top,0px);left:0;right:0;bottom:auto;height:var(--app-h);margin:0 auto;padding-bottom:0}
 html.kb body{overflow:hidden}
 
 /* Elric Agent card inside the chat */

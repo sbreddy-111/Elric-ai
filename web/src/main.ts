@@ -309,7 +309,7 @@ async function mandiText(crop: string, place: string): Promise<string> {
     rows = rows.filter((x) => Number(x.modal_price) > 0).sort((a, b) => Number(b.modal_price) - Number(a.modal_price)).slice(0, 3);
     if (!rows.length) return t('agNoPrice');
     const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-    return `**${t('agPriceHead', { c: crop })}**\n${other ? t('agOtherMarkets', { p: place }) + '\n' : ''}\n` + rows.map((x) => { const q = Number(x.modal_price); return `- ${x.market} (${x.district}): **${inr(q / 100)}/kg** · ${inr(q)}/${t('agQuintal')} · ${x.arrival_date}`; }).join('\n') + `\n\n_${t('agSource')}_`;
+    return `**${t('agPriceHead', { c: crop })}**\n${other ? t('agOtherMarkets', { p: place }) + '\n' : ''}\n` + rows.map((x) => { const q = Number(x.modal_price); return `- ${x.market} (${x.district}): **${inr(q / 100)}/kg** · ${inr(q)}/${t('agQuintal')} · ${x.arrival_date}`; }).join('\n') + `\n\n${t('agSource')}`;
   } catch { return t('agPriceFail'); }
 }
 
@@ -1137,7 +1137,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.28';
+const APP_VERSION = '0.4.29';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
