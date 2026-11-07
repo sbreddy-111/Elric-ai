@@ -13,6 +13,7 @@ export type Feedback = {
   question: string | null; answer: string | null; note: string | null; review_status: string;
   ai_verdict: string | null; ai_sources: unknown; reviewed_at: string | null;
   duplicate_of?: string | null; recheck_count?: number;
+  draft_fact?: string | null; draft_source?: string | null; draft_news?: boolean | null;
 };
 export type Fact = {
   id: number; updated_at: string; topic: string | null; fact: string; lang: string | null;

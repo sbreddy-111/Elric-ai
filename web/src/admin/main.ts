@@ -438,6 +438,7 @@ const drawerHead = (title: string) => `<div class="d-head"><h3>${esc(title)}</h3
 async function approveRow(row: Feedback, fact: string, expires: string | null, topic = 'general') {
   const lang = /[\u0900-\u097F]/.test(fact + (row.question || '')) ? 'hi' : 'en';
   const src = links(row.ai_sources);
+  if (row.draft_source && /^https:\/\//i.test(row.draft_source) && !src.includes(row.draft_source)) src.push(row.draft_source);
   await rest('ai_facts', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({
     topic, fact, lang, active: true, source: 'manual', expires_at: expires,
     sources: { sources: src.map((uri) => ({ uri })), from_feedback: row.id, approved_by: 'admin', ...(expires ? { time_sensitive: true } : {}) },
@@ -664,10 +665,13 @@ async function viewReview() {
     drawBulk();
   };
   const card = (r: Feedback) => {
-    const sug = suggestedFact(r.ai_verdict);
+    const draft = (r.draft_fact || '').trim();
+    const sug = draft || suggestedFact(r.ai_verdict);
     const err = isError(r.kind);
     const rep = repeats.get(r.id) || 0;
-    const news = isNewsVerdict(r.ai_verdict);
+    const news = isNewsVerdict(r.ai_verdict) || !!(draft && r.draft_news);
+    const dsrc = draft && r.draft_source && /^https:\/\//i.test(r.draft_source) ? r.draft_source : '';
+    let dhost = ''; try { dhost = dsrc ? new URL(dsrc).hostname.replace(/^www\./, '') : ''; } catch { dhost = ''; }
     const vt = r.ai_verdict && !/^No question shared/.test(r.ai_verdict) ? verdictText(r.ai_verdict) : '';
     return `<article class="rcard ${selected.has(r.id) ? 'sel' : ''}" data-id="${esc(r.id)}">
       <header>
@@ -680,7 +684,8 @@ async function viewReview() {
       ${r.note ? `<div class="note"><span class="lbl">${icon('chat')} User says</span><p>${esc(r.note)}</p></div>` : ''}
       ${vt ? `<div class="verdict"><span class="lbl">${icon('shield')} Checker</span><p>${esc(vt)}</p>${links(r.ai_sources).length ? linkList(r.ai_sources) : ''}</div>` : ''}
       ${!err && !selectMode ? `<div class="approve">
-        <div class="lbl-row"><label for="f-${esc(r.id)}">Correct fact to add ${sug ? '<span class="tag">Suggested</span>' : ''}</label><span class="counter" id="c-${esc(r.id)}">${sug.length}/300</span></div>
+        ${draft ? `<p class="draft-note">${icon('sparkle')}<span>Draft — check before approving</span>${dhost ? `<a href="${esc(dsrc)}" target="_blank" rel="noopener noreferrer">${icon('link')}${esc(dhost)}</a>` : ''}</p>` : ''}
+        <div class="lbl-row"><label for="f-${esc(r.id)}">Correct fact to add ${sug && !draft ? '<span class="tag">Suggested</span>' : ''}</label><span class="counter" id="c-${esc(r.id)}">${sug.length}/300</span></div>
         <textarea id="f-${esc(r.id)}" rows="3" maxlength="300" placeholder="Write one short, correct sentence…">${esc(sug)}</textarea>
         <label class="check sm"><input type="checkbox" class="newsck" ${news ? 'checked' : ''}> News / changes over time — switch off after ${NEWS_DAYS} days</label>
       </div>` : ''}

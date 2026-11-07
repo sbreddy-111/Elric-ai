@@ -422,3 +422,7 @@ a.kpi:active{transform:scale(.99)}
 .crow .ca{white-space:pre-wrap;word-wrap:break-word;font-size:14px;line-height:1.55;background:var(--s2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;max-height:260px;overflow:auto}
 .crow .cbtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .crow .cbtns .btn{min-height:44px}
+
+.draft-note{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 6px;font-size:12px;font-weight:600;color:var(--gold)}
+.draft-note svg{width:14px;height:14px;flex:none}
+.draft-note a{display:inline-flex;align-items:center;gap:4px;font-weight:500;color:inherit;opacity:.85;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
