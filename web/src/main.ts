@@ -184,7 +184,7 @@ function shell() {
   <header class="top">
     <button class="icon" id="menu" aria-label="${t('cdMenu')}">${svg(ic.menu)}</button>
     <button class="modebtn" id="modebtn" aria-label="${t('cdMode')}">Elric AI · <b>${t(modeKey[mode])}</b>${svg(ic.down)}</button>
-    <button class="lang" id="lang">${getLang() === 'en' ? 'हिं' : 'EN'}</button>
+    <button class="lang" id="lang" aria-label="${t('menuLanguage')}">${({ en: 'EN', te: 'తె', hi: 'हिं' } as Record<string, string>)[getLang()]}</button>
     <button class="icon" id="newc" aria-label="${t('cdNewChat')}">${svg(ic.newc)}</button>
   </header>
   <div class="pill ${O.isOn() ? 'online' : ''}"><i></i>${!O.isOn() ? t('privacyOnDevice') : mode === 'shopping' ? t('privacyOnline') : t('pillOnline')}</div>
@@ -199,7 +199,7 @@ function shell() {
   </form>`;
   $('#menu').onclick = openDrawer;
   $('#modebtn').onclick = modeSheet;
-  $('#lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
+  $('#lang').onclick = () => { setLang(({ en: 'te', te: 'hi', hi: 'en' } as const)[getLang()]); shell(); };
   $('#newc').onclick = () => openChat(undefined);
   $('#snap').onclick = pickAttach;
   $<HTMLInputElement>('#file').onchange = onPhotoPicked;
@@ -324,51 +324,92 @@ async function mandiText(crop: string, place: string): Promise<string> {
   } catch { return t('agPriceFail'); }
 }
 
+// ---------------------------------------------------------------- look (light is the default since 0.4.31)
+const theme = (): 'light' | 'dark' => (localStorage.getItem('elric.theme') === 'dark' ? 'dark' : 'light');
+function setTheme(v: 'light' | 'dark') {
+  try { localStorage.setItem('elric.theme', v); } catch { /* storage blocked */ }
+  applyTheme();
+}
+function applyTheme() {
+  const v = theme();
+  document.documentElement.dataset.theme = v;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', v === 'light' ? '#F7F2E7' : '#0F0F12');
+}
+applyTheme();
+
 /** General-mode Home: greeting, a live Today price card, big task tiles (open Elric Agent on that task),
  *  then the old suggestions as small chips. */
 function homeGeneral(m: HTMLElement, cards: [keyof Strings, () => void][]) {
   const name = getProfile().name ? ', ' + esc(getProfile().name.split(' ')[0]) : '';
-  const tiles: [string, keyof Strings, keyof Strings][] = [
-    ['💡', 'tileBill', 'qBill'], ['📱', 'tileRecharge', 'qRecharge'], ['🌶️', 'tileCrop', 'qCrop'],
-    ['🚌', 'tileBus', 'qBus'], ['🌾', 'tileKisan', 'qKisan'], ['💬', 'tileAsk', 'tileAsk'],
+  const tiles: [string, string, keyof Strings, keyof Strings][] = [
+    ['💡', 't1', 'tileBill', 'qBill'], ['📱', 't2', 'tileRecharge', 'qRecharge'], ['🌾', 't3', 'tileCrop', 'qCrop'],
+    ['🚌', 't4', 'tileBus', 'qBus'], ['👨‍🌾', 't5', 'tileKisan', 'qKisan'], ['💬', 't6', 'tileAsk', 'tileAsk'],
   ];
-  m.innerHTML = `<section class="hero hero-general home2"><img src="icons/mark.png" alt="" class="mark"><h1>${t('greeting')}${name}</h1><p>${t('homeSub')}</p>
-    <div id="today"></div>
+  m.innerHTML = `<section class="hero home3">
+    <div class="hg"><h1>${t('greeting')}${name}</h1><p>${t('homeSub')}</p></div>
+    <div id="mandi" class="mandi loading"><div class="mk">${t('mandiToday')}</div><div class="msk"></div><div class="msk s"></div></div>
     <h2 class="hh">${t('doWork')}</h2>
-    <div class="tiles">${tiles.map(([e, k], i) => `<button class="tile" data-ti="${i}"><span class="te">${e}</span><span>${t(k)}</span></button>`).join('')}</div>
+    <div class="tiles3">${tiles.map(([e, c, k], i) => `<button class="tile3" data-ti="${i}"><span class="ti ${c}">${e}</span><span class="tl">${t(k)}</span></button>`).join('')}</div>
+    <button class="bigmic" id="bigmic"><span class="bmo">${svg(ic.mic)}</span><span><b>${t('tapSpeak')}</b><small>${t('tapSpeakSub')}</small></span></button>
     <div class="hchips">${cards.map(([k], i) => `<button class="hchip" data-i="${i}">${t(k)}</button>`).join('')}</div>
     <div id="status"></div></section>`;
-  m.querySelectorAll<HTMLButtonElement>('.tile').forEach((b) => (b.onclick = () => {
+  m.querySelectorAll<HTMLButtonElement>('.tile3').forEach((b) => (b.onclick = () => {
     const i = +b.dataset.ti!;
-    if (i === 5) { const inp = $<HTMLTextAreaElement>('#input'); inp.focus(); return; }
-    send(t(tiles[i][2]), null, null, true);
+    if (i === 5) { $<HTMLTextAreaElement>('#input').focus(); return; }
+    send(t(tiles[i][3]), null, null, true);
   }));
+  $('#bigmic').onclick = () => $('#mic').click();
   m.querySelectorAll<HTMLButtonElement>('.hchip').forEach((b) => (b.onclick = cards[+b.dataset.i!][1]));
   renderStatus();
-  todayCard();
+  mandiCard();
 }
 
-/** Today card: Guntur dry chilli modal price from Agmarknet (data.gov.in). Hidden when offline or no data. */
-async function todayCard() {
-  const box = document.getElementById('today'); if (!box) return;
-  const KEY = 'elric.today';
-  type Row = { market: string; modal_price: string; arrival_date: string };
-  let row: Row | null = null;
-  try { const c = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (c && Date.now() - c.at < 3 * 3600e3) row = c.row; } catch { /* ignore */ }
-  if (!row) {
+/** Telugu / Hindi names for the crops people ask about most (Agmarknet names are English). */
+const CROP_LOCAL: Record<string, [string, string]> = {
+  'Dry Chillies': ['ఎండు మిర్చి', 'सूखी मिर्च'], 'Green Chilli': ['పచ్చి మిర్చి', 'हरी मिर्च'], Cotton: ['పత్తి', 'कपास'],
+  'Paddy(Dhan)(Common)': ['వడ్లు', 'धान'], Maize: ['మొక్కజొన్న', 'मक्का'], Groundnut: ['వేరుశనగ', 'मूंगफली'], Turmeric: ['పసుపు', 'हल्दी'],
+  Tomato: ['టమాటా', 'टमाटर'], Onion: ['ఉల్లిపాయ', 'प्याज'], Potato: ['బంగాళదుంప', 'आलू'], Brinjal: ['వంకాయ', 'बैंगन'], Banana: ['అరటి', 'केला'],
+  'Bhindi(Ladies Finger)': ['బెండకాయ', 'भिंडी'], Cabbage: ['క్యాబేజీ', 'पत्ता गोभी'], Cauliflower: ['కాలీఫ్లవర్', 'फूल गोभी'], Carrot: ['క్యారెట్', 'गाजर'],
+  'Bitter gourd': ['కాకరకాయ', 'करेला'], 'Bottle gourd': ['సొరకాయ', 'लौकी'], Drumstick: ['మునగకాయ', 'सहजन'], Lemon: ['నిమ్మకాయ', 'नींबू'], Mango: ['మామిడి', 'आम'],
+  Rice: ['బియ్యం', 'चावल'], Coconut: ['కొబ్బరి', 'नारियल'], 'Bengal Gram(Gram)(Whole)': ['శనగలు', 'चना'], 'Red Gram': ['కందులు', 'अरहर'],
+};
+const cropName = (c: string) => { const l = getLang(); const x = CROP_LOCAL[c]; return x && l !== 'en' ? x[l === 'te' ? 0 : 1] : c.replace(/\(.*$/, '').trim(); };
+const CROP_ICON: Record<string, string> = { 'Dry Chillies': '🌶️', 'Green Chilli': '🌶️', Cotton: '☁️', Tomato: '🍅', Onion: '🧅', Potato: '🥔', Brinjal: '🍆', Banana: '🍌', Carrot: '🥕', Groundnut: '🥜', Mango: '🥭', Lemon: '🍋', Coconut: '🥥', Maize: '🌽', Cabbage: '🥬', Cauliflower: '🥦' };
+
+/** Home price card: the latest Agmarknet prices in Andhra Pradesh (phone fetches data.gov.in directly). */
+async function mandiCard() {
+  type Row = { market: string; district: string; commodity: string; modal_price: string; arrival_date: string };
+  const KEY = 'elric.mandi.home';
+  let rows: Row[] | null = null;
+  try { const c = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (c && Date.now() - c.at < 3 * 3600e3) rows = c.rows; } catch { /* ignore */ }
+  if (!rows) {
+    const base = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh';
+    const get = async (x: string) => { const r = await fetch(base + x, { signal: AbortSignal.timeout(7000) }); if (!r.ok) throw new Error(); return ((await r.json()).records || []) as Row[]; };
     try {
-      const base = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=Dry%20Chillies';
-      const get = async (x: string) => { const r = await fetch(base + x, { signal: AbortSignal.timeout(6000) }); return r.ok ? ((await r.json()).records || []) as Row[] : []; };
-      let rows = await get('&filters%5Bdistrict%5D=Guntur');
-      if (!rows.length) rows = await get('');
-      rows.sort((a, b) => Number(b.modal_price) - Number(a.modal_price));
-      row = rows[0] || null;
-      if (row) sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), row }));
-    } catch { row = null; }
+      const [chilli, all] = await Promise.all([get('&filters%5Bcommodity%5D=Dry%20Chillies').catch(() => [] as Row[]), get('').catch(() => [] as Row[])]);
+      rows = [...chilli.sort((a, b) => Number(b.modal_price) - Number(a.modal_price)), ...all].filter((x) => Number(x.modal_price) > 0);
+      if (rows.length) sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), rows }));
+    } catch { rows = []; }
   }
-  const el = document.getElementById('today'); if (!el || !row || !Number(row.modal_price)) return;
-  el.innerHTML = `<button class="today"><span class="te">🌶️</span><span><small>${t('todayChilli')} · ${esc(row.market)}</small><b>₹${Number(row.modal_price).toLocaleString('en-IN')} <i>${t('perQuintal')}</i></b><small>${esc(row.arrival_date)} · Agmarknet</small></span></button>`;
-  (el.querySelector('.today') as HTMLButtonElement).onclick = () => send(t('qCrop2'), null, null, true);
+  const el = document.getElementById('mandi'); if (!el) return;
+  el.classList.remove('loading');
+  const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  if (!rows || !rows.length) {
+    el.innerHTML = `<div class="mk">${t('mandiToday')}</div><p class="moff">${t('pricesOffline')}</p><button class="mall">${t('checkPrices')} ›</button>`;
+    (el.querySelector('.mall') as HTMLButtonElement).onclick = () => send(t('qCrop'), null, null, true);
+    return;
+  }
+  const top = rows[0];
+  const seen = new Set([top.commodity]);
+  const more = rows.filter((x) => !seen.has(x.commodity) && seen.add(x.commodity)).slice(0, 3);
+  const q = Number(top.modal_price);
+  el.innerHTML = `<div class="mk">${t('mandiToday')}</div>
+    <button class="mtop" data-c="${esc(top.commodity)}"><span class="mci">${CROP_ICON[top.commodity] || '🌾'}</span><span class="mcn">${esc(cropName(top.commodity))}<small>${esc(top.market)} · ${esc(top.arrival_date)}</small></span>
+      <span class="mp"><b>${inr(q / 100)}</b><small>${t('perKg')} · ${inr(q)}/${t('agQuintal')}</small></span></button>
+    ${more.length ? `<div class="mrow">${more.map((x) => `<button class="mmini" data-c="${esc(x.commodity)}"><span>${CROP_ICON[x.commodity] || '🌾'} ${esc(cropName(x.commodity))}</span><b>${inr(Number(x.modal_price) / 100)}<i>/kg</i></b></button>`).join('')}</div>` : ''}
+    <button class="mall">${t('seeAll')} ›</button>`;
+  el.querySelectorAll<HTMLButtonElement>('[data-c]').forEach((b) => (b.onclick = () => send(`${b.dataset.c} ${t('mandiToday')}`, null, null, true)));
+  (el.querySelector('.mall') as HTMLButtonElement).onclick = () => send(t('qAllPrices'), null, null, true);
 }
 
 /** keepScroll: stay where the user is reading unless they were already at the bottom. */
@@ -568,6 +609,7 @@ function system(q = ''): string {
   if (mode === 'study') s += ' Mode: Study. Be a patient tutor for Indian students.';
   if (mode === 'shopping') s += ' Mode: Shopping. You have NO access to live prices, stock or offers. Never state or guess specific prices. Help compare features and explain what to look for, and say live prices are coming soon.';
   if (getLang() === 'hi') s += ' The user prefers Hindi.';
+  if (getLang() === 'te') s += ' The user prefers Telugu.';
   if (talk) s += ' This is a spoken conversation: reply in plain spoken sentences, with no markdown, lists, tables, symbols or emojis, in the language the user spoke.';
   const pr = getProfile();
   if (pr.name) s += ` The user's name is ${pr.name}.`;
@@ -630,7 +672,7 @@ async function answerOnline(reply: Turn, question: string, history: E.Turn[], ph
     history: history.slice(-O.HISTORY_TURNS).map((x) => ({ role: x.role, text: x.text.slice(0, 4000) })),
     mode,
     short,
-    lang: getLang(),
+    lang: getLang() === 'hi' ? 'hi' : 'en', // the server knows en/hi; Telugu questions get Telugu answers anyway
     talk: !!talk,
     ...(photo ? { image: { mime: photo.mime, data: photo.data } } : {}),
     ...(doc ? { doc: { name: doc.name, text: D.excerpt(doc, question, ONLINE_DOC_CHARS).text } } : {}),
@@ -704,7 +746,7 @@ async function answerImage(reply: Turn, text: string, ref?: { mime: string; data
   if (!O.isOn() || !O.ready()) { reply.text = t(O.isOn() ? 'imageUnavailable' : 'imageNeedsOnline'); reply.failed = true; return; }
   const t0 = performance.now();
   waitLabel = 'makingImage'; onlineWaiting = true; paint(reply);
-  const end = await O.makeImage(text, getLang(), ref);
+  const end = await O.makeImage(text, getLang() === 'hi' ? 'hi' : 'en', ref);
   onlineWaiting = false; waitLabel = 'gettingOnline';
   flush();
   if (end.kind === 'ok') { reply.image = end.url; reply.imgPrompt = text.slice(0, 450); reply.text = t('imageDone'); reply.src = 'online'; reply.ms = Math.round(performance.now() - t0); return; }
@@ -1148,7 +1190,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.30';
+const APP_VERSION = '0.4.31';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
@@ -1316,7 +1358,8 @@ function renderProfile() {
     ${grp(t('secPersonalise'),
       row('m-me', li.user, t('menuMe'), esc(name) || t('menuMeHint'))
       + row('p-len', li.len, t('lenTitle'), t(short ? 'lenShort' : 'lenLong'))
-      + row('m-lang', li.globe, t('menuLanguage'), getLang() === 'hi' ? 'हिन्दी' : 'English')
+      + row('m-lang', li.globe, t('menuLanguage'), ({ en: 'English', te: 'తెలుగు', hi: 'हिन्दी' } as Record<string, string>)[getLang()])
+      + row('m-theme', li.globe, t('menuTheme'), t(theme() === 'light' ? 'themeLight' : 'themeDark'))
       + row('p-mode', li.modes, t('defaultMode'), t(modeKey[defaultMode()])))}
     ${grp(t('secAI'),
       `<button class="pr" id="m-online" role="switch" aria-checked="${O.isOn()}">${lsvg(li.cloud)}<span class="pl">${t('onlineAnswers')}<small>${t('onlineHow')}</small></span><i class="sw ${O.isOn() ? 'on' : ''}"></i></button>`
@@ -1338,7 +1381,8 @@ function renderProfile() {
   on('p-edit', editName);
   on('m-me', editName);
   on('p-len', () => choose(t('lenTitle'), [['short', t('lenShort'), t('lenShortDesc')], ['long', t('lenLong'), t('lenLongDesc')]], short ? 'short' : 'long', (v) => { short = v === 'short'; localStorage.setItem('elric.length', v); }));
-  on('m-lang', () => choose(t('menuLanguage'), [['en', 'English'], ['hi', 'हिन्दी']], getLang(), (v) => setLang(v)));
+  on('m-lang', () => choose(t('menuLanguage'), [['en', 'English'], ['te', 'తెలుగు'], ['hi', 'हिन्दी']], getLang(), (v) => setLang(v)));
+  on('m-theme', () => choose(t('menuTheme'), [['light', t('themeLight')], ['dark', t('themeDark')]], theme(), (v) => setTheme(v)));
   on('p-mode', () => {
     const desc: Record<Mode, keyof Strings> = { study: 'modeStudyDesc', shopping: 'modeShoppingDesc', general: 'modeGeneralDesc' };
     choose(t('defaultMode'), (['study', 'shopping', 'general'] as Mode[]).map((m) => [m, t(modeKey[m]), t(desc[m])] as [Mode, string, string]), defaultMode(), (v) => { localStorage.setItem('elric.mode', v); if (!turns.length) mode = v; });

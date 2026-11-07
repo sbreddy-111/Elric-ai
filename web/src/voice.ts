@@ -1,7 +1,7 @@
 // Voice for the Elric AI web app: browser speech recognition (voice input, Talk) and
 // speech synthesis (Talk, read aloud). Both are provided by the browser / operating system.
 
-export const speechLang = (l: 'en' | 'hi') => (l === 'hi' ? 'hi-IN' : 'en-IN');
+export const speechLang = (l: 'en' | 'te' | 'hi') => (l === 'hi' ? 'hi-IN' : l === 'te' ? 'te-IN' : 'en-IN');
 
 function recCtor(): any {
   const w: any = globalThis as any;
