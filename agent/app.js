@@ -5,6 +5,20 @@
   const KEY = 'sb_publishable_Yv1D_ZUk38W3-ZvYdoAD8A_-fx5gPCT'; // public by design (same as the app)
 
   const $ = (s) => document.querySelector(s);
+  // Fit to the visible screen: on iPhone the keyboard shrinks visualViewport but not 100dvh, which hid the input.
+  const root = document.documentElement;
+  const fit = () => {
+    const vv = window.visualViewport;
+    if (vv && Math.abs(vv.scale - 1) > 0.01) return;
+    const h = Math.round(vv ? vv.height : window.innerHeight);
+    root.style.setProperty('--app-h', h + 'px');
+    root.classList.toggle('kb', !!vv && window.innerHeight - vv.height > 120);
+    if (vv && vv.offsetTop > 0) window.scrollTo(0, 0);
+    requestAnimationFrame(() => { const m = document.getElementById('main'); if (m && root.classList.contains('kb')) m.scrollTop = m.scrollHeight; });
+  };
+  fit();
+  let fr = 0; const onFit = () => { cancelAnimationFrame(fr); fr = requestAnimationFrame(fit); };
+  addEventListener('resize', onFit); visualViewport?.addEventListener('resize', onFit); visualViewport?.addEventListener('scroll', onFit);
   const log = $('#log'), q = $('#q'), mic = $('#mic'), main = $('#main');
   let speechLang = 'en-IN'; // mic only; replies follow the user's own language automatically
   let pending = null; // last card that still has missing fields → next message is a follow-up
@@ -33,6 +47,7 @@
       label: { commodity: 'Crop', place: 'Place', mobile_number: 'Mobile no.', operator: 'Network', amount: 'Amount (Rs.)', biller: 'Company', service_number: 'Service no.', from: 'From', to: 'To', date: 'Date', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
       bill: ['TEST — NOT REAL', 'Due', 'Sample bill for testing. No payment is made.'], pay: ['Pay on the official site', 'Your service number is copied. Paste it on the site, fill the captcha and pay.', 'Open to pay', 'Copied'] },
   };
+  const qs0 = () => new URLSearchParams(location.search);
   const uiLang = () => speechLang.slice(0, 2);
   let lastLang = 'en', lastScript = 'native';
   const t = (lang, script) => T[lang && lang !== 'en' && script === 'latn' ? lang + '-latn' : lang] || T.en;
@@ -152,9 +167,9 @@
   // Live mandi prices: the phone asks data.gov.in (Agmarknet, Govt of India) directly. Prices are Rs per quintal.
   const OGD = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070';
   const OGD_KEY = '579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b'; // public sample key (10 rows per call)
-  const MT = { en: ['Today\'s market price', 'per quintal', 'Source: Agmarknet, Govt of India', 'No price reported yet. Try again later.', 'Could not reach the price service.'],
-    te: ['ఈరోజు మార్కెట్ ధర', 'క్వింటాకు', 'మూలం: Agmarknet, భారత ప్రభుత్వం', 'ఇంకా ధర రాలేదు. తర్వాత చూడండి.', 'ధర సేవ అందలేదు.'],
-    hi: ['आज का मंडी भाव', 'प्रति क्विंटल', 'स्रोत: Agmarknet, भारत सरकार', 'अभी भाव नहीं आया। बाद में देखें।', 'भाव सेवा से जुड़ नहीं पाए।'] };
+  const MT = { en: ['Latest market price', 'per quintal', 'Source: Agmarknet, Govt of India', 'No price reported yet. Try again later.', 'Could not reach the price service.', (p) => `No ${p} price reported today. Other AP markets:`],
+    te: ['తాజా మార్కెట్ ధర', 'క్వింటాకు', 'మూలం: Agmarknet, భారత ప్రభుత్వం', 'ఇంకా ధర రాలేదు. తర్వాత చూడండి.', 'ధర సేవ అందలేదు.', (p) => `ఈరోజు ${p} ధర రాలేదు. ఇతర AP మార్కెట్లు:`],
+    hi: ['ताज़ा मंडी भाव', 'प्रति क्विंटल', 'स्रोत: Agmarknet, भारत सरकार', 'अभी भाव नहीं आया। बाद में देखें।', 'भाव सेवा से जुड़ नहीं पाए।', (p) => `आज ${p} का भाव नहीं आया। AP की दूसरी मंडियाँ:`] };
   async function mandi(res, L) {
     const M = MT[res.lang] || MT.en;
     const b = el('div', 'bill');
@@ -169,9 +184,11 @@
       let rows = [];
       const pl = (res.fields.place || '').trim();
       if (pl) { try { rows = await get(`&filters%5Bmarket%5D=${encodeURIComponent(pl)}`); } catch {} if (!rows.length) { try { rows = await get(`&filters%5Bdistrict%5D=${encodeURIComponent(pl)}`); } catch {} } }
-      if (!rows.length) rows = await get('');
+      let other = false;
+      if (!rows.length) { rows = await get(''); other = !!pl; }
       wait.remove();
       if (!rows.length) { b.append(el('div', 'sub', M[3])); return; }
+      if (other) b.append(el('div', 'sub', M[5](pl)));
       rows.sort((a, b2) => Number(b2.modal_price) - Number(a.modal_price));
       for (const x of rows.slice(0, 3)) {
         const r = el('div', 'mrow');
@@ -198,8 +215,12 @@
     mlBtn.classList.toggle('set', i !== 0);
   };
   document.querySelectorAll('.chip').forEach((b) => b.onclick = () => send(b.dataset.t));
+  if (qs0().get('from') === 'app') {
+    $('#back').hidden = false; $('#proto').hidden = true;
+    $('#back').onclick = (e) => { if (history.length > 1 && document.referrer.startsWith(location.origin)) { e.preventDefault(); history.back(); } };
+  }
   // Opened from the Elric AI app: ?lang=hi|te sets the mic language, ?q= starts that task.
-  const qs = new URLSearchParams(location.search);
+  const qs = qs0();
   const ql = ML.findIndex((x) => x[0].startsWith(qs.get('lang') || '-'));
   if (ql > 0) { speechLang = ML[ql][0]; mlBtn.textContent = ML[ql][1]; mlBtn.classList.add('set'); }
   if (qs.get('q')) setTimeout(() => send(qs.get('q').slice(0, 200)), 50);
