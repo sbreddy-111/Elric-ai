@@ -324,33 +324,30 @@ async function mandiText(crop: string, place: string): Promise<string> {
   } catch { return t('agPriceFail'); }
 }
 
-/** General-mode Home: greeting, a live Today price card, big task tiles (open Elric Agent on that task),
- *  then the old suggestions as small chips. */
-function homeGeneral(m: HTMLElement, cards: [keyof Strings, () => void][]) {
-  const name = getProfile().name ? ', ' + esc(getProfile().name.split(' ')[0]) : '';
-  const tiles: [string, keyof Strings, keyof Strings][] = [
-    ['💡', 'tileBill', 'qBill'], ['📱', 'tileRecharge', 'qRecharge'], ['🌶️', 'tileCrop', 'qCrop'],
-    ['🚌', 'tileBus', 'qBus'], ['🌾', 'tileKisan', 'qKisan'], ['💬', 'tileAsk', 'tileAsk'],
+/** General-mode Home (0.4.32, owner's pick): greeting + date, "Today for you" card (chilli price, weather), 4 round task buttons. */
+function homeGeneral(m: HTMLElement, _cards: [keyof Strings, () => void][]) {
+  const fn = getProfile().name ? ', ' + esc(getProfile().name.split(' ')[0]) : '';
+  const h = new Date().getHours();
+  const g = t(h < 12 ? 'gMorning' : h < 17 ? 'gAfternoon' : 'gEvening');
+  const date = new Date().toLocaleDateString(getLang() === 'hi' ? 'hi-IN' : 'en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
+  const acts: [string, keyof Strings, keyof Strings][] = [
+    ['🧾', 'hBill', 'qBill'], ['📱', 'hRecharge', 'qRecharge'], ['🌶️', 'hPrices', 'qCrop'], ['🚌', 'hBus', 'qBus'],
   ];
-  m.innerHTML = `<section class="hero hero-general home2"><img src="icons/mark.png" alt="" class="mark"><h1>${t('greeting')}${name}</h1><p>${t('homeSub')}</p>
-    <div id="today"></div>
-    <h2 class="hh">${t('doWork')}</h2>
-    <div class="tiles">${tiles.map(([e, k], i) => `<button class="tile" data-ti="${i}"><span class="te">${e}</span><span>${t(k)}</span></button>`).join('')}</div>
-    <div class="hchips">${cards.map(([k], i) => `<button class="hchip" data-i="${i}">${t(k)}</button>`).join('')}</div>
+  m.innerHTML = `<section class="hero hero-general home3"><h1>${g}${fn}</h1><p class="hdate">${date}</p>
+    <div class="tfy"><h2>${t('todayFor')}</h2>
+      <button class="trow" id="tCrop"><span class="ti">🌶️</span><span class="tl">${t('hCrop')}</span><b class="tv">…</b></button>
+      <button class="trow" id="tWx"><span class="ti">☀️</span><span class="tl">${t('hWeather')}</span><b class="tv">…</b></button>
+    </div>
+    <div class="acts">${acts.map(([e, k], i) => `<button class="act" data-ai="${i}"><span class="ac">${e}</span><span>${t(k)}</span></button>`).join('')}</div>
     <div id="status"></div></section>`;
-  m.querySelectorAll<HTMLButtonElement>('.tile').forEach((b) => (b.onclick = () => {
-    const i = +b.dataset.ti!;
-    if (i === 5) { const inp = $<HTMLTextAreaElement>('#input'); inp.focus(); return; }
-    send(t(tiles[i][2]), null, null, true);
-  }));
-  m.querySelectorAll<HTMLButtonElement>('.hchip').forEach((b) => (b.onclick = cards[+b.dataset.i!][1]));
+  m.querySelectorAll<HTMLButtonElement>('.act').forEach((b) => (b.onclick = () => send(t(acts[+b.dataset.ai!][2]), null, null, true)));
   renderStatus();
   todayCard();
+  weatherRow();
 }
 
-/** Today card: Guntur dry chilli modal price from Agmarknet (data.gov.in). Hidden when offline or no data. */
+/** Today row: AP dry chilli modal price (Agmarknet via data.gov.in), shown per kg. */
 async function todayCard() {
-  const box = document.getElementById('today'); if (!box) return;
   const KEY = 'elric.today';
   type Row = { market: string; modal_price: string; arrival_date: string };
   let row: Row | null = null;
@@ -366,9 +363,41 @@ async function todayCard() {
       if (row) sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), row }));
     } catch { row = null; }
   }
-  const el = document.getElementById('today'); if (!el || !row || !Number(row.modal_price)) return;
-  el.innerHTML = `<button class="today"><span class="te">🌶️</span><span><small>${t('todayChilli')} · ${esc(row.market)}</small><b>₹${Number(row.modal_price).toLocaleString('en-IN')} <i>${t('perQuintal')}</i></b><small>${esc(row.arrival_date)} · Agmarknet</small></span></button>`;
-  (el.querySelector('.today') as HTMLButtonElement).onclick = () => send(t('qCrop2'), null, null, true);
+  const el = document.getElementById('tCrop') as HTMLButtonElement | null; if (!el) return;
+  const v = el.querySelector('.tv')!;
+  if (!row || !Number(row.modal_price)) { v.textContent = '—'; } else {
+    v.innerHTML = `₹${Math.round(Number(row.modal_price) / 100).toLocaleString('en-IN')}<i>${t('perKg')}</i>`;
+    el.querySelector('.tl')!.innerHTML = `${t('hCrop')}<small>${esc(row.market)}</small>`;
+  }
+  el.onclick = () => send(t('qCrop2'), null, null, true);
+}
+
+/** Weather row: free Open-Meteo. Uses phone location only if already allowed, else Narasaraopet. */
+async function weatherRow() {
+  const el = document.getElementById('tWx'); if (!el) return;
+  const v = el.querySelector('.tv')!, ic = el.querySelector('.ti')!;
+  let lat = 16.235, lon = 80.049;
+  try {
+    const st = await (navigator.permissions?.query({ name: 'geolocation' as PermissionName }));
+    if (st?.state === 'granted') {
+      const p = await new Promise<GeolocationPosition>((ok, no) => navigator.geolocation.getCurrentPosition(ok, no, { timeout: 4000, maximumAge: 3600e3 }));
+      lat = +p.coords.latitude.toFixed(2); lon = +p.coords.longitude.toFixed(2);
+    }
+  } catch { /* use default */ }
+  const KEY = `elric.wx.${lat},${lon}`;
+  let w: { t: number; c: number } | null = null;
+  try { const c = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (c && Date.now() - c.at < 3600e3) w = c.w; } catch { /* ignore */ }
+  if (!w) {
+    try {
+      const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&timezone=auto`, { signal: AbortSignal.timeout(6000) });
+      const j = await r.json(); w = { t: Math.round(j.current.temperature_2m), c: j.current.weather_code };
+      sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), w }));
+    } catch { w = null; }
+  }
+  if (!w) { el.remove(); return; }
+  const night = new Date().getHours() >= 18 || new Date().getHours() < 6;
+  const e = w.c >= 95 ? '⛈️' : w.c >= 51 ? '🌧️' : w.c >= 45 ? '🌫️' : w.c >= 2 ? '⛅' : night ? '🌙' : '☀️';
+  ic.textContent = e; v.textContent = `${w.t}°`;
 }
 
 /** keepScroll: stay where the user is reading unless they were already at the bottom. */
@@ -1148,7 +1177,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.30';
+const APP_VERSION = '0.4.32';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [

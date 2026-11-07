@@ -287,3 +287,21 @@ html.kb body{overflow:hidden}
 .agedit{flex:1;padding:11px;border-radius:12px;border:1px solid var(--line)}
 .agpick{flex:1;padding:11px 4px;border-radius:12px;border:1px solid var(--line);background:var(--s2);font-weight:600;font-size:14px}
 .aglink{display:block;margin:8px 0;text-decoration:none}
+/* Home 0.4.32 (owner pick) */
+.home3{justify-content:flex-start;align-items:stretch;text-align:left;padding-top:14px}
+.home3 h1{font-size:32px;line-height:1.15;font-weight:700;margin:0}
+.home3 .hdate{color:var(--mu);margin:6px 0 18px;font-size:14.5px}
+.tfy{border-radius:20px;padding:14px;background:linear-gradient(160deg,rgba(120,120,170,.18),rgba(255,255,255,.03));border:1px solid var(--line);margin-bottom:22px}
+.tfy h2{font-size:19px;margin:2px 4px 12px;font-weight:700}
+.trow{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:11px 12px;border-radius:14px;background:rgba(255,255,255,.06);margin-top:8px}
+.trow:active{background:rgba(255,255,255,.1)}
+.trow .ti{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:rgba(255,255,255,.08);font-size:19px;flex:none}
+.trow .tl{flex:1;font-size:16px;font-weight:600}
+.trow .tl small{display:block;font-size:12px;color:var(--mu);font-weight:400}
+.trow .tv{font-size:20px;font-weight:700;color:var(--gold);white-space:nowrap}
+.trow .tv i{font-style:normal;font-size:12px;color:var(--mu);font-weight:400;margin-left:2px}
+.acts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.act{display:flex;flex-direction:column;align-items:center;gap:7px;font-size:14px}
+.act .ac{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;font-size:26px;background:var(--s1);border:1px solid var(--line)}
+.act:active .ac{background:var(--s2)}
+html.narrow .act .ac{width:54px;height:54px;font-size:23px}
