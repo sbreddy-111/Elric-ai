@@ -346,15 +346,28 @@ function homeGeneral(m: HTMLElement, _cards: [keyof Strings, () => void][]) {
   weatherRow();
 }
 
-/** Today row: AP dry chilli modal price (Agmarknet via data.gov.in), shown per kg. */
+/** Crops the user can pin on the Today card: [Agmarknet name, label, emoji]. */
+const HOME_CROPS: [string, string, string][] = [
+  ['Dry Chillies', 'Chilli', '🌶️'], ['Cotton', 'Cotton', '☁️'], ['Paddy(Dhan)(Common)', 'Paddy', '🌾'], ['Maize', 'Maize', '🌽'],
+  ['Turmeric', 'Turmeric', '🟡'], ['Groundnut', 'Groundnut', '🥜'], ['Bengal Gram(Gram)(Whole)', 'Bengal gram', '🫘'],
+  ['Black Gram (Urd Beans)(Whole)', 'Black gram', '🫘'], ['Green Gram (Moong)(Whole)', 'Green gram', '🫛'],
+  ['Tomato', 'Tomato', '🍅'], ['Onion', 'Onion', '🧅'], ['Banana', 'Banana', '🍌'],
+];
+function homeCrop() { const c = localStorage.getItem('elric.crop'); return HOME_CROPS.find((x) => x[0] === c) || HOME_CROPS[0]; }
+
+/** Today row: AP modal price of the user's crop (Agmarknet via data.gov.in), shown per kg. */
 async function todayCard() {
-  const KEY = 'elric.today';
+  const [crop, label, emo] = homeCrop();
+  const el0 = document.getElementById('tCrop') as HTMLElement | null; if (!el0) return;
+  el0.querySelector('.ti')!.textContent = emo;
+  el0.querySelector('.tl')!.innerHTML = `${esc(label)} ${t('hPriceWord')}<small><span class="tchg" id="tChg">${t('changeCrop')}</span></small>`;
+  const KEY = 'elric.today.' + crop;
   type Row = { market: string; modal_price: string; arrival_date: string };
   let row: Row | null = null;
   try { const c = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (c && Date.now() - c.at < 3 * 3600e3) row = c.row; } catch { /* ignore */ }
   if (!row) {
     try {
-      const base = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=Dry%20Chillies';
+      const base = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=' + encodeURIComponent(crop);
       const get = async (x: string) => { const r = await fetch(base + x, { signal: AbortSignal.timeout(6000) }); return r.ok ? ((await r.json()).records || []) as Row[] : []; };
       let rows = await get('&filters%5Bdistrict%5D=Guntur');
       if (!rows.length) rows = await get('');
@@ -363,41 +376,56 @@ async function todayCard() {
       if (row) sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), row }));
     } catch { row = null; }
   }
-  const el = document.getElementById('tCrop') as HTMLButtonElement | null; if (!el) return;
+  const el = document.getElementById('tCrop') as HTMLElement | null; if (!el) return;
   const v = el.querySelector('.tv')!;
-  if (!row || !Number(row.modal_price)) { v.textContent = '—'; } else {
+  if (!row || !Number(row.modal_price)) { v.innerHTML = `<i>${t('noPriceToday')}</i>`; } else {
     v.innerHTML = `₹${Math.round(Number(row.modal_price) / 100).toLocaleString('en-IN')}<i>${t('perKg')}</i>`;
-    el.querySelector('.tl')!.innerHTML = `${t('hCrop')}<small>${esc(row.market)}</small>`;
+    el.querySelector('small')!.insertAdjacentHTML('afterbegin', `${esc(row.market)} · `);
   }
-  el.onclick = () => send(t('qCrop2'), null, null, true);
+  el.onclick = (e) => {
+    if ((e.target as HTMLElement).closest('#tChg')) {
+      choose(t('pickCrop'), HOME_CROPS.map(([c, l, em]) => [c, `${em} ${l}`] as [string, string]), crop, (c) => localStorage.setItem('elric.crop', c));
+      return;
+    }
+    send(`${label} price today`, null, null, true);
+  };
 }
 
-/** Weather row: free Open-Meteo. Uses phone location only if already allowed, else Narasaraopet. */
-async function weatherRow() {
+/** Weather row: free Open-Meteo at the phone's location (asked once, kept 6 h); Narasaraopet if not allowed. */
+async function weatherRow(fresh = false) {
   const el = document.getElementById('tWx'); if (!el) return;
-  const v = el.querySelector('.tv')!, ic = el.querySelector('.ti')!;
-  let lat = 16.235, lon = 80.049;
-  try {
-    const st = await (navigator.permissions?.query({ name: 'geolocation' as PermissionName }));
-    if (st?.state === 'granted') {
-      const p = await new Promise<GeolocationPosition>((ok, no) => navigator.geolocation.getCurrentPosition(ok, no, { timeout: 4000, maximumAge: 3600e3 }));
-      lat = +p.coords.latitude.toFixed(2); lon = +p.coords.longitude.toFixed(2);
-    }
-  } catch { /* use default */ }
-  const KEY = `elric.wx.${lat},${lon}`;
+  const v = el.querySelector('.tv')!, ic = el.querySelector('.ti')!, tl = el.querySelector('.tl')!;
+  el.onclick = () => { v.textContent = '…'; weatherRow(true); };
+  let loc: { lat: number; lon: number; name: string; at: number } | null = null;
+  try { loc = JSON.parse(localStorage.getItem('elric.loc') || 'null'); } catch { /* ignore */ }
+  if (fresh || !loc || Date.now() - loc.at > 6 * 3600e3) {
+    try {
+      const p = await new Promise<GeolocationPosition>((ok, no) => navigator.geolocation.getCurrentPosition(ok, no, { timeout: 8000, maximumAge: 600e3 }));
+      const lat = +p.coords.latitude.toFixed(2), lon = +p.coords.longitude.toFixed(2);
+      let name = '';
+      try {
+        const g = await (await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`, { signal: AbortSignal.timeout(5000) })).json();
+        name = g.locality || g.city || g.principalSubdivision || '';
+      } catch { /* name optional */ }
+      loc = { lat, lon, name, at: Date.now() };
+      localStorage.setItem('elric.loc', JSON.stringify(loc));
+    } catch { if (!loc) loc = { lat: 16.235, lon: 80.049, name: 'Narasaraopet', at: 0 }; }
+  }
+  tl.innerHTML = `${t('hWeather')}${loc.name ? `<small>${esc(loc.name)}</small>` : ''}`;
+  const KEY = `elric.wx.${loc.lat},${loc.lon}`;
   let w: { t: number; c: number } | null = null;
-  try { const c = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (c && Date.now() - c.at < 3600e3) w = c.w; } catch { /* ignore */ }
+  try { const c = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (!fresh && c && Date.now() - c.at < 1800e3) w = c.w; } catch { /* ignore */ }
   if (!w) {
     try {
-      const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&timezone=auto`, { signal: AbortSignal.timeout(6000) });
+      const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,weather_code&timezone=auto`, { signal: AbortSignal.timeout(6000) });
       const j = await r.json(); w = { t: Math.round(j.current.temperature_2m), c: j.current.weather_code };
       sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), w }));
     } catch { w = null; }
   }
-  if (!w) { el.remove(); return; }
-  const night = new Date().getHours() >= 18 || new Date().getHours() < 6;
-  const e = w.c >= 95 ? '⛈️' : w.c >= 51 ? '🌧️' : w.c >= 45 ? '🌫️' : w.c >= 2 ? '⛅' : night ? '🌙' : '☀️';
-  ic.textContent = e; v.textContent = `${w.t}°`;
+  if (!w) { v.textContent = '—'; return; }
+  const hr = new Date().getHours(), night = hr >= 18 || hr < 6;
+  ic.textContent = w.c >= 95 ? '⛈️' : w.c >= 51 ? '🌧️' : w.c >= 45 ? '🌫️' : w.c >= 2 ? '⛅' : night ? '🌙' : '☀️';
+  v.textContent = `${w.t}°`;
 }
 
 /** keepScroll: stay where the user is reading unless they were already at the bottom. */
@@ -1177,7 +1205,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.33';
+const APP_VERSION = '0.4.34';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [

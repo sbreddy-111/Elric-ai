@@ -334,3 +334,5 @@ html.narrow .act .ac{width:54px;height:54px;font-size:23px}
 .pr.c-r>svg{background:#d9433e;color:#fff}
 .pf-danger{margin-top:18px}
 #p-clear>svg{color:#fff}
+.tchg{color:var(--gold);text-decoration:underline;text-underline-offset:2px}
+.trow .tv i{white-space:nowrap}
