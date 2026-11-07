@@ -19,7 +19,9 @@ function setH() {
   root.classList.toggle('short', h < 600);
   root.classList.toggle('kb', !!vv && window.innerHeight - vv.height > 120);
   // Keep the page from scrolling behind the app when the iOS keyboard opens.
-  if (vv && vv.offsetTop > 0 && standalone()) window.scrollTo(0, 0);
+  // Safari tab too (not only Home Screen): iOS scrolls the page up under the keyboard, which pushed the
+  // composer out of view once Home grew taller (2026-11-08). The app is pinned to the visible area instead.
+  if (vv && vv.offsetTop > 0) window.scrollTo(0, 0);
 }
 
 export function initFit() {

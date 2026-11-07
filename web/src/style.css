@@ -272,3 +272,7 @@ html.pwa .composer{margin-bottom:6px}
 .hchips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
 .hchip{padding:8px 12px;border-radius:999px;background:var(--s1);border:1px solid var(--line);font-size:13.5px;color:var(--mu)}
 html.narrow .tile{font-size:14.5px;min-height:64px;padding:12px 10px}
+
+/* Keyboard open (any browser mode): pin the app to the visible area so the composer stays above the keyboard */
+html.kb #app{position:fixed;top:0;left:0;right:0;bottom:auto;height:var(--app-h);margin:0 auto;padding-bottom:0}
+html.kb body{overflow:hidden}
