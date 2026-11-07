@@ -1,4 +1,4 @@
-export type Lang = 'en' | 'te' | 'hi';
+export type Lang = 'en' | 'hi';
 
 const en = {
   modeStudy: 'Study',
@@ -12,7 +12,6 @@ const en = {
   fromStore: 'From Elric Watches, our store · live price',
   buy: 'Buy',
   greeting: 'Hello',
-  mandiToday: 'Market prices today', perKg: 'per kg', seeAll: 'See all prices', qAllPrices: 'All vegetable and crop prices today', tapSpeak: 'Tap and speak', tapSpeakSub: 'Telugu, Hindi or English', pricesOffline: 'Prices show here when you are online.', checkPrices: 'Check prices', menuTheme: 'Look', themeLight: 'Light', themeDark: 'Dark',
   agYes: 'Yes', agEdit: 'Edit', agEditHint: 'Type or say what to change…', agOpenPay: 'Open official pay page',
   agPayText: '{b} bill: your service number {sn} is copied. Open the official page, paste it, fill the captcha and pay.',
   agSoon: 'Coming soon. This task is still in test mode, no payment is made.',
@@ -268,7 +267,6 @@ const hi: Strings = {
   privacyOnDevice: 'डिवाइस पर · 0 बाइट भेजे गए',
   privacyOnline: 'ऑनलाइन · घड़ियों की कीमतें Elric Watches से',
   greeting: 'नमस्ते',
-  mandiToday: 'आज के मंडी भाव', perKg: 'प्रति किलो', seeAll: 'सारे भाव देखें', qAllPrices: 'आज सब्ज़ी और फसलों के सारे भाव', tapSpeak: 'दबाएँ और बोलें', tapSpeakSub: 'तेलुगु, हिंदी या अंग्रेज़ी', pricesOffline: 'ऑनलाइन होने पर भाव यहाँ दिखेंगे।', checkPrices: 'भाव देखें', menuTheme: 'रंग', themeLight: 'हल्का', themeDark: 'गहरा',
   agYes: 'हाँ', agEdit: 'बदलें', agEditHint: 'क्या बदलना है, लिखें या बोलें…', agOpenPay: 'आधिकारिक भुगतान पेज खोलें',
   agPayText: '{b} बिल: आपका सर्विस नंबर {sn} कॉपी हो गया। आधिकारिक पेज खोलें, पेस्ट करें, कैप्चा भरें और भुगतान करें।',
   agSoon: 'जल्द आ रहा है। यह अभी टेस्ट में है, कोई भुगतान नहीं होता।',
@@ -511,29 +509,9 @@ const hi: Strings = {
   errDownloadHttp: 'डाउनलोड नहीं हो सका (HTTP {code})',
 };
 
+const tables: Record<Lang, Strings> = { en, hi };
 
-/** Telugu: Home, tasks and the most-seen words. Anything missing falls back to English. */
-const te: Partial<Strings> = {
-  greeting: 'నమస్కారం', homeSub: 'ఏదైనా అడగండి, లేదా పని Elric కి ఇవ్వండి.', doWork: 'నా పనులు',
-  mandiToday: 'ఈరోజు మార్కెట్ ధరలు', perKg: 'కిలోకి', perQuintal: 'క్వింటాల్‌కి', seeAll: 'అన్ని ధరలు చూడండి', qAllPrices: 'ఈరోజు కూరగాయలు, పంటల అన్ని ధరలు',
-  tapSpeak: 'నొక్కి మాట్లాడండి', tapSpeakSub: 'తెలుగు, హిందీ లేదా ఇంగ్లీష్', pricesOffline: 'ఆన్‌లైన్‌లో ఉన్నప్పుడు ధరలు ఇక్కడ కనిపిస్తాయి.', checkPrices: 'ధరలు చూడండి',
-  tileBill: 'కరెంట్ బిల్లు', tileRecharge: 'మొబైల్ రీఛార్జ్', tileCrop: 'పంట ధరలు', tileBus: 'బస్సు వెతకండి', tileKisan: 'PM-కిసాన్', tileAsk: 'ఏదైనా అడగండి',
-  qBill: 'నా కరెంట్ బిల్లు కట్టాలి', qRecharge: 'మొబైల్ రీఛార్జ్ చేయాలి', qCrop: 'పంట మార్కెట్ ధర చెప్పు', qCrop2: 'గుంటూరు ఎండు మిర్చి ధర ఈరోజు', qBus: 'బస్సు వెతకాలి', qKisan: 'PM-కిసాన్ స్టేటస్ చూడు',
-  todayChilli: 'మిర్చి తాజా ధర', composerHint: 'Elric AI ని అడగండి', cdMic: 'మాట్లాడి అడగండి', menuLanguage: 'భాష', menuTheme: 'రంగు', themeLight: 'లేత', themeDark: 'ముదురు',
-  sources: 'మూలాలు',
-  agYes: 'అవును', agEdit: 'మార్చు', agEditHint: 'ఏమి మార్చాలో చెప్పండి…', agOpenPay: 'అధికారిక చెల్లింపు పేజీ తెరవండి',
-  agPayText: '{b} బిల్లు: మీ సర్వీస్ నంబర్ {sn} కాపీ అయింది. అధికారిక పేజీ తెరిచి, పేస్ట్ చేసి, క్యాప్చా నింపి చెల్లించండి.',
-  agSoon: 'త్వరలో వస్తుంది. ఇది ఇంకా టెస్ట్‌లో ఉంది, డబ్బులు కట్ అవ్వవు.',
-  agNoPrice: 'ఇంకా ధర రాలేదు. తర్వాత చూడండి.', agPriceFail: 'ప్రభుత్వ ధరల సేవ బిజీగా ఉంది. ఒక నిమిషం తర్వాత మళ్ళీ అవును నొక్కండి.',
-  agPriceHead: '{c}: తాజా మార్కెట్ ధరలు', agOtherMarkets: 'ఈరోజు {p} ధర రాలేదు. AP లో ఇతర మార్కెట్లు:', agQuintal: 'క్వింటాల్', agSource: 'మూలం: Agmarknet, భారత ప్రభుత్వం',
-  agAllCrops: 'అన్ని పంటలు', agAllHead: 'AP మార్కెట్లలో తాజా ధరలు',
-  agT_electricity_bill: 'కరెంట్ బిల్లు', agT_mobile_recharge: 'మొబైల్ రీఛార్జ్', agT_mandi_price: 'మార్కెట్ ధర', agT_bus_search: 'బస్సు వెతకడం', agT_pm_kisan_status: 'PM-కిసాన్ స్టేటస్',
-  ag_biller: 'సంస్థ', ag_service_number: 'సర్వీస్ నంబర్', ag_mobile_number: 'మొబైల్ నంబర్', ag_operator: 'నెట్‌వర్క్', ag_amount: 'మొత్తం', ag_commodity: 'పంట', ag_place: 'ఊరు', ag_from: 'ఎక్కడి నుంచి', ag_to: 'ఎక్కడికి', ag_date: 'తేదీ', ag_aadhaar_or_mobile_last4: 'ఆధార్/మొబైల్ (చివరి 4)',
-};
-
-const tables: Record<Lang, Partial<Strings>> = { en, te, hi };
-
-let current: Lang = (['te', 'hi'] as string[]).includes(localStorage.getItem('elric.lang') || '') ? (localStorage.getItem('elric.lang') as Lang) : 'en';
+let current: Lang = (localStorage.getItem('elric.lang') as Lang) === 'hi' ? 'hi' : 'en';
 
 export function getLang(): Lang {
   return current;
@@ -546,7 +524,7 @@ export function setLang(l: Lang): void {
 }
 
 export function t(key: keyof Strings, vars?: Record<string, string>): string {
-  let s = (tables[current][key] ?? en[key]) as string;
+  let s = tables[current][key] ?? en[key];
   if (vars) for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, v);
   return s;
 }
