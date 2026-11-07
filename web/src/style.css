@@ -256,12 +256,6 @@ html.pwa #app{position:fixed;top:0;left:0;right:0;bottom:0;height:auto;margin:0 
 html.pwa.kb #app{bottom:auto;height:var(--app-h);padding-bottom:0}
 html.pwa .composer{margin-bottom:6px}
 
-/* Elric Agent overlay */
-#agentov{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;background:#0F0F12;padding-top:env(safe-area-inset-top)}
-#agentov .agbar{display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.08);color:#ECECF1}
-#agentov .agbar b{font-weight:600;font-size:16px}
-#agentov iframe{flex:1;width:100%;border:0;background:#0F0F12}
-
 /* General Home 2026-11-08: Today card + big task tiles */
 .home2{justify-content:flex-start;padding-top:8px}
 .home2>p{margin-bottom:14px}

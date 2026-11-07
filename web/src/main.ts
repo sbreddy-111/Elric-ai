@@ -158,7 +158,6 @@ const SIZE = gb(E.LITE.sizeBytes);
 const modeKey: Record<Mode, keyof Strings> = { study: 'modeStudy', shopping: 'modeShopping', general: 'modeGeneral' };
 
 const ic = {
-  agent: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   newc: '<path d="M12 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6M16 19h6M19 16v6"/>',
   cam: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
@@ -257,19 +256,10 @@ async function todayCard() {
   (el.querySelector('.today') as HTMLButtonElement).onclick = () => openAgent(t('qCrop2'));
 }
 
-/** Elric Agent (tasks: power bill, recharge, mandi price, bus, PM-Kisan) opens full screen over the chat.
- *  Same-origin page /agent/ talks only to the ai-agent function; nothing is saved. */
+/** Elric Agent (tasks: power bill, recharge, mandi price, bus, PM-Kisan) opens as its own full page (/agent/),
+ *  so the iPhone keyboard and safe areas behave; its back button returns here. Nothing is saved there. */
 function openAgent(q = '') {
-  if (document.getElementById('agentov')) return;
-  const ov = document.createElement('div');
-  ov.id = 'agentov';
-  ov.innerHTML = `<div class="agbar"><button class="icon" id="agclose" aria-label="${t('cdBack')}">${svg('<path d="M15 18l-6-6 6-6"/>')}</button><b>Elric Agent</b></div>
-  <iframe src="${import.meta.env.BASE_URL}agent/?lang=${getLang()}${q ? '&q=' + encodeURIComponent(q) : ''}" title="Elric Agent" allow="microphone; clipboard-write"></iframe>`;
-  document.body.appendChild(ov);
-  const close = () => { ov.remove(); removeEventListener('keydown', esc); };
-  const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-  addEventListener('keydown', esc);
-  (ov.querySelector('#agclose') as HTMLButtonElement).onclick = close;
+  location.href = `${import.meta.env.BASE_URL}agent/?from=app&lang=${getLang()}${q ? '&q=' + encodeURIComponent(q) : ''}`;
 }
 
 /** keepScroll: stay where the user is reading unless they were already at the bottom. */
@@ -1041,7 +1031,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.25';
+const APP_VERSION = '0.4.26';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
