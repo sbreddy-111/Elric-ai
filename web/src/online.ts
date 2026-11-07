@@ -29,6 +29,8 @@ export type End =
   | { kind: 'done' }
   | { kind: 'stopped' }
   | { kind: 'limit'; retryAfter: number; scope: string }
+  /** The server refused this question (safety). Not a failure: no fallback, no backoff. */
+  | { kind: 'blocked' }
   | { kind: 'failed'; reason: string };
 
 export interface Body {
@@ -188,6 +190,8 @@ export async function ask(body: Body, onText: (piece: string) => void, opts: { f
           try { reader.cancel(); } catch { /* closed */ }
           return { kind: 'done' };
         } else if (o.error) {
+          try { reader.cancel(); } catch { /* closed */ }
+          if (o.error === 'blocked') return { kind: 'blocked' };
           return o.error === 'limit' ? { kind: 'limit', retryAfter: 600, scope: 'provider' } : { kind: 'failed', reason: String(o.error) };
         }
       }
@@ -229,7 +233,7 @@ export async function makeImage(prompt: string, lang: 'en' | 'hi', ref?: { mime:
     try { o = await res.json(); } catch { /* not json */ }
     if (res.status === 422) return { kind: 'blocked' };
     if (res.status === 429) return { kind: 'limit', retryAfter: typeof o.retry_after === 'number' ? o.retry_after : 3600 };
-    if (!res.ok || typeof o.data !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(o.data.slice(0, 200))) return { kind: 'failed', reason: `http ${res.status}` };
+    if (!res.ok || typeof o.data !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(o.data)) return { kind: 'failed', reason: `http ${res.status}` };
     const mime = /^image\/(jpeg|png|webp)$/.test(o.mime) ? o.mime : 'image/jpeg';
     return { kind: 'ok', url: `data:${mime};base64,${o.data}` };
   } catch (e: any) {

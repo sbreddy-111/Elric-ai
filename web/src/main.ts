@@ -17,7 +17,7 @@ const defaultMode = (): Mode => { const m = localStorage.getItem('elric.mode'); 
 let mode: Mode = defaultMode();
 let short = localStorage.getItem('elric.length') !== 'long';
 /** A chat turn; photo and file text live only in memory, never in saved chats. */
-type Turn = E.Turn & { photo?: P.Photo; doc?: D.Doc; image?: string; reported?: boolean; sources?: O.Src[]; products?: O.Prod[]; imgPrompt?: string; hard?: boolean };
+type Turn = E.Turn & { photo?: P.Photo; doc?: D.Doc; image?: string; reported?: boolean; partial?: boolean; sources?: O.Src[]; products?: O.Prod[]; imgPrompt?: string; hard?: boolean };
 let turns: Turn[] = [];
 interface Chat { id: string; title: string; mode: Mode; turns: Turn[]; at: number }
 const CHATS_KEY = 'elric.chats';
@@ -29,20 +29,29 @@ function saveChats(cs: Chat[]) {
   let list = cs.slice(0, 50);
   for (;;) { try { localStorage.setItem(CHATS_KEY, JSON.stringify(list)); return; } catch { if (list.length <= 1) return; list = list.slice(0, -1); } }
 }
+/** The chat on screen was deleted (or Clear all) while its answer was still being written: never save it again. */
+let dropCurrent = false;
 function persist() {
+  try { persistChat(); } catch { /* storage full or blocked: the chat stays on screen */ }
+}
+function persistChat() {
+  if (dropCurrent) return;
   // Saved chats keep a placeholder instead of the photo (browser storage is small).
   const done = turns.filter((x) => x.text).map(({ photo, doc, image, ...x }) => (image ? { ...x, text: `🖼 ${x.text} (${t('imageNotSaved')})` } : photo ? { ...x, text: `📷 ${t('photoLabel')} · ${x.text}` } : doc ? { ...x, text: `📄 ${doc.name} · ${x.text}` } : x));
   if (!done.length) return;
-  if (!chatId) { chatId = Date.now().toString(36); localStorage.setItem(CUR_KEY, chatId); }
+  if (!chatId) { chatId = Date.now().toString(36); try { localStorage.setItem(CUR_KEY, chatId); } catch { /* storage full */ } }
   const cs = loadChats().filter((c) => c.id !== chatId);
   const first = done.find((x) => x.role === 'user')?.text || '';
   cs.push({ id: chatId, title: first.slice(0, 60), mode, turns: done, at: Date.now() });
   saveChats(cs);
 }
+/** A chat (or a new one, id '') to open as soon as the answer being written has stopped and been saved. */
+let pendingOpen: { id: string } | null = null;
 function openChat(c: Chat | undefined) {
-  if (busy) { stopRequested = true; E.stop(); O.stop(); return; } // let the current answer finish stopping and save first
+  if (busy) { pendingOpen = { id: c?.id || '' }; stopRequested = true; E.stop(); O.stop(); return; } // opened by send() once stopped
+  dropCurrent = false;
   chatId = c?.id || ''; turns = c ? c.turns.map((x) => ({ ...x })) : []; if (c) mode = c.mode;
-  if (chatId) localStorage.setItem(CUR_KEY, chatId); else localStorage.removeItem(CUR_KEY);
+  try { if (chatId) localStorage.setItem(CUR_KEY, chatId); else localStorage.removeItem(CUR_KEY); } catch { /* storage blocked */ }
   shell();
 }
 localStorage.removeItem(CUR_KEY); // every launch starts a new chat; old ones are in Recent chats
@@ -93,7 +102,8 @@ function md(src: string): string {
   close();
   return out.join('');
 }
-const body = (x: Turn) => (x.role === 'model' ? (x.image ? `<img class="gen" src="${x.image}" alt="${t('imageAlt')}"><a class="gsave" href="${x.image}" download="elric-image.jpg">${t('imageSave')}</a>` : '') + md(x.text) : (x.photo ? `<img class="ph" src="${x.photo.thumb}" alt="${t('photoLabel')}">` : '') + (x.doc ? `<span class="dq">📄 ${esc(x.doc.name)}</span>` : '') + esc(x.text));
+const okImage = (u?: string) => !!u && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(u);
+const body = (x: Turn) => (x.role === 'model' ? (okImage(x.image) ? `<img class="gen" src="${esc(x.image!)}" alt="${t('imageAlt')}"><a class="gsave" href="${esc(x.image!)}" download="elric-image.jpg">${t('imageSave')}</a>` : '') + md(x.text) : (x.photo ? `<img class="ph" src="${x.photo.thumb}" alt="${t('photoLabel')}">` : '') + (x.doc ? `<span class="dq">📄 ${esc(x.doc.name)}</span>` : '') + esc(x.text));
 const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 /** Small source links under an answer that used the web, and a tip under a hard question answered offline. */
 function extras(x: Turn, i: number): string {
@@ -121,7 +131,7 @@ function stats(x: Turn, i = -1): string {
     ? ` <button class="fb${x.reported ? ' on' : ''}" data-fb="${i}" aria-label="${t(x.reported ? 'fbReported' : 'fbReport')}"${x.reported ? ' aria-disabled="true"' : ''}>👎</button>` : '';
   const cp = x.text && !x.failed && i >= 0 && !(busy && i === turns.length - 1)
     ? ` <button class="ra" data-cp="${i}" aria-label="${t('copy')}">⧉</button>` : '';
-  const tag = ((x.src ? t(x.src === 'online' ? 'tagOnline' : 'tagOffline') : '') + cp + ra + fb).trim();
+  const tag = ((x.src ? t(x.src === 'online' ? 'tagOnline' : 'tagOffline') : '') + (x.partial ? ` · ${t('partialAnswer')}` : '') + cp + ra + fb).trim();
   if (!x.ms) return tag ? `<div class="stat">${tag}</div>` : '';
   const words = x.text.trim().split(/\s+/).filter(Boolean).length;
   const gen = Math.max(1, x.ms - (x.firstMs || 0));
@@ -173,7 +183,7 @@ function shell() {
     <button class="lang" id="lang">${getLang() === 'en' ? 'हिं' : 'EN'}</button>
     <button class="icon" id="newc" aria-label="${t('cdNewChat')}">${svg(ic.newc)}</button>
   </header>
-  <div class="pill ${mode === 'shopping' || O.isOn() ? 'online' : ''}"><i></i>${mode === 'shopping' ? t('privacyOnline') : O.isOn() ? t('pillOnline') : t('privacyOnDevice')}</div>
+  <div class="pill ${O.isOn() ? 'online' : ''}"><i></i>${!O.isOn() ? t('privacyOnDevice') : mode === 'shopping' ? t('privacyOnline') : t('pillOnline')}</div>
   <main id="main"></main>
   <div class="att" id="att"></div>
   <form class="composer" id="form">
@@ -193,14 +203,17 @@ function shell() {
   renderAtt();
   const input = $<HTMLTextAreaElement>('#input');
   input.oninput = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; };
-  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !matchMedia('(pointer:coarse)').matches) { e.preventDefault(); submit(); } };
+  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229 && !matchMedia('(pointer:coarse)').matches) { e.preventDefault(); submit(); } };
   $('#form').onsubmit = (e) => { e.preventDefault(); submit(); };
   renderMain();
   renderProfile();
 }
 
-function renderMain() {
+/** keepScroll: stay where the user is reading unless they were already at the bottom. */
+function renderMain(keepScroll = false) {
   const m = $('#main');
+  const prevTop = m.scrollTop;
+  const atBottom = m.scrollHeight - m.scrollTop - m.clientHeight < 120;
   if (!turns.length) {
     const ask = (k: keyof Strings) => () => send(t(k));
     const fill = (k: keyof Strings) => () => { const i = $<HTMLTextAreaElement>('#input'); i.value = t(k); i.focus(); i.dispatchEvent(new Event('input')); };
@@ -222,8 +235,8 @@ function renderMain() {
   m.innerHTML = `<div class="chat">${turns.map((x, i) => `<div class="msg ${x.role}"${i === turns.length - 1 ? ' id="last"' : ''}>${body(x) || waitDots()}</div>${stats(x, i)}${extras(x, i)}${x.role === 'user' && !busy ? `<div class="qact"><button class="edit" data-cp="${i}">⧉ ${t('copy')}</button><button class="edit" data-e="${i}">✎ ${t('editQ')}</button></div>` : ''}`).join('')}
     ${mode === 'shopping' ? `<div class="note">${t('shoppingNote')}</div>` : ''}${showStatusInChat() ? '<div id="status"></div>' : ''}</div>`;
   renderStatus();
-  m.scrollTop = m.scrollHeight;
-  if (!busy) drawDiagrams(m).then(() => { if (m.scrollHeight - m.scrollTop - m.clientHeight < 400) m.scrollTop = m.scrollHeight; });
+  m.scrollTop = keepScroll && !atBottom ? prevTop : m.scrollHeight;
+  if (!busy) drawDiagrams(m).then(() => { if ((!keepScroll || atBottom) && m.scrollHeight - m.scrollTop - m.clientHeight < 400) m.scrollTop = m.scrollHeight; });
   m.querySelectorAll<HTMLButtonElement>('[data-e]').forEach((b) => (b.onclick = () => {
     const i = +b.dataset.e!; const q = turns[i].text;
     if (turns[i].photo) { pending = turns[i].photo!; pendingDoc = null; }
@@ -238,6 +251,16 @@ function renderMain() {
 }
 
 /** In a chat, the model card shows when offline answers are on, or when a question still needs the model. */
+/** Redraws the chat and the send button only: the typed text, keyboard, open sheet and drawer stay as they are. */
+function refreshChat(keepScroll = false) {
+  if (!document.getElementById('main')) { shell(); return; }
+  renderMain(keepScroll);
+  const b = document.getElementById('send');
+  if (b) { b.innerHTML = svg(busy ? ic.stop : ic.send); b.setAttribute('aria-label', busy ? t('cdStop') : t('cdSend')); }
+  setMicUi();
+  renderAtt();
+}
+
 function showStatusInChat(): boolean {
   const last = turns[turns.length - 1];
   return !O.isOn() || !last || last.role === 'user' || !!last.failed;
@@ -289,9 +312,34 @@ function renderStatus() {
 let wakeLock: any = null;
 async function keepAwake(on: boolean) {
   try {
-    if (on && !wakeLock && (navigator as any).wakeLock) wakeLock = await (navigator as any).wakeLock.request('screen');
+    if (on && wakeLock?.released) wakeLock = null; // the system lets go of it when the page is hidden
+    if (on && !wakeLock && (navigator as any).wakeLock) {
+      const l = await (navigator as any).wakeLock.request('screen');
+      wakeLock = l;
+      l.addEventListener?.('release', () => { if (wakeLock === l) wakeLock = null; });
+    }
     if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
   } catch { wakeLock = null; }
+}
+/** Progress comes per downloaded/read piece (thousands for a big file): repaint at most ~5 times a second. */
+let lastStatusPaint = 0;
+function renderStatusSoon() {
+  const now = performance.now();
+  if (now - lastStatusPaint < 200) return;
+  lastStatusPaint = now;
+  renderStatus();
+}
+/** Engine errors are English; show them in the app language. */
+function engineMsg(e: any): string {
+  const m = String(e?.message || e);
+  let x: RegExpMatchArray | null;
+  if (/^Model file is damaged/.test(m)) return t('errDamaged');
+  if (/^Not enough free space/.test(m)) return t('errNoSpace');
+  if (/^Model file not found/.test(m)) return t('errNotFound');
+  if ((x = m.match(/^Download paused at (\d+)% \(([\s\S]*)\)\. Tap Resume/))) return t('errPaused', { pct: x[1], err: x[2] });
+  if ((x = m.match(/^Incomplete download \((\d+) of (\d+) bytes\)/))) return t('errIncomplete', { done: x[1], total: x[2] });
+  if ((x = m.match(/^Download failed \(HTTP (\d+)\)/))) return t('errDownloadHttp', { code: x[1] });
+  return m;
 }
 let resumeOnReturn = false;
 document.addEventListener('visibilitychange', () => {
@@ -302,19 +350,23 @@ document.addEventListener('visibilitychange', () => {
 
 async function startDownload() {
   if (modelState === 'downloading') return;
-  partial = await E.partialBytes();
-  modelState = 'downloading'; progress = partial / E.LITE.sizeBytes; abort = new AbortController(); renderStatus();
+  // Set before the first await, so a double tap (or tap + return to the app) can't start two downloads.
+  modelState = 'downloading'; abort = new AbortController(); progress = partial / E.LITE.sizeBytes;
+  const signal = abort.signal;
   resumeOnReturn = false;
+  renderStatus();
+  partial = await E.partialBytes();
+  progress = partial / E.LITE.sizeBytes; renderStatus();
   keepAwake(true);
   try {
-    await E.downloadModel((p) => { progress = p.done / p.total; partial = p.done; renderStatus(); }, abort.signal);
+    await E.downloadModel((p) => { progress = p.done / p.total; partial = p.done; renderStatusSoon(); }, signal);
     modelState = 'stored'; partial = 0;
   } catch (e: any) {
     partial = await E.partialBytes();
     modelState = 'idle';
     if (e?.name !== 'AbortError') {
       if (document.visibilityState !== 'visible') { resumeOnReturn = true; } // paused by iOS: carry on when user comes back
-      else { modelState = 'failed'; failIsDownload = true; failMsg = String(e?.message || e); }
+      else { modelState = 'failed'; failIsDownload = true; failMsg = engineMsg(e); }
     }
   }
   keepAwake(false);
@@ -326,15 +378,16 @@ async function startLoad() {
   if (device) device.soft = device.soft.filter((r) => r.kind !== 'crashed');
   modelState = 'loading'; progress = 0; renderStatus();
   try {
-    await E.loadModel((p) => { progress = p.done / p.total; renderStatus(); });
+    await E.loadModel((p) => { progress = p.done / p.total; renderStatusSoon(); });
     modelState = 'ready';
     const lastTurn = turns[turns.length - 1];
     if (lastTurn?.role === 'model' && lastTurn.failed && turns[turns.length - 2]?.role === 'user') turns.pop();
-    if (turns[turns.length - 1]?.role === 'user') { const q = turns.pop()!; setTimeout(() => send(q.text)); }
+    // Ask the waiting question again, with its photo or file.
+    if (turns[turns.length - 1]?.role === 'user') { const q = turns.pop()!; setTimeout(() => send(q.text, q.photo ?? null, q.doc ?? null)); }
   } catch (e: any) {
     modelState = 'failed';
     failIsDownload = false;
-    failMsg = reasonText({ kind: 'loadFailed', err: String(e?.message || e) });
+    failMsg = reasonText({ kind: 'loadFailed', err: engineMsg(e) });
   }
   renderMain();
 }
@@ -360,10 +413,11 @@ function submit() {
   const i = $<HTMLTextAreaElement>('#input');
   const text = i.value.trim();
   if (!text && !pending && !pendingDoc) return;
-  if (dictation) dictation.stop();
   const photo = pending;
   const doc = pendingDoc;
   if (photo && !photoOk()) return;
+  // Abort (not stop): a stopped dictation would put the text it heard back into the cleared box.
+  if (dictation) { dictation.abort(); dictation = null; setMicUi(); }
   i.value = ''; i.style.height = 'auto';
   pending = null; pendingDoc = null;
   send(text || t(doc ? 'docAsk' : 'photoAsk'), photo, doc);
@@ -424,13 +478,21 @@ async function answerOnline(reply: Turn, question: string, history: E.Turn[], ph
   flush();
   O.record(end);
   reply.text = raw.trim();
+  // Refused by the server: say so. Never answer it on the device instead.
+  if (end.kind === 'blocked') {
+    reply.text = t('onlineBlocked'); reply.failed = true;
+    reply.firstMs = undefined; reply.sources = undefined; reply.products = undefined;
+    return true;
+  }
   if (end.kind === 'done' && reply.text) { reply.ms = Math.round(performance.now() - t0); reply.src = 'online'; return true; }
   if (end.kind === 'stopped' || stopRequested) {
     if (reply.text) reply.src = 'online'; else { reply.text = t('stopped'); reply.failed = true; }
     reply.firstMs = undefined;
     return true;
   }
-  // Limit, error, no first word in time or the connection dropped: answer on the device, from the start.
+  // The connection dropped (or stalled) after part of the answer arrived: keep that part, marked as cut off.
+  if (reply.text) { reply.src = 'online'; reply.partial = true; reply.ms = Math.round(performance.now() - t0); return true; }
+  // Limit, error or no first word in time: answer on the device, from the start.
   reply.text = ''; reply.firstMs = undefined; reply.sources = undefined; reply.products = undefined;
   return false;
 }
@@ -506,26 +568,35 @@ async function send(text: string, photo: P.Photo | null = null, newDoc: D.Doc | 
   stopRequested = false;
   const reply: Turn = { role: 'model', text: '', ...(hard ? { hard: true } : {}) };
   turns.push(reply);
-  shell();
-  let final = false;
-  if (photoEdit && photo) { await answerImage(reply, text, { mime: photo.mime, data: photo.data }); final = true; }
-  else if (!photo && !talk && imgEdit) { await answerImage(reply, imgEdit.slice(0, 480), prevRef); final = true; }
-  else if (!photo && !doc && !talk && isImageRequest(text)) { await answerImage(reply, text); final = true; }
-  if (!final && online) final = await answerOnline(reply, text, history, photo, doc, hard);
-  // Photos can't fall back to the device, and hard questions are much better online: try online once more first.
-  if (!final && (photo || hard) && online && !stopRequested && O.ready()) final = await answerOnline(reply, text, history, photo, doc, hard);
-  if (!final) {
-    if (photo) { reply.text = t('photoFailed'); reply.failed = true; } // the device model can't see photos
-    else if (E.isLoaded()) {
-      paint(reply);
-      const q = doc ? `${t('docForModel', { name: doc.name })}\n<<<\n${D.excerpt(doc, text, E.isIOS ? 700 : 1800).text}\n>>>\n\n${text}` : text;
-      await answerOffline(reply, [...history, { role: 'user', text: q }]);
+  refreshChat();
+  try {
+    let final = false;
+    if (photoEdit && photo) { await answerImage(reply, text, { mime: photo.mime, data: photo.data }); final = true; }
+    else if (!photo && !talk && imgEdit) { await answerImage(reply, imgEdit.slice(0, 480), prevRef); final = true; }
+    else if (!photo && !doc && !talk && isImageRequest(text)) { await answerImage(reply, text); final = true; }
+    if (!final && online) final = await answerOnline(reply, text, history, photo, doc, hard);
+    // Photos can't fall back to the device, and hard questions are much better online: try online once more first.
+    if (!final && (photo || hard) && online && !stopRequested && O.ready()) final = await answerOnline(reply, text, history, photo, doc, hard);
+    if (!final) {
+      if (photo) { reply.text = t('photoFailed'); reply.failed = true; } // the device model can't see photos
+      else if (E.isLoaded()) {
+        paint(reply);
+        const q = doc ? `${t('docForModel', { name: doc.name })}\n<<<\n${D.excerpt(doc, text, E.isIOS ? 700 : 1800).text}\n>>>\n\n${text}` : text;
+        await answerOffline(reply, [...history, { role: 'user', text: q }]);
+      }
+      else { reply.text = t('onlineBusy'); reply.failed = true; }
     }
-    else { reply.text = t('onlineBusy'); reply.failed = true; }
+  } catch (e: any) {
+    flush(); onlineWaiting = false; waitLabel = 'gettingOnline';
+    if (!reply.text.trim()) { reply.text = t('errorAnswer', { err: String(e?.message || e) }); reply.failed = true; }
+  } finally {
+    busy = false;
+    persist();
+    const next = pendingOpen;
+    pendingOpen = null;
+    if (next) openChat(next.id ? loadChats().find((c) => c.id === next.id) : undefined);
+    else refreshChat(true);
   }
-  busy = false;
-  persist();
-  shell();
   return reply;
 }
 
@@ -705,13 +776,26 @@ async function saveDiagram(svg: SVGSVGElement) {
     g.drawImage(img, pad * k, pad * k, w * k, h * k);
     const blob: Blob = await new Promise((ok, bad) => c.toBlob((b) => (b ? ok(b) : bad(new Error('blob'))), 'image/png'));
     const file = new File([blob], 'elric-diagram.png', { type: 'image/png' });
-    if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch { /* user closed the sheet */ } return; }
+    if (navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); return; }
+      catch (e: any) { if (e?.name === 'AbortError') return; } // user closed the sheet; anything else (e.g. iPhone lost the tap): download instead
+    }
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'elric-diagram.png'; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   } catch { toast(t('saveFailed'), 'err'); }
 }
 
 let toastTimer = 0;
+/** Stays up until tapped: "New version — tap to refresh". */
+function updateBanner() {
+  let el = document.getElementById('upd');
+  if (!el) {
+    el = document.createElement('button'); el.id = 'upd'; el.setAttribute('type', 'button'); el.className = 'toast show upd';
+    el.onclick = () => location.reload();
+    document.body.appendChild(el);
+  }
+  el.textContent = t('newVersion');
+}
 function toast(msg: string, kind: 'ok' | 'err' = 'ok') {
   let el = document.getElementById('toast');
   if (!el) { el = document.createElement('div'); el.id = 'toast'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); document.body.appendChild(el); }
@@ -728,7 +812,7 @@ function reportSheet(i: number) {
     <textarea id="fbnote" class="fbnote" rows="3" maxlength="4000" placeholder="${t('fbPlaceholder')}" aria-label="${t('fbPlaceholder')}"></textarea>
     <p class="fbinfo">${t('fbInfo')}</p>
     <div class="fbbtns"><button class="ghost" id="fbcancel">${t('cancel')}</button><button class="primary" id="fbsend">${t('fbSend')}</button></div>`, false);
-  $('#fbcancel').onclick = () => { $('#sheet').innerHTML = ''; };
+  $('#fbcancel').onclick = closeSheet;
   const sendBtn = $<HTMLButtonElement>('#fbsend');
   sendBtn.onclick = async () => {
     if (sendBtn.disabled) return;
@@ -851,12 +935,24 @@ function stopTalk() {
   renderTalk();
 }
 
+let sheetReturn: HTMLElement | null = null;
+function closeSheet() {
+  const s = document.getElementById('sheet');
+  if (s) s.innerHTML = '';
+  const back = sheetReturn; sheetReturn = null;
+  if (back?.isConnected) try { back.focus({ preventScroll: true }); } catch { /* ignore */ }
+}
 function sheet(html: string, withClose = true) {
   const s = $('#sheet');
-  s.innerHTML = `<div class="scrim"></div><div class="panel">${html}${withClose ? `<button class="ghost" id="close">${t('close')}</button>` : ''}</div>`;
-  const close = () => (s.innerHTML = '');
-  s.querySelector<HTMLElement>('.scrim')!.onclick = close;
-  if (withClose) $('#close').onclick = close;
+  if (!s.querySelector('.panel')) sheetReturn = document.activeElement as HTMLElement | null;
+  s.innerHTML = `<div class="scrim"></div><div class="panel" role="dialog" aria-modal="true" tabindex="-1">${html}${withClose ? `<button class="ghost" id="close">${t('close')}</button>` : ''}</div>`;
+  const panel = s.querySelector<HTMLElement>('.panel')!;
+  const h = panel.querySelector('h3, .shd');
+  if (h) { h.id = 'sheet-h'; panel.setAttribute('aria-labelledby', 'sheet-h'); }
+  s.querySelector<HTMLElement>('.scrim')!.onclick = closeSheet;
+  if (withClose) $('#close').onclick = closeSheet;
+  // Move focus into the sheet (the panel itself, so a text box doesn't pop the phone keyboard).
+  try { panel.focus({ preventScroll: true }); } catch { /* ignore */ }
 }
 
 /** Online answers on/off. Turning on asks once that the user is 18 or older. */
@@ -866,7 +962,7 @@ function toggleOnline() {
   if (O.age18()) { O.setOn(true); done(); return; }
   sheet(`<h3>${t('onlineAnswers')}</h3><p>${t('age18Text')}</p><button class="primary" id="a18">${t('age18Yes')}</button><button class="ghost" id="a18no">${t('notNow')}</button>`, false);
   $('#a18').onclick = () => { O.confirmAge18(); done(); };
-  $('#a18no').onclick = () => { $('#sheet').innerHTML = ''; };
+  $('#a18no').onclick = closeSheet;
 }
 
 function modeSheet() {
@@ -881,7 +977,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.21';
+const APP_VERSION = '0.4.22';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
@@ -983,6 +1079,8 @@ function openDrawer() {
   void d.offsetWidth;
   d.classList.add('open');
   document.body.classList.add('dw-on');
+  p.setAttribute('tabindex', '-1');
+  try { p.focus({ preventScroll: true }); } catch { /* ignore */ }
 }
 function renderRecents() {
   const box = document.getElementById('d-rc');
@@ -995,7 +1093,7 @@ function renderRecents() {
   box.querySelectorAll<HTMLButtonElement>('[data-c]').forEach((b) => (b.onclick = () => { closeDrawer(); openChat(loadChats().find((c) => c.id === b.dataset.c)); }));
   box.querySelectorAll<HTMLButtonElement>('[data-d]').forEach((b) => (b.onclick = () => {
     const id = b.dataset.d!; saveChats(loadChats().filter((c) => c.id !== id));
-    if (id === chatId) { closeDrawer(); openChat(undefined); } else renderRecents();
+    if (id === chatId) { if (busy) dropCurrent = true; closeDrawer(); openChat(undefined); } else renderRecents();
   }));
 }
 
@@ -1010,7 +1108,7 @@ function editName() {
     <label class="fl">${t('meName')}<input id="pn" maxlength="40" value="${esc(pr.name)}"></label>
     <button class="primary" id="psave">${t('save')}</button>`);
   $('#psave').onclick = () => {
-    localStorage.setItem('elric.profile', JSON.stringify({ name: $<HTMLInputElement>('#pn').value.trim(), study: '' }));
+    localStorage.setItem('elric.profile', JSON.stringify({ ...getProfile(), name: $<HTMLInputElement>('#pn').value.trim() }));
     shell();
   };
 }
@@ -1029,6 +1127,7 @@ function openProfile() {
   renderProfile();
   void p.offsetWidth;
   p.classList.add('open');
+  try { p.querySelector<HTMLElement>('#p-close')?.focus({ preventScroll: true }); } catch { /* ignore */ }
 }
 function renderProfile() {
   const p = document.getElementById('prof');
@@ -1060,7 +1159,7 @@ function renderProfile() {
       row('m-about', li.info, t('menuAbout'))
       + row('m-lic', li.code, t('menuLicenses'))
       + row('p-ver', li.tag, t('version'), APP_VERSION, false))}
-    <p class="pf-foot">${t(isIOS() ? 'installTip' : 'installTipPc')}<br>Elric AI · Version ${APP_VERSION}</p>
+    <p class="pf-foot">${t(isIOS() ? 'installTip' : 'installTipPc')}<br>${t('versionLine', { v: APP_VERSION })}</p>
   </div>`;
   p.querySelector('.pf-in')!.scrollTop = scroll;
   const on = (id: string, f: () => void) => { const b = p.querySelector<HTMLElement>('#' + id); if (b) b.onclick = f; };
@@ -1078,15 +1177,17 @@ function renderProfile() {
   on('p-clear', () => {
     if (!loadChats().length || !confirm(t('clearAllConfirm'))) return;
     localStorage.removeItem(CHATS_KEY);
-    if (chatId) openChat(undefined); else renderProfile();
+    if (busy) { dropCurrent = true; openChat(undefined); } // the answer being written is not saved either
+    else if (chatId) openChat(undefined); else renderProfile();
   });
   on('m-priv', () => sheet(`<h3>${t('menuPrivacy')}</h3><p>${t('privacyBody')}</p>${LEGAL_LINKS()}`));
   on('m-about', () => sheet(`<h3>${t('menuAbout')}</h3><p>${t('aboutBody')}</p>${LEGAL_LINKS()}`));
   on('m-lic', () => sheet(`<h3>${t('menuLicenses')}</h3><p>${t('licensesIntro')}</p>${LICENSES.map(([n, l, u]) => `<p class="lic"><b>${n}</b><br><a href="${u}" target="_blank" rel="noopener">${l}</a></p>`).join('')}`));
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || document.querySelector('#sheet .panel')) return;
-  if (document.getElementById('drawer')) closeDrawer(); else closeProfile();
+  if (e.key !== 'Escape' || document.querySelector('.dview')) return; // the diagram viewer closes itself
+  if (document.querySelector('#sheet .panel')) closeSheet(); // the top-most layer first
+  else if (document.getElementById('drawer')) closeDrawer(); else closeProfile();
 });
 
 setLang(getLang());
@@ -1095,5 +1196,6 @@ E.checkDevice().then((r) => { device = r; renderStatus(); });
 if ('serviceWorker' in navigator) {
   const had = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register('./sw.js').then((r) => r.update()).catch(() => {});
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !busy && modelState !== 'downloading' && modelState !== 'loading') location.reload(); });
+  // A new version took over: offer a refresh, never reload on its own (a draft, photo or answer would be lost).
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (had) updateBanner(); });
 }

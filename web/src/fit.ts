@@ -9,6 +9,8 @@ export const standalone = (): boolean =>
 
 function setH() {
   const vv = window.visualViewport;
+  // Pinch-zoom (a table, the diagram viewer) also shrinks the visual viewport: not a keyboard, not a new height.
+  if (vv && Math.abs(vv.scale - 1) > 0.01) return;
   // In Home Screen mode on iOS, visualViewport shrinks with the keyboard; innerHeight does not.
   const h = Math.round(vv ? vv.height : window.innerHeight);
   root.style.setProperty('--app-h', h + 'px');

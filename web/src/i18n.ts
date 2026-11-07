@@ -227,6 +227,16 @@ const en = {
   imageBlocked: 'Elric can’t make that image. Try describing something else.',
   imageLimit: 'You’ve reached today’s image limit. Try again later.',
   imageFailed: 'Couldn’t make the image right now. Tap ✎ to try again.',
+  onlineBlocked: 'Elric can’t help with that. Try asking something else.',
+  partialAnswer: 'Answer cut off: the connection dropped',
+  newVersion: 'New version — tap to refresh',
+  versionLine: 'Elric AI · Version {v}',
+  errDamaged: 'Model file is damaged. Please remove and download again.',
+  errNoSpace: 'Not enough free space on this device for Elric Lite.',
+  errPaused: 'Download paused at {pct}% ({err}). Tap Resume download to continue.',
+  errIncomplete: 'Incomplete download ({done} of {total} bytes)',
+  errNotFound: 'Model file not found on this device. Please download it again.',
+  errDownloadHttp: 'Download failed (HTTP {code})',
 };
 
 export type Strings = typeof en;
@@ -455,6 +465,16 @@ const hi: Strings = {
   imageBlocked: 'Elric यह तस्वीर नहीं बना सकता। कुछ और बताकर देखें।',
   imageLimit: 'आज की तस्वीरों की सीमा पूरी हो गई। बाद में फिर कोशिश करें।',
   imageFailed: 'अभी तस्वीर नहीं बन सकी। फिर से कोशिश करने के लिए ✎ दबाएँ।',
+  onlineBlocked: 'Elric इसमें मदद नहीं कर सकता। कुछ और पूछकर देखें।',
+  partialAnswer: 'जवाब बीच में कट गया: कनेक्शन टूट गया',
+  newVersion: 'नया वर्शन — रीफ़्रेश के लिए टैप करें',
+  versionLine: 'Elric AI · वर्शन {v}',
+  errDamaged: 'मॉडल फ़ाइल खराब है। कृपया हटाकर फिर से डाउनलोड करें।',
+  errNoSpace: 'इस डिवाइस पर Elric Lite के लिए पर्याप्त जगह नहीं है।',
+  errPaused: 'डाउनलोड {pct}% पर रुक गया ({err})। जारी रखने के लिए ‘डाउनलोड जारी रखें’ दबाएँ।',
+  errIncomplete: 'डाउनलोड अधूरा है ({total} में से {done} बाइट)',
+  errNotFound: 'मॉडल फ़ाइल इस डिवाइस पर नहीं मिली। कृपया फिर से डाउनलोड करें।',
+  errDownloadHttp: 'डाउनलोड नहीं हो सका (HTTP {code})',
 };
 
 const tables: Record<Lang, Strings> = { en, hi };

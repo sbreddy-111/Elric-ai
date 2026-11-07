@@ -120,6 +120,7 @@ export function clearCrashFlag(): void {
 export function isStored(): boolean {
   return !!localStorage.getItem(STORED_FLAG);
 }
+if (typeof localStorage !== 'undefined' && localStorage.getItem(STORED_FLAG)) setTimeout(() => cacheRuntime(), 3000); // older installs: fetch the runtime once
 
 // ---------- Storage (OPFS first, Cache API fallback) ----------
 
@@ -311,6 +312,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * where it stopped instead of starting over.
  */
 export async function downloadModel(onProgress: (p: Progress) => void, signal: AbortSignal): Promise<void> {
+  await downloadModelFile(onProgress, signal);
+  cacheRuntime(); // the model is on the device now: keep the runtime for offline use too
+}
+async function downloadModelFile(onProgress: (p: Progress) => void, signal: AbortSignal): Promise<void> {
   try {
     await navigator.storage?.persist?.();
   } catch {
@@ -485,7 +490,8 @@ export async function loadModel(onProgress?: (p: Progress) => void): Promise<voi
   // If the page dies while this flag is set, next launch shows an honest "ran out of memory" state.
   localStorage.setItem(LOADING_FLAG, String(Date.now()));
   try {
-    const fileset = await FilesetResolver.forGenAiTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai@0.10.30/wasm');
+    // Runtime served from this site (copied from node_modules at build; see vite.config.ts), so it works offline.
+    const fileset = await FilesetResolver.forGenAiTasks(RUNTIME_BASE());
     llm = await LlmInference.createFromOptions(fileset, {
       baseOptions: { modelAssetBuffer: counted.getReader() },
       maxTokens: MAX_TOKENS,
@@ -496,6 +502,18 @@ export async function loadModel(onProgress?: (p: Progress) => void): Promise<voi
   } finally {
     localStorage.removeItem(LOADING_FLAG);
   }
+  cacheRuntime();
+}
+
+declare const __MP_DIR__: string;
+const RUNTIME_BASE = () => new URL(__MP_DIR__, document.baseURI).href.replace(/\/$/, '');
+/** Asks the service worker to keep the on-device runtime for offline use (only once the model is on the device). */
+export function cacheRuntime(): void {
+  try {
+    const sw = navigator.serviceWorker;
+    if (!sw) return;
+    sw.ready.then((r) => r.active?.postMessage({ type: 'cache-runtime' })).catch(() => {});
+  } catch { /* no service worker */ }
 }
 
 export interface Turn {
@@ -520,8 +538,10 @@ export function countTokens(text: string): number {
 function render(system: string, turns: Turn[]): string {
   if ((LITE as any).chat === 'gemma3') {
     let g = '';
+    // Gemma 3 has no system turn: the instructions go in front of the first user turn.
+    const first = turns.findIndex((t) => t.role === 'user');
     turns.forEach((t, i) => {
-      const txt = i === 0 && t.role === 'user' ? `${system}\n\n${t.text}` : t.text;
+      const txt = i === first ? `${system}\n\n${t.text}` : t.text;
       g += `<start_of_turn>${t.role === 'model' ? 'model' : 'user'}\n${txt}<end_of_turn>\n`;
     });
     return g + '<start_of_turn>model\n';
@@ -544,7 +564,9 @@ function buildPrompt(system: string, turns: Turn[]): string {
   while (start < turns.length - 1) {
     const size = llm?.sizeInTokens(prompt) ?? 0;
     if (size + reserve <= MAX_TOKENS) break;
+    // Drop a whole question + answer at a time, so the oldest turn left is always a question.
     start++;
+    while (start < turns.length - 1 && turns[start].role !== 'user') start++;
     prompt = render(system, turns.slice(start));
   }
   return prompt;
