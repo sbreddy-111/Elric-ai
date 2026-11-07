@@ -161,6 +161,11 @@ const svg = (p: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="current
 
 function shell() {
   closeDrawer();
+  // Sheets live on <body>, outside #app, so they always show above the drawer and profile
+  // (in Home Screen mode #app is position:fixed, which would trap them underneath).
+  let sh = document.getElementById('sheet');
+  if (!sh) { sh = document.createElement('div'); sh.id = 'sheet'; document.body.appendChild(sh); }
+  sh.innerHTML = '';
   $('#app').innerHTML = `
   <header class="top">
     <button class="icon" id="menu" aria-label="${t('cdMenu')}">${svg(ic.menu)}</button>
@@ -177,8 +182,7 @@ function shell() {
     <textarea id="input" rows="1" placeholder="${t(pending ? 'photoHint' : pendingDoc ? 'docHint' : 'composerHint')}"></textarea>
     <button type="button" class="icon mic${dictation ? ' on' : ''}" id="mic" aria-label="${t(dictation ? 'cdMicStop' : 'cdMic')}">${svg(ic.mic)}</button>
     <button type="submit" class="send" id="send" aria-label="${busy ? t('cdStop') : t('cdSend')}">${svg(busy ? ic.stop : ic.send)}</button>
-  </form>
-  <div id="sheet"></div>`;
+  </form>`;
   $('#menu').onclick = openDrawer;
   $('#modebtn').onclick = modeSheet;
   $('#lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
@@ -857,10 +861,11 @@ function sheet(html: string, withClose = true) {
 
 /** Online answers on/off. Turning on asks once that the user is 18 or older. */
 function toggleOnline() {
-  if (O.isOn()) { O.setOn(false); shell(); return; }
-  if (O.age18()) { O.setOn(true); shell(); return; }
+  const done = () => { shell(); if (document.querySelector('.pf.open')) renderProfile(); };
+  if (O.isOn()) { O.setOn(false); done(); return; }
+  if (O.age18()) { O.setOn(true); done(); return; }
   sheet(`<h3>${t('onlineAnswers')}</h3><p>${t('age18Text')}</p><button class="primary" id="a18">${t('age18Yes')}</button><button class="ghost" id="a18no">${t('notNow')}</button>`, false);
-  $('#a18').onclick = () => { O.confirmAge18(); shell(); };
+  $('#a18').onclick = () => { O.confirmAge18(); done(); };
   $('#a18no').onclick = () => { $('#sheet').innerHTML = ''; };
 }
 
@@ -876,7 +881,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.20';
+const APP_VERSION = '0.4.21';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
