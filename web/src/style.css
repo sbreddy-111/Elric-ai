@@ -276,3 +276,14 @@ html.narrow .tile{font-size:14.5px;min-height:64px;padding:12px 10px}
 /* Keyboard open (any browser mode): pin the app to the visible area so the composer stays above the keyboard */
 html.kb #app{position:fixed;top:0;left:0;right:0;bottom:auto;height:var(--app-h);margin:0 auto;padding-bottom:0}
 html.kb body{overflow:hidden}
+
+/* Elric Agent card inside the chat */
+.agcard{margin:8px 0 2px;padding:12px 14px;border-radius:16px;background:var(--s1);border:1px solid rgba(212,166,74,.45)}
+.agk{font-size:13px;color:var(--gold);font-weight:600;margin-bottom:6px}
+.agcard dl{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;margin:0;font-size:14.5px}
+.agcard dt{color:var(--mu)}.agcard dd{margin:0;font-weight:500;word-break:break-all}.agcard dd.miss{color:var(--warn)}
+.agacts,.agpicks{display:flex;gap:8px;margin-top:12px}
+.agyes{flex:1;padding:11px;border-radius:12px;background:var(--gold);color:#1a1405;font-weight:600;text-align:center}
+.agedit{flex:1;padding:11px;border-radius:12px;border:1px solid var(--line)}
+.agpick{flex:1;padding:11px 4px;border-radius:12px;border:1px solid var(--line);background:var(--s2);font-weight:600;font-size:14px}
+.aglink{display:block;margin:8px 0;text-decoration:none}

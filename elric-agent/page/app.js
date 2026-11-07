@@ -202,7 +202,7 @@
         b.append(r);
       }
       b.append(el('div', 'sub', M[2]));
-      lastCtx = `${res.fields.commodity} modal prices in Rs per quintal (100 kg): ` + rows.slice(0, 3).map((x) => `${x.market} (${x.district}) Rs ${x.modal_price} on ${x.arrival_date}`).join('; ');
+      lastCtx = `${res.fields.commodity} modal prices in Rs per quintal (100 kg): ` + rows.slice(0, 3).map((x) => `${x.market} (${x.district}) Rs ${x.modal_price} per quintal = Rs ${(Number(x.modal_price) / 100).toFixed(2)} per kg, on ${x.arrival_date}`).join('; ');
     } catch {
       wait.remove();
       b.append(el('div', 'sub', M[4]));

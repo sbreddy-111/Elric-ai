@@ -17,8 +17,10 @@ const defaultMode = (): Mode => { const m = localStorage.getItem('elric.mode'); 
 let mode: Mode = defaultMode();
 let short = localStorage.getItem('elric.length') !== 'long';
 /** A chat turn; photo and file text live only in memory, never in saved chats. */
-type Turn = E.Turn & { photo?: P.Photo; doc?: D.Doc; image?: string; reported?: boolean; partial?: boolean; sources?: O.Src[]; products?: O.Prod[]; imgPrompt?: string; hard?: boolean };
+type Turn = E.Turn & { agent?: AgentRes; payUrl?: string; photo?: P.Photo; doc?: D.Doc; image?: string; reported?: boolean; partial?: boolean; sources?: O.Src[]; products?: O.Prod[]; imgPrompt?: string; hard?: boolean };
 let turns: Turn[] = [];
+/** Elric Agent card inside the chat (from the ai-agent function). closed = answered with Yes/Edit or superseded. */
+interface AgentRes { task: string; lang: string; script: string; fields: Record<string, string | null>; missing: string[]; confirm_text: string; closed?: boolean }
 interface Chat { id: string; title: string; mode: Mode; turns: Turn[]; at: number }
 const CHATS_KEY = 'elric.chats';
 const CUR_KEY = 'elric.currentChat';
@@ -109,6 +111,8 @@ const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./,
 function extras(x: Turn, i: number): string {
   if (x.role !== 'model' || (busy && i === turns.length - 1)) return '';
   let h = '';
+  if (x.agent) h += agentCard(x.agent, i);
+  if (x.payUrl && /^https:\/\//.test(x.payUrl)) h += `<a class="agyes aglink" href="${esc(x.payUrl)}" target="_blank" rel="noopener">${t('agOpenPay')}</a>`;
   const src = (x.sources || []).filter((s) => /^https?:\/\//.test(s.u) && host(s.u));
   if (src.length && !x.failed) h += `<div class="srcs"><span>${t('sources')}</span>${src.map((s) => `<a href="${esc(s.u)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(s.t || host(s.u))}">${esc(host(s.u))}</a>`).join('')}</div>`;
   if (x.products?.length && !x.failed) {
@@ -209,6 +213,106 @@ function shell() {
   renderProfile();
 }
 
+// ---------------------------------------------------------------- Elric Agent in the chat
+const AGENT_URL = O.SB_URL + '/functions/v1/ai-agent';
+const AG_ICON: Record<string, string> = { electricity_bill: '💡', mobile_recharge: '📱', mandi_price: '🌶️', bus_search: '🚌', pm_kisan_status: '🌾' };
+const AG_PICKS: Record<string, string[]> = { biller: ['APCPDCL', 'APSPDCL', 'APEPDCL'], operator: ['Jio', 'Airtel', 'Vi', 'BSNL'] };
+const PAY_URL: Record<string, string> = {
+  APCPDCL: 'https://www.apcpdcl.in/ConsumerDashboard/KnownBillPay',
+  APSPDCL: 'https://apspdcl.in/ConsumerDashboard/serviceDetails.jsp',
+  APEPDCL: 'https://www.apeasternpower.com/payWithoutLogin',
+};
+/** Cheap on-phone check before asking the server: only messages that look like a task go to the agent. */
+const AGENT_RE = /\b(bill|current bill|karent|bijli|electricity|power|apcpdcl|apspdcl|apepdcl|recharge|top ?up|mandi|market (price|rate|yard)|rate|dhara|bhav|bhaav|bus|kisan|mirchi|chilli|chillies|cotton|patti|paddy|vadlu|dhan|onion|tomato|groundnut|maize)\b|బిల్లు|కరెంట్|రీఛార్జ్|ధర|రేటు|బస్|కిసాన్|మిర్చి|పత్తి|బిల|बिल|बिजली|रिचार्ज|भाव|मंडी|बस|किसान|मिर्च|कपास|धान/i;
+let agentEdit: AgentRes | null = null;
+const openAgentTurn = () => { const x = [...turns].reverse().find((y) => y.role === 'model' && y.agent); return x?.agent && !x.agent.closed && x.agent.missing.length ? x.agent : null; };
+
+function agentCard(a: AgentRes, i: number): string {
+  const lab = (k: string) => t(('ag_' + k) as keyof Strings) || k;
+  const OPN: Record<string, string> = { JIO: 'Jio', AIRTEL: 'Airtel', VI: 'Vi', BSNL: 'BSNL' };
+  const rows = Object.keys(a.fields || {}).map((k) => {
+    const v = a.fields[k];
+    const shown = v ? (k === 'operator' ? OPN[v] || v : k === 'amount' ? '₹' + v : v) : k === 'place' ? 'Andhra Pradesh' : '';
+    return `<dt>${esc(lab(k))}</dt><dd class="${shown ? '' : 'miss'}">${shown ? esc(shown) : '—'}</dd>`;
+  }).join('');
+  let act = '';
+  if (!a.closed && !busy) {
+    const picks = a.missing.length ? AG_PICKS[a.missing[0]] : null;
+    if (picks) act = `<div class="agpicks">${picks.map((p) => `<button class="agpick" data-ag="${i}" data-act="pick" data-v="${esc(p)}">${esc(p)}</button>`).join('')}</div>`;
+    else if (!a.missing.length) act = `<div class="agacts"><button class="agyes" data-ag="${i}" data-act="yes">${t('agYes')}</button><button class="agedit" data-ag="${i}" data-act="edit">${t('agEdit')}</button></div>`;
+  }
+  return `<div class="agcard"><div class="agk">${AG_ICON[a.task] || '⚡'} ${esc(t(('agT_' + a.task) as keyof Strings) || a.task)}</div>${rows ? `<dl>${rows}</dl>` : ''}${act}</div>`;
+}
+
+/** Sends the message to the agent when it looks like a task (or answers an open card). false = let the normal chat answer. */
+async function tryAgent(text: string, force = false): Promise<boolean> {
+  const open = agentEdit || openAgentTurn();
+  if (!force && !open && !AGENT_RE.test(text)) return false;
+  if (!navigator.onLine) return false;
+  busy = true;
+  const user: Turn = { role: 'user', text };
+  const reply: Turn = { role: 'model', text: '' };
+  turns.push(user, reply);
+  refreshChat();
+  let ok = false;
+  try {
+    const body: Record<string, unknown> = { text: text.slice(0, 400), ui_lang: getLang() };
+    if (open) body.prev = { task: open.task, fields: open.fields, lang: open.lang, script: open.script };
+    const r = await fetch(AGENT_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: O.CHAT_KEY }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
+    if (r.ok) {
+      const res = (await r.json()) as AgentRes;
+      if (res && res.task && res.task !== 'unknown' && typeof res.confirm_text === 'string') {
+        if (open) open.closed = true;
+        agentEdit = null;
+        reply.text = res.confirm_text;
+        reply.agent = { task: res.task, lang: res.lang, script: res.script, fields: res.fields || {}, missing: res.missing || [], confirm_text: res.confirm_text };
+        ok = true;
+      }
+    }
+  } catch { /* fall back to the normal chat */ }
+  if (!ok) turns.splice(turns.indexOf(user), 2);
+  busy = false;
+  if (ok) persist();
+  refreshChat();
+  return ok;
+}
+
+async function agentYes(a: AgentRes) {
+  a.closed = true;
+  const f = a.fields;
+  if (a.task === 'electricity_bill') {
+    const sn = f.service_number || '';
+    try { await navigator.clipboard?.writeText(sn); } catch { /* not allowed */ }
+    turns.push({ role: 'model', text: t('agPayText', { b: f.biller || '', sn }), payUrl: PAY_URL[f.biller || ''] || PAY_URL.APCPDCL });
+  } else if (a.task === 'mandi_price') {
+    const reply: Turn = { role: 'model', text: '' };
+    turns.push(reply); busy = true; refreshChat();
+    reply.text = await mandiText(f.commodity || '', f.place || '');
+    busy = false;
+  } else {
+    turns.push({ role: 'model', text: t('agSoon') });
+  }
+  persist();
+  refreshChat();
+}
+
+/** Latest Agmarknet prices, written as chat text (so follow-up questions are answered by the normal chat). */
+async function mandiText(crop: string, place: string): Promise<string> {
+  const base = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=${encodeURIComponent(crop)}`;
+  type Row = { market: string; district: string; variety: string; modal_price: string; arrival_date: string };
+  const get = async (x: string) => { const r = await fetch(base + x, { signal: AbortSignal.timeout(10000) }); if (!r.ok) throw new Error(); return ((await r.json()).records || []) as Row[]; };
+  try {
+    let rows: Row[] = [];
+    if (place) { try { rows = await get(`&filters%5Bmarket%5D=${encodeURIComponent(place)}`); } catch { /* next */ } if (!rows.length) { try { rows = await get(`&filters%5Bdistrict%5D=${encodeURIComponent(place)}`); } catch { /* next */ } } }
+    let other = false;
+    if (!rows.length) { rows = await get(''); other = !!place; }
+    rows = rows.filter((x) => Number(x.modal_price) > 0).sort((a, b) => Number(b.modal_price) - Number(a.modal_price)).slice(0, 3);
+    if (!rows.length) return t('agNoPrice');
+    const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    return `**${t('agPriceHead', { c: crop })}**\n${other ? t('agOtherMarkets', { p: place }) + '\n' : ''}\n` + rows.map((x) => { const q = Number(x.modal_price); return `- ${x.market} (${x.district}): **${inr(q / 100)}/kg** · ${inr(q)}/${t('agQuintal')} · ${x.arrival_date}`; }).join('\n') + `\n\n_${t('agSource')}_`;
+  } catch { return t('agPriceFail'); }
+}
+
 /** General-mode Home: greeting, a live Today price card, big task tiles (open Elric Agent on that task),
  *  then the old suggestions as small chips. */
 function homeGeneral(m: HTMLElement, cards: [keyof Strings, () => void][]) {
@@ -226,7 +330,7 @@ function homeGeneral(m: HTMLElement, cards: [keyof Strings, () => void][]) {
   m.querySelectorAll<HTMLButtonElement>('.tile').forEach((b) => (b.onclick = () => {
     const i = +b.dataset.ti!;
     if (i === 5) { const inp = $<HTMLTextAreaElement>('#input'); inp.focus(); return; }
-    openAgent(t(tiles[i][2]));
+    send(t(tiles[i][2]), null, null, true);
   }));
   m.querySelectorAll<HTMLButtonElement>('.hchip').forEach((b) => (b.onclick = cards[+b.dataset.i!][1]));
   renderStatus();
@@ -253,13 +357,7 @@ async function todayCard() {
   }
   const el = document.getElementById('today'); if (!el || !row || !Number(row.modal_price)) return;
   el.innerHTML = `<button class="today"><span class="te">🌶️</span><span><small>${t('todayChilli')} · ${esc(row.market)}</small><b>₹${Number(row.modal_price).toLocaleString('en-IN')} <i>${t('perQuintal')}</i></b><small>${esc(row.arrival_date)} · Agmarknet</small></span></button>`;
-  (el.querySelector('.today') as HTMLButtonElement).onclick = () => openAgent(t('qCrop2'));
-}
-
-/** Elric Agent (tasks: power bill, recharge, mandi price, bus, PM-Kisan) opens as its own full page (/agent/),
- *  so the iPhone keyboard and safe areas behave; its back button returns here. Nothing is saved there. */
-function openAgent(q = '') {
-  location.href = `${import.meta.env.BASE_URL}agent/?from=app&lang=${getLang()}${q ? '&q=' + encodeURIComponent(q) : ''}`;
+  (el.querySelector('.today') as HTMLButtonElement).onclick = () => send(t('qCrop2'), null, null, true);
 }
 
 /** keepScroll: stay where the user is reading unless they were already at the bottom. */
@@ -297,6 +395,13 @@ function renderMain(keepScroll = false) {
     if (turns[i].doc) { pendingDoc = turns[i].doc!; pending = null; }
     turns = turns.slice(0, i); shell();
     const inp = $<HTMLTextAreaElement>('#input'); inp.value = (pending && q === t('photoAsk')) || (pendingDoc && q === t('docAsk')) ? '' : q; inp.focus(); inp.dispatchEvent(new Event('input'));
+  }));
+  m.querySelectorAll<HTMLButtonElement>('[data-ag]').forEach((b) => (b.onclick = () => {
+    const a = turns[+b.dataset.ag!]?.agent; if (!a || a.closed || busy) return;
+    const act = b.dataset.act;
+    if (act === 'pick') send(b.dataset.v || '');
+    else if (act === 'yes') agentYes(a);
+    else if (act === 'edit') { a.closed = true; agentEdit = { ...a, missing: [] }; refreshChat(); const inp = $<HTMLTextAreaElement>('#input'); inp.placeholder = t('agEditHint'); inp.focus(); }
   }));
   m.querySelectorAll<HTMLButtonElement>('[data-r]').forEach((b) => (b.onclick = () => readAloud(+b.dataset.r!)));
   m.querySelectorAll<HTMLButtonElement>('[data-fb]').forEach((b) => (b.onclick = () => reportSheet(+b.dataset.fb!)));
@@ -479,7 +584,7 @@ function submit() {
 
 /** Turns that can be sent to a model as history (no notices, no empty replies). */
 function historyOf(list: Turn[]): E.Turn[] {
-  return list.filter((x) => !x.failed && x.text.trim()).map(({ photo, doc, image, sources, hard, reported, ...x }) => (photo ? { ...x, text: `[${t('photoLabel')}] ${x.text}` } : doc ? { ...x, text: `[📄 ${doc.name}] ${x.text}` } : x));
+  return list.filter((x) => !x.failed && x.text.trim()).map(({ photo, doc, image, sources, hard, reported, agent, payUrl, ...x }) => (photo ? { ...x, text: `[${t('photoLabel')}] ${x.text}` } : doc ? { ...x, text: `[📄 ${doc.name}] ${x.text}` } : x));
 }
 
 let frame = 0;
@@ -598,9 +703,10 @@ async function answerImage(reply: Turn, text: string, ref?: { mime: string; data
 
 let stopRequested = false;
 /** Asks a question (optionally with a photo). Resolves with the answer turn, or null if none was started. */
-async function send(text: string, photo: P.Photo | null = null, newDoc: D.Doc | null = null): Promise<Turn | null> {
+async function send(text: string, photo: P.Photo | null = null, newDoc: D.Doc | null = null, forceAgent = false): Promise<Turn | null> {
   if (busy) return null;
   stopReading();
+  if (!photo && !newDoc && !talk && (await tryAgent(text, forceAgent))) return turns[turns.length - 1];
   const history = historyOf(turns);
   // A file attached earlier in this chat stays in use for follow-up questions (in memory only).
   const doc = newDoc || (photo ? null : [...turns].reverse().find((x) => x.doc)?.doc || null);
@@ -1031,7 +1137,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.27';
+const APP_VERSION = '0.4.28';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
