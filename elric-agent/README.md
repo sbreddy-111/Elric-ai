@@ -20,6 +20,7 @@ Returns `{ task, lang, script, fields, missing, confirm_text }`. `lang` + `scrip
 - Tasks: `electricity_bill` (biller, service_number), `bus_search` (from, to, date YYYY-MM-DD), `pm_kisan_status` (aadhaar_or_mobile_last4), `unknown`.
 - `prev` = last card, so a follow-up ("4455667") fills missing fields and keeps the rest.
 - Model: Groq `openai/gpt-oss-20b` in JSON mode (secret `GROQ_API_KEY`), Gemini flash-lite backup (`GEMINI_API_KEY`).
+- Spoken numbers: digit words in English, Telugu, Hindi, Tenglish, Hinglish ("nine eight seven", "తొమ్మిది ఎనిమిది", "ek do teen", "double five") and Telugu/Devanagari digits become ASCII digits before anything else (only runs of 3+ digits, so "do teen din" stays).
 - No invented values: the server drops a service number / last-4 that is not in the user's words, a biller not in the list, a bad date.
   When something is missing, the question comes from fixed sentences (Telugu, Hindi, English, Tenglish, Hinglish).
 - Privacy: user text is never stored or logged (only status codes). Rate limit: 40/hour, 150/day per IP, via the shared

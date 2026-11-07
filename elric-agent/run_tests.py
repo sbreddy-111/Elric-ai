@@ -1,4 +1,4 @@
-# Runs the 12 sample utterances against the deployed ai-agent function and writes TESTS.md.
+# Runs the sample utterances against the deployed ai-agent function and writes TESTS.md.
 import json, urllib.request, datetime, time
 API='https://hqsqpiwmozgsxiizhaml.supabase.co/functions/v1/ai-agent'
 KEY='sb_publishable_Yv1D_ZUk38W3-ZvYdoAD8A_-fx5gPCT'
@@ -18,6 +18,22 @@ T=[
  ('en','I need a bus from Narasaraopet to Chennai tomorrow','en','bus_search',{'from':'Narasaraopet','to':'Chennai','date':tm},[]),
  ('en','Pay my current bill','en','electricity_bill',{'biller':None,'service_number':None},['biller','service_number']),
  ('en','Book me a movie ticket for tonight','en','unknown',{},[]),
+ ('en','Check my APCPDCL bill, service number nine eight seven six five four three','en','electricity_bill',{'biller':'APCPDCL','service_number':'9876543'},[]),
+ ('te','APCPDCL కరెంట్ బిల్లు, సర్వీస్ నంబర్ తొమ్మిది ఎనిమిది ఏడు ఆరు ఐదు','en','electricity_bill',{'biller':'APCPDCL','service_number':'98765'},[]),
+ ('hi','PM Kisan status batao, aadhaar last 4 digit ek do teen chaar','en','pm_kisan_status',{'aadhaar_or_mobile_last4':'1234'},[]),
+ ('en','Pay my APEPDCL bill, service number 112413A035070847','en','electricity_bill',{'biller':'APEPDCL','service_number':'112413A035070847'},[]),
+ ('en','Recharge my Jio number 9876543210 with 299','en','mobile_recharge',{'mobile_number':'9876543210','operator':'JIO','amount':'299'},[]),
+ ('te','naa Airtel number 9123456780 ki 199 recharge cheyyi','en','mobile_recharge',{'mobile_number':'9123456780','operator':'AIRTEL','amount':'199'},[]),
+ ('hi','मेरे फोन में रिचार्ज करो','en','mobile_recharge',{'mobile_number':None,'operator':None,'amount':None},['mobile_number','operator','amount']),
+ ('hi','Vi number 8899776655 par 155 ka recharge karo','en','mobile_recharge',{'mobile_number':'8899776655','operator':'VI','amount':'155'},[]),
+ ('en','Recharge BSNL nine eight four eight one two three four five six','en','mobile_recharge',{'mobile_number':'9848123456','operator':'BSNL','amount':None},['amount']),
+ ('te','Guntur lo mirchi rate enta','en','mandi_price',{'commodity':'Dry Chillies','place':'Guntur'},[]),
+ ('te','ఈరోజు పత్తి ధర ఎంత?','en','mandi_price',{'commodity':'Cotton'},[]),
+ ('te','bendakaya rate enta ivvala','en','mandi_price',{'commodity':'Bhindi(Ladies Finger)'},[]),
+ ('en','tomato price in Guntur market','en','mandi_price',{'commodity':'Tomato','place':'Guntur'},[]),
+ ('te','biyyam rate enta','en','mandi_price',{'commodity':'Rice'},[]),
+ ('hi','aaj pyaz ka mandi bhav batao','en','mandi_price',{'commodity':'Onion'},[]),
+ ('en','What is the mandi crop price today?','en','mandi_price',{'commodity':None},['commodity']),
 ]
 rows=[];passed=0
 for i,(lg,text,ui,task,exp,miss) in enumerate(T,1):
@@ -45,7 +61,7 @@ for i,(lg,text,ui,task,exp,miss) in enumerate(T,1):
     time.sleep(1)
 esc=lambda s:str(s).replace('|','\\|')
 md=[f"# Elric Agent — function tests\n",f"Function: `ai-agent` (Supabase project hqsqpiwmozgsxiizhaml). Run {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5,minutes=30))):%Y-%m-%d %H:%M} IST. \"Tomorrow\" = {tm}.\n",
-    f"**Result: {passed}/12 pass.** Script: `run_tests.py`. Every request sends ui_lang=en (the page default); the reply language must follow the user's words.\n",
+    f"**Result: {passed}/{len(T)} pass.** Script: `run_tests.py`. Every request sends ui_lang=en (the page default); the reply language must follow the user's words.\n",
     "| # | Lang | Said | Task | Fields | Missing | Reply (confirm_text) | Time | Result |","|---|---|---|---|---|---|---|---|---|"]
 for r in rows: md.append('| '+' | '.join(esc(x) for x in r)+' |')
 open('TESTS.md','w').write('\n'.join(md)+'\n')

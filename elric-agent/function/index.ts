@@ -3,7 +3,7 @@
 // POST JSON { text, ui_lang?: 'te'|'hi'|'en' (default en), prev?: {task, fields, lang, script} }  (apikey header = publishable key)
 //   prev = the task card from the last turn, so a follow-up ("1234 ane number") can fill missing fields.
 // 200 { task, lang, script: 'native'|'latn', fields, missing, confirm_text }  (lang/script = how the user wrote)
-//   task: electricity_bill | mobile_recharge | bus_search | pm_kisan_status | unknown
+//   task: electricity_bill | mobile_recharge | mandi_price | bus_search | pm_kisan_status | unknown
 // 400 bad_request · 401 unauthorized · 429 limit · 503 unavailable
 //
 // Privacy: the user's text is never stored or logged. Only status codes are logged. Rate limit uses
@@ -39,26 +39,31 @@ const PUBLIC_KEYS = (() => {
   return keys;
 })();
 
-const TASKS = ["electricity_bill", "mobile_recharge", "bus_search", "pm_kisan_status", "unknown"] as const;
+const TASKS = ["electricity_bill", "mobile_recharge", "mandi_price", "bus_search", "pm_kisan_status", "unknown"] as const;
 const FIELDS: Record<string, string[]> = {
   electricity_bill: ["biller", "service_number"],
   mobile_recharge: ["mobile_number", "operator", "amount"],
+  mandi_price: ["commodity", "place"],
   bus_search: ["from", "to", "date"],
   pm_kisan_status: ["aadhaar_or_mobile_last4"],
   unknown: [],
 };
 const OPERATORS = ["JIO", "AIRTEL", "VI", "BSNL"];
 const OP_NAME: Record<string, string> = { JIO: "Jio", AIRTEL: "Airtel", VI: "Vi", BSNL: "BSNL" };
+// Optional fields (never asked for).
+const OPTIONAL = new Set(["place"]);
+// Agmarknet commodity names (data.gov.in "Current Daily Price" dataset).
+const CROPS = ["Dry Chillies", "Green Chilli", "Cotton", "Paddy(Dhan)(Common)", "Maize", "Groundnut", "Turmeric", "Bengal Gram(Gram)(Whole)", "Black Gram (Urd Beans)(Whole)", "Green Gram (Moong)(Whole)", "Red Gram", "Jowar(Sorghum)", "Tomato", "Onion", "Potato", "Brinjal", "Banana", "Lemon", "Mango", "Coconut", "Bhindi(Ladies Finger)", "Cabbage", "Cauliflower", "Carrot", "Beetroot", "Bitter gourd", "Bottle gourd", "Drumstick", "Cucumbar(Kheera)", "Capsicum", "Beans", "Ginger(Green)", "Garlic", "Coriander(Leaves)", "Pumpkin", "Ridgeguard(Tori)", "Snakeguard", "Sweet Potato", "Raddish", "Spinach", "Rice", "Wheat"];
 const BILLERS = ["APCPDCL", "APSPDCL", "APEPDCL", "TSSPDCL", "TSNPDCL"];
 
 // Used only when the server dropped a value the model gave (so its sentence would be wrong).
 // Asking for a missing field always uses these fixed sentences (clear, native, never invented).
 const ASK: Record<string, Record<string, string>> = {
-  "te-latn": { mobile_number: "Ye mobile number ki recharge?", operator: "Ye network? (Jio / Airtel / Vi / BSNL)", amount: "Enta recharge cheyyali? (Rs.)",  biller: "Ye current company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "Mee service number cheppandi?", from: "Ekkada nunchi?", to: "Ekkadiki vellali?", date: "Ye roju?", aadhaar_or_mobile_last4: "Aadhaar leda mobile last 4 digits cheppandi?" },
-  "hi-latn": { mobile_number: "Kis mobile number par recharge?", operator: "Kaun sa network? (Jio / Airtel / Vi / BSNL)", amount: "Kitne ka recharge? (Rs.)",  biller: "Kaun si bijli company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "Aapka service number kya hai?", from: "Kahan se?", to: "Kahan jaana hai?", date: "Kis din?", aadhaar_or_mobile_last4: "Aadhaar ya mobile ke last 4 digit batayein?" },
-  te: { mobile_number: "ఏ మొబైల్ నంబర్‌కు రీఛార్జ్?", operator: "ఏ నెట్‌వర్క్? (Jio / Airtel / Vi / BSNL)", amount: "ఎంత రీఛార్జ్ చేయాలి? (₹)", biller: "ఏ విద్యుత్ సంస్థ? (APCPDCL / APSPDCL / APEPDCL)", service_number: "మీ సర్వీస్ నంబర్ ఎంత?", from: "ఎక్కడి నుంచి?", to: "ఎక్కడికి?", date: "ఏ తేదీ?", aadhaar_or_mobile_last4: "ఆధార్ లేదా మొబైల్ చివరి 4 అంకెలు?" },
-  hi: { mobile_number: "किस मोबाइल नंबर पर रिचार्ज?", operator: "कौन सा नेटवर्क? (Jio / Airtel / Vi / BSNL)", amount: "कितने का रिचार्ज? (₹)", biller: "कौन सी बिजली कंपनी? (APCPDCL / APSPDCL / APEPDCL)", service_number: "आपका सर्विस नंबर क्या है?", from: "कहाँ से?", to: "कहाँ तक?", date: "किस तारीख को?", aadhaar_or_mobile_last4: "आधार या मोबाइल के आखिरी 4 अंक?" },
-  en: { mobile_number: "Which mobile number to recharge?", operator: "Which network? (Jio / Airtel / Vi / BSNL)", amount: "How much to recharge? (Rs.)", biller: "Which power company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "What is your service number?", from: "From which city?", to: "To which city?", date: "Which date?", aadhaar_or_mobile_last4: "Last 4 digits of Aadhaar or mobile?" },
+  "te-latn": {commodity: "Ye panta rate kavali? (mirchi, patti, vadlu...)",  mobile_number: "Ye mobile number ki recharge?", operator: "Ye network? (Jio / Airtel / Vi / BSNL)", amount: "Enta recharge cheyyali? (Rs.)",  biller: "Ye current company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "Mee service number cheppandi?", from: "Ekkada nunchi?", to: "Ekkadiki vellali?", date: "Ye roju?", aadhaar_or_mobile_last4: "Aadhaar leda mobile last 4 digits cheppandi?" },
+  "hi-latn": {commodity: "Kis fasal ka bhav chahiye? (mirchi, kapas, dhan...)",  mobile_number: "Kis mobile number par recharge?", operator: "Kaun sa network? (Jio / Airtel / Vi / BSNL)", amount: "Kitne ka recharge? (Rs.)",  biller: "Kaun si bijli company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "Aapka service number kya hai?", from: "Kahan se?", to: "Kahan jaana hai?", date: "Kis din?", aadhaar_or_mobile_last4: "Aadhaar ya mobile ke last 4 digit batayein?" },
+  te: { commodity: "ఏ పంట ధర కావాలి? (మిర్చి, పత్తి, వడ్లు...)", mobile_number: "ఏ మొబైల్ నంబర్‌కు రీఛార్జ్?", operator: "ఏ నెట్‌వర్క్? (Jio / Airtel / Vi / BSNL)", amount: "ఎంత రీఛార్జ్ చేయాలి? (₹)", biller: "ఏ విద్యుత్ సంస్థ? (APCPDCL / APSPDCL / APEPDCL)", service_number: "మీ సర్వీస్ నంబర్ ఎంత?", from: "ఎక్కడి నుంచి?", to: "ఎక్కడికి?", date: "ఏ తేదీ?", aadhaar_or_mobile_last4: "ఆధార్ లేదా మొబైల్ చివరి 4 అంకెలు?" },
+  hi: { commodity: "किस फसल का भाव चाहिए? (मिर्च, कपास, धान...)", mobile_number: "किस मोबाइल नंबर पर रिचार्ज?", operator: "कौन सा नेटवर्क? (Jio / Airtel / Vi / BSNL)", amount: "कितने का रिचार्ज? (₹)", biller: "कौन सी बिजली कंपनी? (APCPDCL / APSPDCL / APEPDCL)", service_number: "आपका सर्विस नंबर क्या है?", from: "कहाँ से?", to: "कहाँ तक?", date: "किस तारीख को?", aadhaar_or_mobile_last4: "आधार या मोबाइल के आखिरी 4 अंक?" },
+  en: { commodity: "Which crop price? (chilli, cotton, paddy...)", mobile_number: "Which mobile number to recharge?", operator: "Which network? (Jio / Airtel / Vi / BSNL)", amount: "How much to recharge? (Rs.)", biller: "Which power company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "What is your service number?", from: "From which city?", to: "To which city?", date: "Which date?", aadhaar_or_mobile_last4: "Last 4 digits of Aadhaar or mobile?" },
 };
 
 const clean = (s: unknown, max: number) =>
@@ -90,6 +95,9 @@ Tasks:
   mobile_number: the 10-digit mobile number exactly as said (join spoken digits; drop +91/0 prefix); else null. "my number"/"naa number" without digits = null.
   operator: one of JIO, AIRTEL, VI (Vodafone/Idea), BSNL, only if the user names it; else null.
   amount: rupees as digits (e.g. "199 plan", "299 ki", "రెండు వందల తొంభై తొమ్మిది" = 299); else null.
+- "mandi_price": today's market (mandi/market yard/APMC) price of a crop (rate/dhara/bhav/ధర/भाव). Fields: commodity, place.
+  commodity: EXACTLY one of ${CROPS.join(" | ")}. Map local words: mirchi/mirapakayalu/endu mirchi/lal mirch/red chilli = "Dry Chillies"; pacchi mirchi/hari mirch = "Green Chilli"; patti/kapas/పత్తి = "Cotton"; vadlu/dhanyam/dhan/rice paddy = "Paddy(Dhan)(Common)"; mokkajonna/makka = "Maize"; verusenaga/palli/moongphali = "Groundnut"; pasupu/haldi = "Turmeric"; senagalu/chana = "Bengal Gram(Gram)(Whole)"; minumulu/urad = "Black Gram (Urd Beans)(Whole)"; pesalu/moong = "Green Gram (Moong)(Whole)"; kandulu/tur/arhar = "Red Gram"; jonnalu = "Jowar(Sorghum)"; tomato/tamata, onion/ullipaya/pyaz, potato/aloo/bangaladumpa, brinjal/vankaya/baingan, banana/arati, lemon/nimma, mango/mamidi, coconut/kobbari; bendakaya/bhindi/okra = "Bhindi(Ladies Finger)"; cabbage/kosu/patta gobhi; cauliflower/gobi/phool gobhi; carrot/gajar; beetroot; kakarakaya/karela = "Bitter gourd"; sorakaya/lauki/anapakaya = "Bottle gourd"; munagakaya/sahjan = "Drumstick"; dosakaya/kheera/cucumber = "Cucumbar(Kheera)"; capsicum/simla mirch; beans/chikkudu; allam/adrak = "Ginger(Green)"; vellulli/lahsun = "Garlic"; kottimeera/dhaniya = "Coriander(Leaves)"; gummadi/kaddu = "Pumpkin"; beerakaya/tori = "Ridgeguard(Tori)"; potlakaya = "Snakeguard"; chilagada dumpa/shakarkand = "Sweet Potato"; mullangi/mooli = "Raddish"; palakura/palak = "Spinach"; biyyam/chawal/rice = "Rice" (vadlu/dhan stays Paddy); godhumalu/gehun = "Wheat". Else null.
+  place: the town/market the user named, in English (e.g. "Guntur"); else null (optional, never ask).
 - "bus_search": find a bus. Fields: from (origin), to (destination) (city names in English, e.g. "Hyderabad"), date (YYYY-MM-DD; resolve today/tomorrow/repu/kal/parsu/weekday names from today's date; else null).
 - "pm_kisan_status": PM-Kisan instalment/payment status. Field: aadhaar_or_mobile_last4 (last 4 digits of Aadhaar or registered mobile, only if the user said them; if they said a full number, keep only the last 4 digits).
   Direction words: destination = "to X", "X ki/X ku/X ke/X kosam", "X jaane/X jaana/X jaanevali", "X vellali", "X కి/కు", "X को/X जाने";
@@ -107,7 +115,7 @@ Rules:
   hi "APCPDCL बिल, सर्विस नंबर 1234. चेक करें?"  Tenglish "Guntur nunchi Hyderabad bus, repu (7 Nov). Chudamaa?"
   Hinglish "Hyderabad se Vijayawada bus, kal (7 Nov). Dekhein?"  In confirm_text write dates like "7 Nov"; in fields.date ALWAYS use YYYY-MM-DD.
   If something is missing, ask only for the first missing field, e.g. "Which service number?".
-  For unknown, say briefly you can now help with power bills, mobile recharge, bus search and PM-Kisan status.
+  For unknown, say briefly you can now help with power bills, mobile recharge, crop market prices, bus search and PM-Kisan status.
 - Numbers stay as digits.
 ${prev ? `This is a follow-up. The previous task card was: ${JSON.stringify(prev)}. Keep its task and its values unless the user changes them; fill missing fields from the new message.` : ""}
 JSON shape: {"task": "...", "lang": "te|hi|en", "fields": {...}, "missing": [...], "confirm_text": "..."}`;
@@ -160,11 +168,11 @@ function readyText(task: string, f: Record<string, string | null>, key: string):
   const d = f.date ? new Date(f.date + "T00:00:00Z").toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" }) : "";
   const op = OP_NAME[f.operator ?? ""] ?? f.operator;
   const R: Record<string, Record<string, string>> = {
-    en: { electricity_bill: `${f.biller} bill, service no. ${f.service_number}. Check it?`, mobile_recharge: `Recharge ${f.mobile_number} (${op}) for Rs.${f.amount}. Go ahead?`, bus_search: `Bus from ${f.from} to ${f.to} on ${d}. Search?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check it?` },
-    te: { electricity_bill: `${f.biller} బిల్లు, సర్వీస్ నంబర్ ${f.service_number}. చెక్ చేయాలా?`, mobile_recharge: `${f.mobile_number} (${op}) కు ₹${f.amount} రీఛార్జ్. చేయాలా?`, bus_search: `${f.from} నుంచి ${f.to} బస్, ${d}. వెతకాలా?`, pm_kisan_status: `PM-కిసాన్ స్టేటస్, చివరి 4 అంకెలు ${f.aadhaar_or_mobile_last4}. చెక్ చేయాలా?` },
-    hi: { electricity_bill: `${f.biller} बिल, सर्विस नंबर ${f.service_number}. चेक करें?`, mobile_recharge: `${f.mobile_number} (${op}) पर ₹${f.amount} का रिचार्ज. करें?`, bus_search: `${f.from} से ${f.to} बस, ${d}. खोजें?`, pm_kisan_status: `PM-किसान स्टेटस, आखिरी 4 अंक ${f.aadhaar_or_mobile_last4}. चेक करें?` },
-    "te-latn": { electricity_bill: `${f.biller} bill, service number ${f.service_number}. Check cheyyamantara?`, mobile_recharge: `${f.mobile_number} (${op}) ki Rs.${f.amount} recharge. Cheyyamantara?`, bus_search: `${f.from} nunchi ${f.to} bus, ${d}. Vetakamantara?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check cheyyamantara?` },
-    "hi-latn": { electricity_bill: `${f.biller} bill, service number ${f.service_number}. Check karein?`, mobile_recharge: `${f.mobile_number} (${op}) par Rs.${f.amount} ka recharge. Karein?`, bus_search: `${f.from} se ${f.to} bus, ${d}. Dhoondhein?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check karein?` },
+    en: { electricity_bill: `${f.biller} bill, service no. ${f.service_number}. Check it?`, mobile_recharge: `Recharge ${f.mobile_number} (${op}) for Rs.${f.amount}. Go ahead?`, mandi_price: `${f.commodity} market price${f.place ? ` near ${f.place}` : " in AP"}. Show it?`, bus_search: `Bus from ${f.from} to ${f.to} on ${d}. Search?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check it?` },
+    te: { electricity_bill: `${f.biller} బిల్లు, సర్వీస్ నంబర్ ${f.service_number}. చెక్ చేయాలా?`, mandi_price: `${f.commodity} మార్కెట్ ధర${f.place ? ` (${f.place})` : ""}. చూపించాలా?`, mobile_recharge: `${f.mobile_number} (${op}) కు ₹${f.amount} రీఛార్జ్. చేయాలా?`, bus_search: `${f.from} నుంచి ${f.to} బస్, ${d}. వెతకాలా?`, pm_kisan_status: `PM-కిసాన్ స్టేటస్, చివరి 4 అంకెలు ${f.aadhaar_or_mobile_last4}. చెక్ చేయాలా?` },
+    hi: { electricity_bill: `${f.biller} बिल, सर्विस नंबर ${f.service_number}. चेक करें?`, mandi_price: `${f.commodity} मंडी भाव${f.place ? ` (${f.place})` : ""}. दिखाएँ?`, mobile_recharge: `${f.mobile_number} (${op}) पर ₹${f.amount} का रिचार्ज. करें?`, bus_search: `${f.from} से ${f.to} बस, ${d}. खोजें?`, pm_kisan_status: `PM-किसान स्टेटस, आखिरी 4 अंक ${f.aadhaar_or_mobile_last4}. चेक करें?` },
+    "te-latn": { electricity_bill: `${f.biller} bill, service number ${f.service_number}. Check cheyyamantara?`, mandi_price: `${f.commodity} market rate${f.place ? ` (${f.place})` : ""}. Chupinchamantara?`, mobile_recharge: `${f.mobile_number} (${op}) ki Rs.${f.amount} recharge. Cheyyamantara?`, bus_search: `${f.from} nunchi ${f.to} bus, ${d}. Vetakamantara?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check cheyyamantara?` },
+    "hi-latn": { electricity_bill: `${f.biller} bill, service number ${f.service_number}. Check karein?`, mandi_price: `${f.commodity} mandi bhav${f.place ? ` (${f.place})` : ""}. Dikhayein?`, mobile_recharge: `${f.mobile_number} (${op}) par Rs.${f.amount} ka recharge. Karein?`, bus_search: `${f.from} se ${f.to} bus, ${d}. Dhoondhein?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check karein?` },
   };
   return R[key]?.[task] ?? R.en[task] ?? "";
 }
@@ -220,6 +228,8 @@ function normalize(raw: string, text: string, prevFields: Record<string, string>
     if (!v || /^(null|none|unknown|n\/a)$/i.test(v)) v = null;
     if (v && k === "biller") { v = v.toUpperCase().replace(/\s/g, ""); if (!BILLERS.includes(v)) v = null; }
     if (v && k === "service_number") { v = v.toUpperCase().replace(/[^A-Z0-9]/g, ""); const nd = v.replace(/\D/g, "").length; if (nd < 3 || v.length - nd > 2 || !alnumInText.includes(v)) v = null; }
+    if (v && k === "commodity") { const c = CROPS.find((x) => x.toLowerCase() === v!.toLowerCase()); v = c ?? null; }
+    if (v && k === "place") { v = v.replace(/[^A-Za-z .-]/g, "").trim().slice(0, 30) || null; }
     if (v && k === "mobile_number") { v = v.replace(/\D/g, "").replace(/^(91|0)(?=\d{10}$)/, ""); if (!/^[6-9]\d{9}$/.test(v) || !digitsInText.includes(v)) v = null; }
     if (v && k === "operator") { v = v.toUpperCase().replace(/[^A-Z]/g, ""); if (/VODAFONE|IDEA|^VI$/.test(v)) v = "VI"; if (/JIO/.test(v)) v = "JIO"; if (/AIRTEL/.test(v)) v = "AIRTEL"; if (!OPERATORS.includes(v) || !new RegExp(v === "VI" ? "\\b(vi|vodafone|idea)\\b|వొడాఫోన్|ఐడియా|वोडाफोन|आइडिया" : v === "JIO" ? "jio|జియో|जियो" : v === "AIRTEL" ? "airtel|ఎయిర్‌?టెల్|एयरटेल" : "bsnl|బీఎస్ఎన్ఎల్|बीएसएनएल", "iu").test(text + " " + (prevFields.operator ?? ""))) v = null; }
     if (v && k === "amount") { v = v.replace(/[^\d.]/g, "").replace(/\.\d*$/, ""); const n = Number(v); if (!v || n < 10 || n > 5000) v = null; else if (!digitsInText.includes(v) && !/[\u0C00-\u0C7F\u0900-\u097F]|hundred|vandala|sau\b|so\b/i.test(text)) v = null; }
@@ -234,7 +244,7 @@ function normalize(raw: string, text: string, prevFields: Record<string, string>
     if (f.from && !f.to && !prevFields.from && cityRole(text, f.from) === "to") { f.to = f.from; f.from = null; }
     else if (f.to && !f.from && !prevFields.to && cityRole(text, f.to) === "from") { f.from = f.to; f.to = null; }
   }
-  const missing = FIELDS[task].filter((k) => !f[k]);
+  const missing = FIELDS[task].filter((k) => !f[k] && !OPTIONAL.has(k));
   let confirm = clean(o?.confirm_text, 200);
   const key = script === "latn" && lang !== "en" ? lang + "-latn" : lang;
   if (missing.length) confirm = ASK[key][missing[0]];
