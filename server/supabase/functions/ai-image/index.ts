@@ -8,8 +8,10 @@
 // Model: Cloudflare Workers AI @cf/black-forest-labs/flux-1-schnell (free daily allowance), called only
 // from here. Edge secrets: CF_ACCOUNT_ID, CF_AI_TOKEN (an API token with Account → Workers AI → Read
 // permission). Optional GROQ_API_KEY: Hindi/Telugu prompts are turned into English first.
-// Limits: 5/h + 10/day per device, 10/h + 20/day per IP, 100/day for everyone (table ai_usage, hashed keys,
-// same function ai_usage_hit as ai-chat). No prompt or image is stored or logged.
+// Limits: 5/h + 10/day per device, 6/h + 12/day per IP, 30/h + 70/day for everyone (table ai_usage, hashed keys
+// imgd:/imgip:/g:image, same atomic function ai_usage_hit as ai-chat). The IP is cf-connecting-ip (set by
+// Cloudflare, not the client), so one person cannot use up everyone's daily pictures by rotating device ids.
+// A request that is blocked or fails upstream is refunded (ai_usage_refund). No prompt or image is stored or logged.
 // CORS: https://elricai.sbs and https://www.elricai.sbs.
 
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
@@ -17,14 +19,17 @@ const SB_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SALT = Deno.env.get("AI_CHAT_SALT") ?? "";
 const CF_ACCOUNT = (Deno.env.get("CF_ACCOUNT_ID") ?? "").trim();
 const CF_TOKEN = (Deno.env.get("CF_AI_TOKEN") ?? "").trim().replace(/^Bearer\s+/i, "");
-const CF_BASE = Deno.env.get("CF_API_BASE") ?? "https://api.cloudflare.com/client/v4";
+// Our own Worker (elric-image), which speaks this JSON format. Without it there is no image backend:
+// the public Cloudflare REST API would need a different (multipart) request for FLUX.2.
+const CF_BASE = (Deno.env.get("CF_API_BASE") ?? "").trim();
 const GROQ_KEY = (Deno.env.get("GROQ_API_KEY") ?? "").trim().replace(/^Bearer\s+/i, "");
 const GROQ_URL = Deno.env.get("GROQ_API_URL") ?? "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = "@cf/black-forest-labs/flux-2-klein-4b"; // better quality; can edit a given photo
 const FALLBACK = "@cf/black-forest-labs/flux-1-schnell";
 const MAX_REF = 1_600_000; // base64 of a reference photo
 
-const DEVICE_HOUR = 5, DEVICE_DAY = 10, IP_HOUR = 10, IP_DAY = 20, ALL_HOUR = 30, ALL_DAY = 70; // free daily allowance fits about 80 klein-4b pictures
+const DEVICE_HOUR = 5, DEVICE_DAY = 10, IP_HOUR = 6, IP_DAY = 12, ALL_HOUR = 30, ALL_DAY = 70; // free daily allowance fits about 80 klein-4b pictures
+const RPC_TIMEOUT_MS = 5_000;
 const MAX_PROMPT = 500;
 const TIMEOUT_MS = 50_000;
 
@@ -59,29 +64,42 @@ async function rpc(fn: string, body: unknown) {
     method: "POST",
     headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
   });
   if (!r.ok) throw new Error(`rpc ${r.status}`);
   return await r.json();
 }
 
 const clean = (s: unknown, max: number) =>
-  typeof s === "string" ? s.replace(/[\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "";
+  typeof s === "string" ? s.normalize("NFC").replace(/[\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "";
+
+/** Client IP from Cloudflare (cf-connecting-ip cannot be sent by the client); first XFF hop only as a fallback. */
+function clientIp(req: Request): string {
+  const cf = (req.headers.get("cf-connecting-ip") ?? "").trim();
+  if (cf) return cf;
+  return (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
+}
 
 // Not allowed: sexual content, minors in any unsafe context, gore, self-harm, hate, real people's likeness
 // in fake situations, weapons instructions, documents/IDs/currency (fraud).
+// Word stems match every form (guns, bombing, terrorists, killed, corpses, weapons, mutilated, ...).
 const BLOCK = new RegExp(
-  "\\b(nude|nudity|naked|nsfw|porn|sex|sexy|sexual|erotic|lingerie|bikini|topless|boobs?|breasts?|genitals?|" +
-  "gore|gory|bloody|beheaded|corpse|dead body|mutilat|suicide|self[- ]?harm|kill(ing)?|murder|torture|" +
-  "terroris|bomb|gun|rifle|pistol|weapon|nazi|swastika|kkk|racist|" +
-  "aadhaa?r|pan card|passport|driving licen[cs]e|voter id|id card|currency note|banknote|cheque|signature|" +
-  "deepfake|fake photo of|celebrity|politician|modi|rahul gandhi|trump|biden)\\b|" +
-  "नग्न|अश्लील|सेक्स|खून|हत्या|आत्महत्या|बम|बंदूक|आधार", "i");
+  "\\b(nud(?:e|es|ity)|naked\\w*|nsfw|porn\\w*|sex\\w*|erotic\\w*|lingerie|bikinis?|topless|boobs?|breasts?|genital\\w*|nipples?|" +
+  "strip(?:per|pers|ping|tease)\\w*|undress\\w*|" +
+  "gor(?:e|y)|blood(?:y|ied|shed)|behead\\w*|decapitat\\w*|corpses?|dead bod(?:y|ies)|mutilat\\w*|dismember\\w*|suicid\\w*|" +
+  "self[- ]?harm\\w*|kill\\w*|murder\\w*|tortur\\w*|massacre\\w*|shoot(?:ing|ings|er|ers)|stab(?:bing|bed|s)?|" +
+  "terror\\w*|bomb(?:s|ed|er|ers|ing|ings)?|explosiv\\w*|grenades?|guns?|gunm[ae]n|rifles?|pistols?|revolvers?|firearms?|weapon\\w*|ak-?47|" +
+  "nazi\\w*|swastikas?|kkk|racis\\w*|" +
+  "aadhaa?r|pan cards?|passports?|driving licen[cs]es?|voter ids?|id cards?|currency notes?|banknotes?|cheques?|signatures?|" +
+  "deepfakes?|fake photos? of|celebrit\\w*|politician\\w*|modi|rahul gandhi|trump|biden)\\b|" +
+  "नग्न|अश्लील|सेक्स|खून|हत्या|आत्महत्या|बम|बंदूक|हथियार|आतंक|लाश|आधार|" +
+  "నగ్న|అశ్లీల|సెక్స్|రక్తం|హత్య|ఆత్మహత్య|బాంబు|తుపాకీ|ఆయుధ|ఉగ్రవా|శవం|ఆధార్", "i");
 
 function blocked(p: string) { return BLOCK.test(p); }
 
-/** Turns a Hindi/Telugu/Hinglish prompt into a short English image prompt (best effort). */
-async function toEnglish(p: string): Promise<string> {
-  if (!GROQ_KEY) return p;
+/** Turns a Hindi/Telugu/Hinglish prompt into a short English image prompt. null = the rewrite failed. */
+async function toEnglish(p: string): Promise<string | null> {
+  if (!GROQ_KEY) return null;
   try {
     const r = await fetch(GROQ_URL, {
       method: "POST",
@@ -95,11 +113,11 @@ async function toEnglish(p: string): Promise<string> {
       }),
       signal: AbortSignal.timeout(6000),
     });
-    if (!r.ok) return p;
+    if (!r.ok) return null;
     const j = await r.json();
     const t = clean(j?.choices?.[0]?.message?.content, MAX_PROMPT);
-    return t || p;
-  } catch { return p; }
+    return t || null;
+  } catch { return null; }
 }
 
 const CORS_ORIGINS = new Set(["https://elricai.sbs", "https://www.elricai.sbs"]);
@@ -138,28 +156,33 @@ async function handle(req: Request): Promise<Response> {
   const prompt = clean(body?.prompt, MAX_PROMPT);
   if (prompt.length < 3) return json(400, { status: "bad_request", field: "prompt" });
   if (blocked(prompt)) return json(422, { status: "blocked" });
-  if (!CF_ACCOUNT || !CF_TOKEN) return json(503, { status: "unavailable" });
+  if (!CF_ACCOUNT || !CF_TOKEN || !CF_BASE) return json(503, { status: "unavailable" });
   const ref = typeof body?.image === "string" && body.image.length > 100 && body.image.length <= MAX_REF && /^[A-Za-z0-9+/=]+$/.test(body.image.slice(0, 400))
     ? { data: body.image as string, mime: /^image\/(jpeg|png|webp)$/.test(body?.mime) ? body.mime as string : "image/jpeg" } : null;
 
-  const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
+  const ip = clientIp(req);
+  const keys = [`imgd:${await sha("d:" + device)}`, `imgip:${await sha("ip:" + ip)}`, "g:image"];
   try {
     const hit = await rpc("ai_usage_hit", {
-      p_keys: [`i:d:${await sha("d:" + device)}`, `i:ip:${await sha("ip:" + ip)}`, "g:image"],
-      p_hour_caps: [DEVICE_HOUR, IP_HOUR, ALL_HOUR], p_day_caps: [DEVICE_DAY, IP_DAY, ALL_DAY],
+      p_keys: keys, p_hour_caps: [DEVICE_HOUR, IP_HOUR, ALL_HOUR], p_day_caps: [DEVICE_DAY, IP_DAY, ALL_DAY],
     });
     if (!hit?.ok) {
-      const scope = hit?.scope === "i" ? "device" : "daily"; // keys split on ':' → 'i' for device/ip, 'g' for all
+      const scope = hit?.scope === "imgd" ? "device" : hit?.scope === "imgip" ? "ip" : "daily";
       return json(429, { status: "limit", scope, window: hit?.window, retry_after: hit?.retry_after ?? 3600 });
     }
   } catch { return json(503, { status: "unavailable" }); }
+  // Blocked or failed requests do not use up the user's (or everyone's) pictures.
+  const refund = async (res: Response) => { try { await rpc("ai_usage_refund", { p_keys: keys }); } catch { /* best effort */ } return res; };
 
-  let english = await toEnglish(ref ? `EDIT the given picture. ${prompt}` : prompt);
+  const rewritten = await toEnglish(ref ? `EDIT the given picture. ${prompt}` : prompt);
+  // Without the rewrite, a prompt in another script cannot be checked against the (English) blocklist.
+  if (rewritten === null && /[^\u0000-\u024f\u2000-\u206f\u20b9]/.test(prompt)) return refund(json(503, { status: "unavailable" }));
+  let english = rewritten ?? (ref ? `EDIT the given picture. ${prompt}` : prompt);
   // Elric AI is for India: scenes with people or places default to an Indian setting unless another place is named.
   const PEOPLE = /\b(child|children|kid|kids|boy|girl|man|men|woman|women|people|person|family|student|teacher|farmer|school|village|street|market|city|town|house|home|classroom|festival|wedding|shop)s?\b/i;
   const ELSEWHERE = /\b(america|american|usa|europe|european|england|london|paris|japan|japanese|china|chinese|africa|african|korea|russia|germany|france|italy|spain|canada|australia|mexico|arab|dubai|western|space|moon|mars|fantasy|cartoon of)\b/i;
   if (!ref && PEOPLE.test(english) && !ELSEWHERE.test(english) && !/\bindia/i.test(english)) english += ", set in India with Indian people and surroundings, natural and realistic";
-  if (blocked(english)) return json(422, { status: "blocked" });
+  if (blocked(english) || blocked(prompt)) return refund(json(422, { status: "blocked" }));
   try {
     const run = (model: string) => fetch(`${CF_BASE}/accounts/${CF_ACCOUNT}/ai/run/${model}`, {
       method: "POST",
@@ -171,16 +194,16 @@ async function handle(req: Request): Promise<Response> {
     if (!r.ok && !ref && r.status !== 400) { console.log(`ai-image main status ${r.status}, trying fallback`); r = await run(FALLBACK); }
     if (!r.ok) {
       console.log(`ai-image provider status ${r.status}`); // status only, never the prompt
-      if (r.status === 429) return json(429, { status: "limit", scope: "daily", retry_after: 3600 });
-      if (r.status === 400) return json(422, { status: "blocked" }); // provider safety filter or bad prompt
-      return json(503, { status: "unavailable" });
+      if (r.status === 429) return refund(json(429, { status: "limit", scope: "daily", retry_after: 3600 }));
+      if (r.status === 400) return refund(json(422, { status: "blocked" })); // provider safety filter or bad prompt
+      return refund(json(503, { status: "unavailable" }));
     }
     const j = await r.json();
     const data = j?.result?.image;
-    if (typeof data !== "string" || data.length < 100) return json(503, { status: "unavailable" });
+    if (typeof data !== "string" || data.length < 100) return refund(json(503, { status: "unavailable" }));
     return json(200, { status: "ok", mime: "image/jpeg", data });
   } catch {
     console.log("ai-image provider timeout/error");
-    return json(503, { status: "unavailable" });
+    return refund(json(503, { status: "unavailable" }));
   }
 }

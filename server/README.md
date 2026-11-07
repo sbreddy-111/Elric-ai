@@ -5,7 +5,10 @@ Lives in the shared Supabase project `elric-fit` (ref `hqsqpiwmozgsxiizhaml`). O
 - `supabase/migrations/20261103_ai_autofix.sql` – review columns, locked anon grants, pg_cron + pg_net, hourly job.
 - `supabase/functions/ai-autofix` – hourly worker: up to 10 `new` feedback rows with a question → Gemini
   (`gemini-3.5-flash-lite`, free) reads candidate pages (Wikipedia API, DuckDuckGo, Gemini-suggested reference URLs)
-  via the free URL-context tool. Auto-adds a fact (`ai_facts.source='auto'`) only if the answer is clearly wrong,
+  via the free URL-context tool. Feedback text is fenced as untrusted data with links/domains removed, and only pages
+  the function found itself can count as sources. Since 2026-11-07 the `auto_add` switch is off by default, so proven
+  facts wait in `needs_review` ("Waiting for your approval") for the owner. With the switch on, it auto-adds a fact
+  (`ai_facts.source='auto'`) only if the answer is clearly wrong,
   it is a general public fact (not personal/opinion/Elric/founder/local/time-sensitive), ≥2 independent sites that
   Gemini actually retrieved state it, and no existing fact conflicts or is similar. Otherwise `needs_review`
   (or `rejected` when the app answer was right). Rows without a question → `needs_review`.
@@ -25,7 +28,8 @@ undo an auto fact: `update ai_facts set active=false where id=…;`
   (Supabase magic link, `create_user:false`; `https://elricai.sbs/admin/` is in the Auth redirect allow list).
   Session kept in localStorage with auto refresh (multi-tab safe). No shared Auth settings changed.
 - `functions/admin-login` (verify_jwt off): owner email + code → RFC 6238 (SHA-1, 30 s, ±1 step), reused codes
-  rejected (atomic `last_step`), 5 wrong → 15 min lock; then Admin API `generate_link` (magiclink, no email) and
+  rejected (atomic `last_step`), per IP 5 tries/h + 20/day (`ai_usage` key `al:`), 10 wrong codes in a row (any IP)
+  → 30 min lock, counted atomically by SQL `ai_admin_totp_fail()` (migration `20261107_ai_security_fixes.sql`); then Admin API `generate_link` (magiclink, no email) and
   returns only `token_hash`; the page calls `/auth/v1/verify {type:'magiclink', token_hash}`. Generic errors.
 - `functions/admin-totp-setup` (owner JWT checked via /auth/v1/user): status | start (pending key, 30 min) | confirm.
   The current key keeps working until a new one is confirmed. Shared TOTP code: `functions/_totp-common.ts.txt`
@@ -47,6 +51,9 @@ undo an auto fact: `update ai_facts set active=false where id=…;`
 - Prompt built server-side (mirrors the app's systemPrompt + relevant `ai_facts`, cached 10 min, + IDENTITY rule).
 - Models: `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite` on 429/5xx/404 (`AI_CHAT_MODELS` overrides), thinking minimal.
 - Abuse guard: `ai_usage` (migration `20261103_ai_chat.sql`) — salted SHA-256 of device id / IP (Edge secret
-  `AI_CHAT_SALT`), 30/h + 100/day per device, 60/h + 200/day per IP; rows pruned after 2 days. Body ≤1.6 MB.
+  `AI_CHAT_SALT`), 30/h + 100/day per device, 60/h + 200/day per IP, 60/h + 400/day for everyone (`g:chat`, inside
+  Groq's free 1,000 requests/day); rows pruned after 2 days. Body ≤1.6 MB. IP = `cf-connecting-ip` (set by Cloudflare;
+  a client-sent one is rejected at the edge). `ai_usage_hit` counts and checks in one UPSERT per key (row lock) and
+  rolls back when a key is over its cap (migration `20261107_ai_security_fixes.sql`).
   No chat text stored or logged.
 - Test hooks (only with header `x-autofix-secret`): `x-elric-test: fail-primary | limit | small-cap`, `x-elric-think`.

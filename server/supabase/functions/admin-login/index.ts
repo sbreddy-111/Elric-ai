@@ -3,7 +3,7 @@ const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const SR_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const OWNER_EMAIL = "theinfo222@gmail.com";
-const ORIGINS = ["https://elricai.sbs", "http://localhost:5173"];
+const ORIGINS = ["https://elricai.sbs", "https://www.elricai.sbs"];
 
 function cors(req: Request): Record<string, string> {
   const o = req.headers.get("origin") ?? "";
@@ -52,6 +52,7 @@ async function db(path: string, init: RequestInit = {}) {
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, {
     ...init,
     headers: { apikey: SR_KEY, Authorization: `Bearer ${SR_KEY}`, "Content-Type": "application/json", Prefer: "return=representation", ...(init.headers ?? {}) },
+    signal: AbortSignal.timeout(8000),
   });
   const t = await r.text();
   if (!r.ok) throw new Error(`db ${r.status}`);
@@ -69,19 +70,26 @@ async function claimStep(step: number, extra: Record<string, unknown> = {}) {
   });
   return Array.isArray(rows) && rows.length === 1;
 }
-async function recordFailure(row: TotpRow) {
-  const n = (row.failed_count ?? 0) + 1;
-  const lock = n >= 5;
-  await db("ai_admin_totp?id=eq.1", { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({
-    failed_count: lock ? 0 : n, ...(lock ? { locked_until: new Date(Date.now() + 15 * 60_000).toISOString() } : {}), updated_at: new Date().toISOString(),
-  }) });
+/** Counts a wrong code atomically in SQL (ai_admin_totp_fail: 10 in a row → 30 min lock), so parallel
+ *  guesses can't share one read of failed_count. */
+async function recordFailure() {
+  await db("rpc/ai_admin_totp_fail", { method: "POST", body: "{}" });
+}
+/** Per-IP throttle for sign-in tries (ai_usage keys "al:<hash>", 5/hour, 20/day). false = over the limit. */
+async function ipAllowed(req: Request): Promise<boolean> {
+  const ip = (req.headers.get("cf-connecting-ip") ?? "").trim() || (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode((Deno.env.get("AI_CHAT_SALT") ?? "") + "|al:" + ip));
+  const h = Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const hit = await db("rpc/ai_usage_hit", { method: "POST", body: JSON.stringify({ p_keys: [`al:${h}`], p_hour_caps: [5], p_day_caps: [20] }) });
+  return !!hit?.ok;
 }
 const isLocked = (row: TotpRow) => !!row.locked_until && new Date(row.locked_until).getTime() > Date.now();
 // ---- end shared ----
 
 // Elric AI Admin sign-in: owner email + 6-digit authenticator code → one-time magic-link token hash
 // (generated with the Admin API, no email sent). The page exchanges it with /auth/v1/verify for a session.
-// Public (verify_jwt=false). Generic errors only. 5 wrong codes → 15 min lockout. Codes can't be reused.
+// Public (verify_jwt=false). Generic errors only. Each IP: 5 tries/hour, 20/day. 10 wrong codes in a row (any IP)
+// → 30 min lockout, counted atomically in SQL. Codes can't be reused.
 
 const BAD = "That code didn't work. Check your email and the 6-digit code, then try again.";
 const LATER = "Please try again a bit later.";
@@ -93,12 +101,13 @@ Deno.serve(async (req) => {
   let email = "", code = "";
   try { const b = await req.json(); email = String(b?.email ?? "").trim().toLowerCase(); code = String(b?.code ?? "").replace(/\s/g, ""); } catch { /* bad body */ }
   try {
+    if (!(await ipAllowed(req))) return json({ error: LATER }, 429, ch);
     if (email !== OWNER_EMAIL || !/^\d{6}$/.test(code)) { await new Promise((r) => setTimeout(r, 400)); return json({ error: BAD }, 401, ch); }
     const row = await getRow();
     if (!row?.secret) return json({ error: BAD }, 401, ch);
     if (isLocked(row)) return json({ error: LATER }, 429, ch);
     const step = await matchStep(row.secret, code);
-    if (!step || step <= row.last_step) { await recordFailure(row); return json({ error: BAD }, 401, ch); }
+    if (!step || step <= row.last_step) { await recordFailure(); return json({ error: BAD }, 401, ch); }
     if (!(await claimStep(step))) return json({ error: BAD }, 401, ch);
     const r = await fetch(`${SB_URL}/auth/v1/admin/generate_link`, {
       method: "POST",

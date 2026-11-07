@@ -2,12 +2,20 @@
 // Models: FLUX.2 klein 4B (default: better quality, can edit a photo) and FLUX.1 schnell (fallback).
 const ALLOWED = new Set(["@cf/black-forest-labs/flux-1-schnell", "@cf/black-forest-labs/flux-2-klein-4b"]);
 const b64ToBytes = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+/** Constant-time check: both sides are hashed first, so length and content leak no timing. */
+async function authOk(got, want) {
+  const enc = new TextEncoder();
+  const [a, b] = await Promise.all([crypto.subtle.digest("SHA-256", enc.encode(got)), crypto.subtle.digest("SHA-256", enc.encode(want))]);
+  return crypto.subtle.timingSafeEqual(a, b);
+}
 export default {
   async fetch(req, env) {
     const u = new URL(req.url);
     const m = u.pathname.match(/^\/accounts\/[^/]+\/ai\/run\/(@cf\/[\w./-]+)$/);
     if (req.method !== "POST" || !m) return new Response("not found", { status: 404 });
-    if ((req.headers.get("authorization") || "") !== `Bearer ${env.SHARED}`) return new Response("unauthorized", { status: 401 });
+    // No secret configured = closed (never accept "Bearer undefined"). Compare in constant time.
+    if (typeof env.SHARED !== "string" || !env.SHARED) return new Response("not configured", { status: 500 });
+    if (!(await authOk(req.headers.get("authorization") || "", `Bearer ${env.SHARED}`))) return new Response("unauthorized", { status: 401 });
     if (!ALLOWED.has(m[1])) return new Response("bad model", { status: 400 });
     let body; try { body = await req.json(); } catch { return new Response("bad", { status: 400 }); }
     const prompt = String(body?.prompt || "").slice(0, 2048);
@@ -30,7 +38,7 @@ export default {
     } catch (e) {
       const s = String(e && e.message || e);
       console.log("ai error", s.slice(0, 200));
-      return new Response(JSON.stringify({ success: false, err: s.slice(0, 200) }), { status: /limit|neuron|429|exceeded/i.test(s) ? 429 : /nsfw|safety|flag/i.test(s) ? 400 : 503, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ success: false }), { status: /limit|neuron|429|exceeded/i.test(s) ? 429 : /nsfw|safety|flag/i.test(s) ? 400 : 503, headers: { "content-type": "application/json" } });
     }
   },
 };

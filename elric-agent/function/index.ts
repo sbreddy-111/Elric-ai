@@ -3,11 +3,12 @@
 // POST JSON { text, ui_lang?: 'te'|'hi'|'en' (default en), prev?: {task, fields, lang, script} }  (apikey header = publishable key)
 //   prev = the task card from the last turn, so a follow-up ("1234 ane number") can fill missing fields.
 // 200 { task, lang, script: 'native'|'latn', fields, missing, confirm_text }  (lang/script = how the user wrote)
-//   task: electricity_bill | bus_search | pm_kisan_status | unknown
+//   task: electricity_bill | mobile_recharge | bus_search | pm_kisan_status | unknown
 // 400 bad_request · 401 unauthorized · 429 limit · 503 unavailable
 //
 // Privacy: the user's text is never stored or logged. Only status codes are logged. Rate limit uses
-// the shared ai_usage_hit RPC with a salted SHA-256 of the IP (key prefix "ag:").
+// the shared ai_usage_hit RPC with a salted SHA-256 of the IP (key prefix "ag:"; IP = cf-connecting-ip, set by
+// Cloudflare, not the client) plus an all-users cap (g:agent).
 // Model: Groq openai/gpt-oss-20b in JSON mode, Gemini flash-lite as backup.
 
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
@@ -18,6 +19,8 @@ const GROQ_MODEL = Deno.env.get("AI_CHAT_GROQ_MODEL") ?? "openai/gpt-oss-20b";
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 const GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
 const IP_HOUR = 40, IP_DAY = 150;
+/** All users together (key g:agent): keeps the agent inside its share of Groq's free 1,000 requests/day. */
+const ALL_HOUR = 60, ALL_DAY = 200;
 const MAX_TEXT = 500;
 
 const PUBLIC_KEYS = (() => {
@@ -36,23 +39,26 @@ const PUBLIC_KEYS = (() => {
   return keys;
 })();
 
-const TASKS = ["electricity_bill", "bus_search", "pm_kisan_status", "unknown"] as const;
+const TASKS = ["electricity_bill", "mobile_recharge", "bus_search", "pm_kisan_status", "unknown"] as const;
 const FIELDS: Record<string, string[]> = {
   electricity_bill: ["biller", "service_number"],
+  mobile_recharge: ["mobile_number", "operator", "amount"],
   bus_search: ["from", "to", "date"],
   pm_kisan_status: ["aadhaar_or_mobile_last4"],
   unknown: [],
 };
+const OPERATORS = ["JIO", "AIRTEL", "VI", "BSNL"];
+const OP_NAME: Record<string, string> = { JIO: "Jio", AIRTEL: "Airtel", VI: "Vi", BSNL: "BSNL" };
 const BILLERS = ["APCPDCL", "APSPDCL", "APEPDCL", "TSSPDCL", "TSNPDCL"];
 
 // Used only when the server dropped a value the model gave (so its sentence would be wrong).
 // Asking for a missing field always uses these fixed sentences (clear, native, never invented).
 const ASK: Record<string, Record<string, string>> = {
-  "te-latn": { biller: "Ye current company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "Mee service number cheppandi?", from: "Ekkada nunchi?", to: "Ekkadiki vellali?", date: "Ye roju?", aadhaar_or_mobile_last4: "Aadhaar leda mobile last 4 digits cheppandi?" },
-  "hi-latn": { biller: "Kaun si bijli company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "Aapka service number kya hai?", from: "Kahan se?", to: "Kahan jaana hai?", date: "Kis din?", aadhaar_or_mobile_last4: "Aadhaar ya mobile ke last 4 digit batayein?" },
-  te: { biller: "ఏ విద్యుత్ సంస్థ? (APCPDCL / APSPDCL / APEPDCL)", service_number: "మీ సర్వీస్ నంబర్ ఎంత?", from: "ఎక్కడి నుంచి?", to: "ఎక్కడికి?", date: "ఏ తేదీ?", aadhaar_or_mobile_last4: "ఆధార్ లేదా మొబైల్ చివరి 4 అంకెలు?" },
-  hi: { biller: "कौन सी बिजली कंपनी? (APCPDCL / APSPDCL / APEPDCL)", service_number: "आपका सर्विस नंबर क्या है?", from: "कहाँ से?", to: "कहाँ तक?", date: "किस तारीख को?", aadhaar_or_mobile_last4: "आधार या मोबाइल के आखिरी 4 अंक?" },
-  en: { biller: "Which power company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "What is your service number?", from: "From which city?", to: "To which city?", date: "Which date?", aadhaar_or_mobile_last4: "Last 4 digits of Aadhaar or mobile?" },
+  "te-latn": { mobile_number: "Ye mobile number ki recharge?", operator: "Ye network? (Jio / Airtel / Vi / BSNL)", amount: "Enta recharge cheyyali? (Rs.)",  biller: "Ye current company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "Mee service number cheppandi?", from: "Ekkada nunchi?", to: "Ekkadiki vellali?", date: "Ye roju?", aadhaar_or_mobile_last4: "Aadhaar leda mobile last 4 digits cheppandi?" },
+  "hi-latn": { mobile_number: "Kis mobile number par recharge?", operator: "Kaun sa network? (Jio / Airtel / Vi / BSNL)", amount: "Kitne ka recharge? (Rs.)",  biller: "Kaun si bijli company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "Aapka service number kya hai?", from: "Kahan se?", to: "Kahan jaana hai?", date: "Kis din?", aadhaar_or_mobile_last4: "Aadhaar ya mobile ke last 4 digit batayein?" },
+  te: { mobile_number: "ఏ మొబైల్ నంబర్‌కు రీఛార్జ్?", operator: "ఏ నెట్‌వర్క్? (Jio / Airtel / Vi / BSNL)", amount: "ఎంత రీఛార్జ్ చేయాలి? (₹)", biller: "ఏ విద్యుత్ సంస్థ? (APCPDCL / APSPDCL / APEPDCL)", service_number: "మీ సర్వీస్ నంబర్ ఎంత?", from: "ఎక్కడి నుంచి?", to: "ఎక్కడికి?", date: "ఏ తేదీ?", aadhaar_or_mobile_last4: "ఆధార్ లేదా మొబైల్ చివరి 4 అంకెలు?" },
+  hi: { mobile_number: "किस मोबाइल नंबर पर रिचार्ज?", operator: "कौन सा नेटवर्क? (Jio / Airtel / Vi / BSNL)", amount: "कितने का रिचार्ज? (₹)", biller: "कौन सी बिजली कंपनी? (APCPDCL / APSPDCL / APEPDCL)", service_number: "आपका सर्विस नंबर क्या है?", from: "कहाँ से?", to: "कहाँ तक?", date: "किस तारीख को?", aadhaar_or_mobile_last4: "आधार या मोबाइल के आखिरी 4 अंक?" },
+  en: { mobile_number: "Which mobile number to recharge?", operator: "Which network? (Jio / Airtel / Vi / BSNL)", amount: "How much to recharge? (Rs.)", biller: "Which power company? (APCPDCL / APSPDCL / APEPDCL)", service_number: "What is your service number?", from: "From which city?", to: "To which city?", date: "Which date?", aadhaar_or_mobile_last4: "Last 4 digits of Aadhaar or mobile?" },
 };
 
 const clean = (s: unknown, max: number) =>
@@ -79,7 +85,11 @@ Tasks:
   biller must be one of APCPDCL (central AP: Guntur, Palnadu/Narasaraopet, Krishna, NTR/Vijayawada, Prakasam, Bapatla, Eluru),
   APSPDCL (south AP: Nellore, Tirupati, Chittoor, Kadapa, Kurnool, Anantapur), APEPDCL (north AP: Visakhapatnam, Vizianagaram,
   Srikakulam, East/West Godavari, Kakinada), TSSPDCL, TSNPDCL. Set biller ONLY if the user names it or names a town/district that clearly maps to one; else null.
-  service_number: the consumer/service/USC number exactly as the user said it (digits only, join spoken digits); else null.
+  service_number: the consumer/service/USC number exactly as the user said it (digits, plus a letter only if the user said one, e.g. 112413A035070847; join spoken digits); else null.
+- "mobile_recharge": prepaid mobile recharge (recharge/top-up/balance veyyi/recharge karo/రీఛార్జ్/रिचार्ज). Fields: mobile_number, operator, amount.
+  mobile_number: the 10-digit mobile number exactly as said (join spoken digits; drop +91/0 prefix); else null. "my number"/"naa number" without digits = null.
+  operator: one of JIO, AIRTEL, VI (Vodafone/Idea), BSNL, only if the user names it; else null.
+  amount: rupees as digits (e.g. "199 plan", "299 ki", "రెండు వందల తొంభై తొమ్మిది" = 299); else null.
 - "bus_search": find a bus. Fields: from (origin), to (destination) (city names in English, e.g. "Hyderabad"), date (YYYY-MM-DD; resolve today/tomorrow/repu/kal/parsu/weekday names from today's date; else null).
 - "pm_kisan_status": PM-Kisan instalment/payment status. Field: aadhaar_or_mobile_last4 (last 4 digits of Aadhaar or registered mobile, only if the user said them; if they said a full number, keep only the last 4 digits).
   Direction words: destination = "to X", "X ki/X ku/X ke/X kosam", "X jaane/X jaana/X jaanevali", "X vellali", "X కి/కు", "X को/X जाने";
@@ -97,7 +107,7 @@ Rules:
   hi "APCPDCL बिल, सर्विस नंबर 1234. चेक करें?"  Tenglish "Guntur nunchi Hyderabad bus, repu (7 Nov). Chudamaa?"
   Hinglish "Hyderabad se Vijayawada bus, kal (7 Nov). Dekhein?"  In confirm_text write dates like "7 Nov"; in fields.date ALWAYS use YYYY-MM-DD.
   If something is missing, ask only for the first missing field, e.g. "Which service number?".
-  For unknown, say briefly you can now help with power bills, bus search and PM-Kisan status.
+  For unknown, say briefly you can now help with power bills, mobile recharge, bus search and PM-Kisan status.
 - Numbers stay as digits.
 ${prev ? `This is a follow-up. The previous task card was: ${JSON.stringify(prev)}. Keep its task and its values unless the user changes them; fill missing fields from the new message.` : ""}
 JSON shape: {"task": "...", "lang": "te|hi|en", "fields": {...}, "missing": [...], "confirm_text": "..."}`;
@@ -148,12 +158,13 @@ async function callGemini(system: string, text: string): Promise<string | null> 
 // Fixed "ready to go" sentences, used for follow-up turns and when the model's sentence is in the wrong language.
 function readyText(task: string, f: Record<string, string | null>, key: string): string {
   const d = f.date ? new Date(f.date + "T00:00:00Z").toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" }) : "";
+  const op = OP_NAME[f.operator ?? ""] ?? f.operator;
   const R: Record<string, Record<string, string>> = {
-    en: { electricity_bill: `${f.biller} bill, service no. ${f.service_number}. Check it?`, bus_search: `Bus from ${f.from} to ${f.to} on ${d}. Search?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check it?` },
-    te: { electricity_bill: `${f.biller} బిల్లు, సర్వీస్ నంబర్ ${f.service_number}. చెక్ చేయాలా?`, bus_search: `${f.from} నుంచి ${f.to} బస్, ${d}. వెతకాలా?`, pm_kisan_status: `PM-కిసాన్ స్టేటస్, చివరి 4 అంకెలు ${f.aadhaar_or_mobile_last4}. చెక్ చేయాలా?` },
-    hi: { electricity_bill: `${f.biller} बिल, सर्विस नंबर ${f.service_number}. चेक करें?`, bus_search: `${f.from} से ${f.to} बस, ${d}. खोजें?`, pm_kisan_status: `PM-किसान स्टेटस, आखिरी 4 अंक ${f.aadhaar_or_mobile_last4}. चेक करें?` },
-    "te-latn": { electricity_bill: `${f.biller} bill, service number ${f.service_number}. Check cheyyamantara?`, bus_search: `${f.from} nunchi ${f.to} bus, ${d}. Vetakamantara?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check cheyyamantara?` },
-    "hi-latn": { electricity_bill: `${f.biller} bill, service number ${f.service_number}. Check karein?`, bus_search: `${f.from} se ${f.to} bus, ${d}. Dhoondhein?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check karein?` },
+    en: { electricity_bill: `${f.biller} bill, service no. ${f.service_number}. Check it?`, mobile_recharge: `Recharge ${f.mobile_number} (${op}) for Rs.${f.amount}. Go ahead?`, bus_search: `Bus from ${f.from} to ${f.to} on ${d}. Search?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check it?` },
+    te: { electricity_bill: `${f.biller} బిల్లు, సర్వీస్ నంబర్ ${f.service_number}. చెక్ చేయాలా?`, mobile_recharge: `${f.mobile_number} (${op}) కు ₹${f.amount} రీఛార్జ్. చేయాలా?`, bus_search: `${f.from} నుంచి ${f.to} బస్, ${d}. వెతకాలా?`, pm_kisan_status: `PM-కిసాన్ స్టేటస్, చివరి 4 అంకెలు ${f.aadhaar_or_mobile_last4}. చెక్ చేయాలా?` },
+    hi: { electricity_bill: `${f.biller} बिल, सर्विस नंबर ${f.service_number}. चेक करें?`, mobile_recharge: `${f.mobile_number} (${op}) पर ₹${f.amount} का रिचार्ज. करें?`, bus_search: `${f.from} से ${f.to} बस, ${d}. खोजें?`, pm_kisan_status: `PM-किसान स्टेटस, आखिरी 4 अंक ${f.aadhaar_or_mobile_last4}. चेक करें?` },
+    "te-latn": { electricity_bill: `${f.biller} bill, service number ${f.service_number}. Check cheyyamantara?`, mobile_recharge: `${f.mobile_number} (${op}) ki Rs.${f.amount} recharge. Cheyyamantara?`, bus_search: `${f.from} nunchi ${f.to} bus, ${d}. Vetakamantara?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check cheyyamantara?` },
+    "hi-latn": { electricity_bill: `${f.biller} bill, service number ${f.service_number}. Check karein?`, mobile_recharge: `${f.mobile_number} (${op}) par Rs.${f.amount} ka recharge. Karein?`, bus_search: `${f.from} se ${f.to} bus, ${d}. Dhoondhein?`, pm_kisan_status: `PM-Kisan status, last 4 digits ${f.aadhaar_or_mobile_last4}. Check karein?` },
   };
   return R[key]?.[task] ?? R.en[task] ?? "";
 }
@@ -201,12 +212,17 @@ function normalize(raw: string, text: string, prevFields: Record<string, string>
   let dropped = false;
   const src = o?.fields && typeof o.fields === "object" ? o.fields : {};
   const digitsInText = (text + " " + Object.values(prevFields).join(" ")).replace(/\D/g, "");
+  // APEPDCL service numbers can carry a letter (e.g. 112413A035070847), so keep letters too.
+  const alnumInText = (text + " " + Object.values(prevFields).join(" ")).toUpperCase().replace(/[^A-Z0-9]/g, "");
   for (const k of FIELDS[task]) {
     let v = src[k];
     v = v === null || v === undefined ? null : clean(String(v), 40);
     if (!v || /^(null|none|unknown|n\/a)$/i.test(v)) v = null;
     if (v && k === "biller") { v = v.toUpperCase().replace(/\s/g, ""); if (!BILLERS.includes(v)) v = null; }
-    if (v && k === "service_number") { v = v.replace(/\D/g, ""); if (v.length < 3 || !digitsInText.includes(v)) v = null; }
+    if (v && k === "service_number") { v = v.toUpperCase().replace(/[^A-Z0-9]/g, ""); const nd = v.replace(/\D/g, "").length; if (nd < 3 || v.length - nd > 2 || !alnumInText.includes(v)) v = null; }
+    if (v && k === "mobile_number") { v = v.replace(/\D/g, "").replace(/^(91|0)(?=\d{10}$)/, ""); if (!/^[6-9]\d{9}$/.test(v) || !digitsInText.includes(v)) v = null; }
+    if (v && k === "operator") { v = v.toUpperCase().replace(/[^A-Z]/g, ""); if (/VODAFONE|IDEA|^VI$/.test(v)) v = "VI"; if (/JIO/.test(v)) v = "JIO"; if (/AIRTEL/.test(v)) v = "AIRTEL"; if (!OPERATORS.includes(v) || !new RegExp(v === "VI" ? "\\b(vi|vodafone|idea)\\b|వొడాఫోన్|ఐడియా|वोडाफोन|आइडिया" : v === "JIO" ? "jio|జియో|जियो" : v === "AIRTEL" ? "airtel|ఎయిర్‌?టెల్|एयरटेल" : "bsnl|బీఎస్ఎన్ఎల్|बीएसएनएल", "iu").test(text + " " + (prevFields.operator ?? ""))) v = null; }
+    if (v && k === "amount") { v = v.replace(/[^\d.]/g, "").replace(/\.\d*$/, ""); const n = Number(v); if (!v || n < 10 || n > 5000) v = null; else if (!digitsInText.includes(v) && !/[\u0C00-\u0C7F\u0900-\u097F]|hundred|vandala|sau\b|so\b/i.test(text)) v = null; }
     if (v && k === "aadhaar_or_mobile_last4") { v = v.replace(/\D/g, "").slice(-4); if (v.length !== 4 || !digitsInText.includes(v)) v = null; }
     if (v && k === "date") v = isoDate(v);
     if (!v && src[k] && !/^(null|none|unknown|n\/a)$/i.test(String(src[k]))) dropped = true;
@@ -232,10 +248,53 @@ function normalize(raw: string, text: string, prevFields: Record<string, string>
   return { task, lang, script, fields: f, missing, confirm_text: confirm };
 }
 
-const CORS_ORIGINS = new Set(["https://elricai.sbs", "https://www.elricai.sbs"]);
+// Spoken numbers: "nine eight seven", "తొమ్మిది ఎనిమిది", "ek do teen chaar", "double five", Telugu/Devanagari digits -> ASCII digits.
+// Only a run of 3+ digits that has at least one word is joined, so "do teen din" or "one bus" stay as they are.
+const DIGIT_WORDS: Record<string, string> = {};
+([
+  ["0", "zero oh o sunna sunnaa shunya shoonya sifar సున్నా శూన్యం शून्य जीरो ज़ीरो सिफर"],
+  ["1", "one okati okkati ek ఒకటి ఒక్కటి एक"],
+  ["2", "two rendu do రెండు दो"],
+  ["3", "three moodu mudu teen తీన్ మూడు तीन"],
+  ["4", "four naalugu nalugu char chaar నాలుగు चार"],
+  ["5", "five aidu ayidu aydu paanch panch paach ఐదు అయిదు पांच पाँच"],
+  ["6", "six aaru aru chhe chhah chhah che ఆరు छह छः छे"],
+  ["7", "seven edu eedu aedu saat sat ఏడు सात"],
+  ["8", "eight enimidi yenimidi enmidi aath ath ఎనిమిది आठ"],
+  ["9", "nine tommidi thommidi nau nao తొమ్మిది नौ"],
+] as [string, string][]).forEach(([d, w]) => w.split(" ").forEach((x) => (DIGIT_WORDS[x] = d)));
+const REPEAT: Record<string, number> = { double: 2, dabal: 2, "डबल": 2, "డబుల్": 2, triple: 3, tripal: 3, "ट्रिपल": 3, "ట్రిపుల్": 3 };
+function spokenDigits(s: string): string {
+  s = s.replace(/[\u0C66-\u0C6F]/g, (c) => String(c.charCodeAt(0) - 0x0C66)).replace(/[\u0966-\u096F]/g, (c) => String(c.charCodeAt(0) - 0x0966));
+  const toks = s.split(/(\s+)/);
+  const out: string[] = [];
+  let run: string[] = [], digits = "", hasWord = false, rep = 1;
+  const flush = () => {
+    if (run.length) {
+      if (hasWord && digits.length >= 3) { out.push(digits); if (run[run.length - 1].trim() === "") out.push(" "); }
+      else out.push(...run);
+    }
+    run = []; digits = ""; hasWord = false; rep = 1;
+  };
+  for (const t of toks) {
+    if (/^\s+$/.test(t)) { if (run.length) run.push(t); else out.push(t); continue; }
+    const m = t.match(/^(.*?)([,.;:!?]*)$/u) as RegExpMatchArray;
+    const w = m[1].toLowerCase(), tail = m[2];
+    if (REPEAT[w]) { run.push(t); rep = REPEAT[w]; hasWord = true; continue; }
+    const d = /^\d+$/.test(w) ? w : DIGIT_WORDS[w];
+    if (d === undefined) { flush(); out.push(t); continue; }
+    if (!/^\d+$/.test(w)) hasWord = true;
+    digits += d.repeat(d.length === 1 ? rep : 1); rep = 1; run.push(t);
+    if (tail) { flush(); out.push(tail); }
+  }
+  flush();
+  return out.join("").replace(/\s+$/, (x) => (s.match(/\s+$/) ? x : ""));
+}
+
+const CORS_ORIGINS = new Set(["https://elricai.sbs", "https://www.elricai.sbs", "https://elric-agent.elricfit.workers.dev"]);
 function corsHeaders(origin: string | null): Record<string, string> {
   if (!origin) return {};
-  const ok = CORS_ORIGINS.has(origin) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  const ok = CORS_ORIGINS.has(origin);
   if (!ok) return {};
   return {
     "Access-Control-Allow-Origin": origin,
@@ -260,7 +319,7 @@ Deno.serve(async (req) => {
     if (raw.length > 8000) return json(413, { status: "too_large" }, cors);
     body = JSON.parse(raw);
   } catch { return json(400, { status: "bad_request" }, cors); }
-  const text = clean(body?.text, MAX_TEXT);
+  const text = spokenDigits(clean(body?.text, MAX_TEXT));
   if (!text) return json(400, { status: "bad_request", field: "text" }, cors);
   const uiLang = ["te", "hi", "en"].includes(body?.ui_lang) ? body.ui_lang : "en";
   let prev: { task: string; fields: Record<string, string> } | null = null;
@@ -274,12 +333,13 @@ Deno.serve(async (req) => {
   const prevScript = body?.prev?.script === "latn" ? "latn" : "native";
   const fallbackLang = prevLang || uiLang;
 
-  const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
+  const ip = (req.headers.get("cf-connecting-ip") ?? "").trim() || (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
   try {
     const r = await fetch(`${SB_URL}/rest/v1/rpc/ai_usage_hit`, {
       method: "POST",
       headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ p_keys: [`ag:${await sha("ag:" + ip)}`], p_hour_caps: [IP_HOUR], p_day_caps: [IP_DAY] }),
+      body: JSON.stringify({ p_keys: [`ag:${await sha("ag:" + ip)}`, "g:agent"], p_hour_caps: [IP_HOUR, ALL_HOUR], p_day_caps: [IP_DAY, ALL_DAY] }),
+      signal: AbortSignal.timeout(5000),
     });
     if (!r.ok) throw new Error();
     const hit = await r.json();
