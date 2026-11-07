@@ -1177,7 +1177,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.32';
+const APP_VERSION = '0.4.33';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
@@ -1220,6 +1220,14 @@ const avatar = (cls: string) => { const n = initials(getProfile().name); return 
 const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
 
 let drawerQuery = '';
+let showAllRecents = false;
+/** Small emoji for a chat title, picked from words in it. */
+function chatIcon(title: string) {
+  const x = title.toLowerCase();
+  const m: [RegExp, string][] = [[/recharge|mobile|sim/, '📱'], [/bill|electric|power|current/, '💡'], [/price|mandi|crop|chilli|mirchi|rate|bhav/, '🌶️'], [/bus|ticket|travel/, '🚌'], [/image|photo|picture|draw/, '🖼️'], [/watch/, '⌚'], [/flowchart|diagram|chart/, '📊'], [/quiz|exam|study|physics|math|chem|learn/, '📚'], [/buy|shop|price|under/, '🛍️'], [/kisan|farm/, '🌾']];
+  for (const [r, e] of m) if (r.test(x)) return e;
+  return '💬';
+}
 function closeDrawer() {
   const d = document.getElementById('drawer');
   document.body.classList.remove('dw-on');
@@ -1236,12 +1244,8 @@ function openDrawer() {
     <div class="dw-h"><img src="icons/mark.png" alt=""><b>Elric AI</b><button class="dw-ib" id="d-search" aria-label="${t('searchChats')}">${lsvg(li.search)}</button></div>
     <div class="dw-q" hidden><input id="d-q" type="search" placeholder="${t('searchChats')}" autocomplete="off"></div>
     <div class="dw-sc">
-      <nav class="dw-nav">
-        <button class="dw-it" id="m-talk">${lsvg(li.talk)}<span>${t('talk')}</span></button>
-        <button class="dw-it" id="d-photo">${lsvg(li.cam)}<span>${t('photoQuestion')}</span></button>
-      </nav>
       <div class="dw-seg" role="radiogroup" aria-label="${t('modeTitle')}">${(['study', 'shopping', 'general'] as Mode[]).map((m) => `<button role="radio" aria-checked="${m === mode}" class="${m === mode ? 'on' : ''}" data-dm="${m}">${t(modeKey[m])}</button>`).join('')}</div>
-      <div class="dw-sh">${t('recents')}</div>
+      <div class="dw-sh"><span>${t('recents')}</span><button class="dw-all" id="d-all"></button></div>
       <div class="dw-rc" id="d-rc"></div>
     </div>
     <div class="dw-f"><button class="dw-new" id="d-newpill">${lsvg(li.edit)}<span>${t('cdNewChat')}</span></button><button class="dw-me" id="d-me" aria-label="${t('profile')}">${avatar('av')}</button></div>
@@ -1258,8 +1262,7 @@ function openDrawer() {
   q.oninput = () => { drawerQuery = q.value.trim().toLowerCase(); renderRecents(); };
   const fresh = () => { closeDrawer(); openChat(undefined); };
   d.querySelector<HTMLElement>('#d-newpill')!.onclick = fresh;
-  d.querySelector<HTMLElement>('#m-talk')!.onclick = () => { closeDrawer(); startTalk(); };
-  d.querySelector<HTMLElement>('#d-photo')!.onclick = () => { closeDrawer(); pickPhoto(); };
+  d.querySelector<HTMLElement>('#d-all')!.onclick = () => { showAllRecents = !showAllRecents; renderRecents(); };
   d.querySelector<HTMLElement>('#d-me')!.onclick = () => { closeDrawer(); openProfile(); };
   d.querySelectorAll<HTMLButtonElement>('[data-dm]').forEach((b) => (b.onclick = () => { mode = b.dataset.dm as Mode; closeDrawer(); shell(); }));
   // Swipe left to close.
@@ -1286,9 +1289,13 @@ function renderRecents() {
   const box = document.getElementById('d-rc');
   if (!box) return;
   const all = loadChats();
-  const cs = drawerQuery ? all.filter((c) => (c.title || '').toLowerCase().includes(drawerQuery)) : all;
+  const found = drawerQuery ? all.filter((c) => (c.title || '').toLowerCase().includes(drawerQuery)) : all;
+  const LIM = 8, cs = drawerQuery || showAllRecents ? found : found.slice(0, LIM);
+  const allBtn = document.getElementById('d-all');
+  if (allBtn) { allBtn.hidden = !!drawerQuery || found.length <= LIM; allBtn.textContent = t(showAllRecents ? 'showLess' : 'seeAll'); }
+  box.classList.toggle('card', cs.length > 0);
   box.innerHTML = cs.length
-    ? cs.map((c) => `<div class="rc ${c.id === chatId ? 'sel' : ''}"><button class="ct" data-c="${c.id}">${esc(c.title || '…')}</button><button class="cx" data-d="${c.id}" aria-label="${t('deleteChat')}">${lsvg(li.x)}</button></div>`).join('')
+    ? cs.map((c) => `<div class="rc ${c.id === chatId ? 'sel' : ''}"><span class="rci">${chatIcon(c.title || '')}</span><button class="ct" data-c="${c.id}">${esc(c.title || '…')}</button><button class="cx" data-d="${c.id}" aria-label="${t('deleteChat')}">${lsvg(li.x)}</button></div>`).join('')
     : `<p class="dw-empty">${t(drawerQuery ? 'noMatches' : 'noChats')}</p>`;
   box.querySelectorAll<HTMLButtonElement>('[data-c]').forEach((b) => (b.onclick = () => { closeDrawer(); openChat(loadChats().find((c) => c.id === b.dataset.c)); }));
   box.querySelectorAll<HTMLButtonElement>('[data-d]').forEach((b) => (b.onclick = () => {
@@ -1334,31 +1341,31 @@ function renderProfile() {
   if (!p) return;
   const scroll = p.querySelector('.pf-in')?.scrollTop || 0;
   const name = getProfile().name;
-  const row = (id: string, icon: string, label: string, val = '', chev = true) =>
-    `<button class="pr" id="${id}">${lsvg(icon)}<span class="pl">${label}</span>${val ? `<span class="pv">${val}</span>` : ''}${chev ? '<i class="chev">›</i>' : ''}</button>`;
-  const link = (href: string, icon: string, label: string) => `<a class="pr" href="${href}" target="_blank" rel="noopener">${lsvg(icon)}<span class="pl">${label}</span><i class="chev">›</i></a>`;
+  const row = (id: string, icon: string, label: string, val = '', chev = true, c = '') =>
+    `<button class="pr ${c}" id="${id}">${lsvg(icon)}<span class="pl">${label}</span>${val ? `<span class="pv">${val}</span>` : ''}${chev ? '<i class="chev">›</i>' : ''}</button>`;
+  const link = (href: string, icon: string, label: string) => `<a class="pr c-s" href="${href}" target="_blank" rel="noopener">${lsvg(icon)}<span class="pl">${label}</span><i class="chev">›</i></a>`;
   const grp = (title: string, rows: string) => `<div class="pf-sh">${title}</div><div class="pf-g">${rows}</div>`;
   p.innerHTML = `<div class="pf-in">
     <button class="pf-x" id="p-close" aria-label="${t('close')}">${lsvg(li.x)}</button>
-    <div class="pf-top"><button class="pf-av" id="p-edit" aria-label="${t('editName')}">${avatar('av big')}<span class="pf-pen">${lsvg(li.edit)}</span></button>
-      <div class="pf-name">${name ? esc(name) : `<span class="mu">${t('menuMeHint')}</span>`}</div></div>
-    ${grp(t('secPersonalise'),
-      row('m-me', li.user, t('menuMe'), esc(name) || t('menuMeHint'))
-      + row('p-len', li.len, t('lenTitle'), t(short ? 'lenShort' : 'lenLong'))
-      + row('m-lang', li.globe, t('menuLanguage'), getLang() === 'hi' ? 'हिन्दी' : 'English')
-      + row('p-mode', li.modes, t('defaultMode'), t(modeKey[defaultMode()])))}
+    <div class="pf-card"><button class="pf-av" id="p-edit" aria-label="${t('editName')}">${avatar('av big')}</button>
+      <div class="pf-name">${name ? esc(name) : `<span class="mu">${t('menuMeHint')}</span>`}</div><button class="pf-ed" id="m-me">${t('editProfile')}</button></div>
+    <div class="qt">
+      <button class="qti" id="m-lang">${lsvg(li.globe)}<b>${t('menuLanguage')}</b><small>${getLang() === 'hi' ? 'हिन्दी' : 'English'}</small></button>
+      <button class="qti" id="p-len">${lsvg(li.len)}<b>${t('qtAnswers')}</b><small>${t(short ? 'lenShort' : 'lenLong')}</small></button>
+      <button class="qti" id="p-mode">${lsvg(li.modes)}<b>${t('qtMode')}</b><small>${t(modeKey[defaultMode()])}</small></button>
+    </div>
     ${grp(t('secAI'),
-      `<button class="pr" id="m-online" role="switch" aria-checked="${O.isOn()}">${lsvg(li.cloud)}<span class="pl">${t('onlineAnswers')}<small>${t('onlineHow')}</small></span><i class="sw ${O.isOn() ? 'on' : ''}"></i></button>`
-      + row('m-models', li.chip, t('menuModels'), t(E.MODEL_NAME_KEY as keyof Strings)))}
+      `<button class="pr c-g" id="m-online" role="switch" aria-checked="${O.isOn()}">${lsvg(li.cloud)}<span class="pl">${t('onlineAnswers')}<small>${t('onlineHow')}</small></span><i class="sw ${O.isOn() ? 'on' : ''}"></i></button>`
+      + row('m-models', li.chip, t('menuModels'), t(E.MODEL_NAME_KEY as keyof Strings), true, 'c-t'))}
     ${grp(t('secPrivacy'),
-      row('p-age', li.badge, t('age'), t(O.age18() ? 'ageYes' : 'ageNo'), false)
-      + row('p-clear', li.trash, t('clearAll'), '', false)
-      + row('m-priv', li.shield, t('menuPrivacy'))
+      row('p-age', li.badge, t('age'), t(O.age18() ? 'ageYes' : 'ageNo'), false, 'c-b')
+      + row('m-priv', li.shield, t('menuPrivacy'), '', true, 'c-s')
       + link('terms.html', li.doc, t('linkTerms')))}
     ${grp(t('secAbout'),
-      row('m-about', li.info, t('menuAbout'))
-      + row('m-lic', li.code, t('menuLicenses'))
-      + row('p-ver', li.tag, t('version'), APP_VERSION, false))}
+      row('m-about', li.info, t('menuAbout'), '', true, 'c-o')
+      + row('m-lic', li.code, t('menuLicenses'), '', true, 'c-l')
+      + row('p-ver', li.tag, t('version'), APP_VERSION, false, 'c-l'))}
+    <div class="pf-g pf-danger">${row('p-clear', li.trash, t('clearAll'), '', false, 'c-r')}</div>
     <p class="pf-foot">${t(isIOS() ? 'installTip' : 'installTipPc')}<br>${t('versionLine', { v: APP_VERSION })}</p>
   </div>`;
   p.querySelector('.pf-in')!.scrollTop = scroll;
