@@ -23,27 +23,28 @@
   let speechLang = 'en-IN'; // mic only; replies follow the user's own language automatically
   let pending = null; // last card that still has missing fields → next message is a follow-up
   let busy = false;
+  let lastCtx = ''; // short text of the last result shown (sent so follow-ups like "per kg?" can be answered)
 
   // Card text in the user's language. *-latn = Telugu/Hindi typed in English letters.
   const T = {
     'te-latn': { yes: 'Avunu', edit: 'Maarchu', need: 'kavali', soon: 'Tvaralo vastundi. Idi inka test maatrame.', fill: 'Paina adigindi type cheyandi leda cheppandi.', err: 'Connect kaledu. Malli try cheyandi.', limit: 'Ee ganta limit ayipoyindi. Konchem tarvata try cheyandi.',
-      task: { electricity_bill: 'Current bill', mobile_recharge: 'Mobile recharge', mandi_price: 'Market price', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Inka teliyadu' },
+      task: { electricity_bill: 'Current bill', mobile_recharge: 'Mobile recharge', mandi_price: 'Market price', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Elric' },
       label: { commodity: 'Crop', place: 'Place', mobile_number: 'Mobile number', operator: 'Network', amount: 'Amount (Rs.)', biller: 'Company', service_number: 'Service number', from: 'Ekkada nunchi', to: 'Ekkadiki', date: 'Tedi', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
       bill: ['Test bill — nijam kaadu', 'Due', 'Test kosam sample bill. Payment emi jaragadu.'], pay: ['Official site lo pay cheyandi', 'Mee service number copy ayindi. Site lo paste chesi, captcha vesi pay cheyandi.', 'Pay cheyadaniki open cheyandi', 'Copy ayindi'] },
     'hi-latn': { yes: 'Haan', edit: 'Badlein', need: 'chahiye', soon: 'Jald aa raha hai. Abhi sirf test hai.', fill: 'Upar ke sawaal ka jawab likhein ya bolein.', err: 'Connect nahi hua. Phir try karein.', limit: 'Is ghante ki limit poori. Thodi der baad try karein.',
-      task: { electricity_bill: 'Bijli bill', mobile_recharge: 'Mobile recharge', mandi_price: 'Market price', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Abhi pata nahi' },
+      task: { electricity_bill: 'Bijli bill', mobile_recharge: 'Mobile recharge', mandi_price: 'Market price', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Elric' },
       label: { commodity: 'Crop', place: 'Place', mobile_number: 'Mobile number', operator: 'Network', amount: 'Amount (Rs.)', biller: 'Company', service_number: 'Service number', from: 'Kahan se', to: 'Kahan tak', date: 'Tareekh', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
       bill: ['Test bill — asli nahi', 'Due', 'Test ke liye sample bill. Koi payment nahi hota.'], pay: ['Official site par pay karein', 'Aapka service number copy ho gaya. Site par paste karke captcha bharein aur pay karein.', 'Pay karne ke liye kholein', 'Copy ho gaya'] },
     te: { yes: 'అవును', edit: 'మార్చు', need: 'కావాలి', soon: 'త్వరలో వస్తుంది. ఇది ఇంకా టెస్ట్ మాత్రమే.', fill: 'పై ప్రశ్నకు జవాబు టైప్ చేయండి లేదా చెప్పండి.', err: 'కనెక్ట్ కాలేదు. మళ్లీ ప్రయత్నించండి.', limit: 'ఈ గంటకు పరిమితి దాటింది. కొంచెం తర్వాత ప్రయత్నించండి.',
-      task: { electricity_bill: 'కరెంట్ బిల్లు', mobile_recharge: 'మొబైల్ రీఛార్జ్', mandi_price: 'మార్కెట్ ధర', bus_search: 'బస్ వెతుకు', pm_kisan_status: 'PM-కిసాన్ స్టేటస్', unknown: 'ఇంకా తెలియదు' },
+      task: { electricity_bill: 'కరెంట్ బిల్లు', mobile_recharge: 'మొబైల్ రీఛార్జ్', mandi_price: 'మార్కెట్ ధర', bus_search: 'బస్ వెతుకు', pm_kisan_status: 'PM-కిసాన్ స్టేటస్', unknown: 'Elric' },
       label: { commodity: 'పంట', place: 'ఊరు', mobile_number: 'మొబైల్ నంబర్', operator: 'నెట్‌వర్క్', amount: 'మొత్తం (₹)', biller: 'సంస్థ', service_number: 'సర్వీస్ నంబర్', from: 'ఎక్కడి నుంచి', to: 'ఎక్కడికి', date: 'తేదీ', aadhaar_or_mobile_last4: 'ఆధార్/మొబైల్ (చివరి 4)' },
       bill: ['టెస్ట్ — నిజం కాదు', 'గడువు', 'టెస్ట్ కోసం నమూనా బిల్లు. ఎలాంటి చెల్లింపు జరగదు.'], pay: ['అధికారిక సైట్‌లో చెల్లించండి', 'మీ సర్వీస్ నంబర్ కాపీ అయింది. సైట్‌లో పేస్ట్ చేసి, క్యాప్చా వేసి చెల్లించండి.', 'చెల్లించడానికి ఓపెన్ చేయండి', 'కాపీ అయింది'] },
     hi: { yes: 'हाँ', edit: 'बदलें', need: 'चाहिए', soon: 'जल्द आ रहा है। अभी सिर्फ़ टेस्ट है।', fill: 'ऊपर के सवाल का जवाब लिखें या बोलें।', err: 'कनेक्ट नहीं हुआ। फिर से कोशिश करें।', limit: 'इस घंटे की सीमा पूरी हुई। थोड़ी देर बाद कोशिश करें।',
-      task: { electricity_bill: 'बिजली बिल', mobile_recharge: 'मोबाइल रिचार्ज', mandi_price: 'मंडी भाव', bus_search: 'बस खोजें', pm_kisan_status: 'PM-किसान स्टेटस', unknown: 'अभी पता नहीं' },
+      task: { electricity_bill: 'बिजली बिल', mobile_recharge: 'मोबाइल रिचार्ज', mandi_price: 'मंडी भाव', bus_search: 'बस खोजें', pm_kisan_status: 'PM-किसान स्टेटस', unknown: 'Elric' },
       label: { commodity: 'फसल', place: 'जगह', mobile_number: 'मोबाइल नंबर', operator: 'नेटवर्क', amount: 'राशि (₹)', biller: 'कंपनी', service_number: 'सर्विस नंबर', from: 'कहाँ से', to: 'कहाँ तक', date: 'तारीख', aadhaar_or_mobile_last4: 'आधार/मोबाइल (आखिरी 4)' },
       bill: ['टेस्ट — असली नहीं', 'देय', 'टेस्ट के लिए नमूना बिल। कोई भुगतान नहीं होता।'], pay: ['आधिकारिक साइट पर भुगतान करें', 'आपका सर्विस नंबर कॉपी हो गया। साइट पर पेस्ट करें, कैप्चा भरें और भुगतान करें।', 'भुगतान के लिए खोलें', 'कॉपी हो गया'] },
     en: { yes: 'Yes', edit: 'Edit', need: 'needed', soon: 'Coming soon. This is a test version.', fill: 'Type or say the answer to the question above.', err: 'Could not connect. Please try again.', limit: 'Hourly limit reached. Please try a bit later.',
-      task: { electricity_bill: 'Power bill', mobile_recharge: 'Mobile recharge', mandi_price: 'Market price', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Not sure yet' },
+      task: { electricity_bill: 'Power bill', mobile_recharge: 'Mobile recharge', mandi_price: 'Market price', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Elric' },
       label: { commodity: 'Crop', place: 'Place', mobile_number: 'Mobile no.', operator: 'Network', amount: 'Amount (Rs.)', biller: 'Company', service_number: 'Service no.', from: 'From', to: 'To', date: 'Date', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
       bill: ['TEST — NOT REAL', 'Due', 'Sample bill for testing. No payment is made.'], pay: ['Pay on the official site', 'Your service number is copied. Paste it on the site, fill the captcha and pay.', 'Open to pay', 'Copied'] },
   };
@@ -72,6 +73,7 @@
     const wait = el('div', 'typing'); wait.innerHTML = '<i></i><i></i><i></i>';
     log.append(wait); scroll();
     const body = { text, ui_lang: uiLang() };
+    if (lastCtx) body.ctx = lastCtx;
     if (pending) body.prev = { task: pending.task, fields: pending.fields, lang: pending.lang, script: pending.script };
     try {
       const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: KEY }, body: JSON.stringify(body) });
@@ -192,11 +194,15 @@
       rows.sort((a, b2) => Number(b2.modal_price) - Number(a.modal_price));
       for (const x of rows.slice(0, 3)) {
         const r = el('div', 'mrow');
-        r.append(el('div', 'amt', '₹' + Number(x.modal_price).toLocaleString('en-IN')));
+        const qp = Number(x.modal_price);
+        const a = el('div', 'amt', '₹' + qp.toLocaleString('en-IN'));
+        a.append(el('span', 'kg', ` · ₹${(qp / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}/kg`));
+        r.append(a);
         r.append(el('div', 'sub', `${M[1]} · ${x.market}, ${x.district} · ${x.variety} · ${x.arrival_date}`));
         b.append(r);
       }
       b.append(el('div', 'sub', M[2]));
+      lastCtx = `${res.fields.commodity} modal prices in Rs per quintal (100 kg): ` + rows.slice(0, 3).map((x) => `${x.market} (${x.district}) Rs ${x.modal_price} on ${x.arrival_date}`).join('; ');
     } catch {
       wait.remove();
       b.append(el('div', 'sub', M[4]));
