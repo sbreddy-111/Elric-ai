@@ -261,3 +261,20 @@ html.pwa .composer{margin-bottom:6px}
 #agentov .agbar{display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.08);color:#ECECF1}
 #agentov .agbar b{font-weight:600;font-size:16px}
 #agentov iframe{flex:1;width:100%;border:0;background:#0F0F12}
+
+/* General Home 2026-11-08: Today card + big task tiles */
+.home2{justify-content:flex-start;padding-top:8px}
+.home2>p{margin-bottom:14px}
+.today{display:flex;gap:12px;align-items:center;width:100%;text-align:left;padding:12px 14px;margin-bottom:14px;border-radius:16px;background:linear-gradient(135deg,rgba(212,166,74,.16),rgba(212,166,74,.04));border:1px solid rgba(212,166,74,.5)}
+.today .te{font-size:30px}
+.today small{display:block;color:var(--mu);font-size:12.5px}
+.today b{display:block;font-size:22px;color:var(--gold);font-weight:700}
+.today b i{font-style:normal;font-size:13px;color:var(--mu);font-weight:400}
+.hh{margin:2px 0 10px;font-size:15px;font-weight:600;color:var(--mu);letter-spacing:.02em}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tile{display:flex;align-items:center;gap:10px;text-align:left;padding:14px 12px;min-height:72px;border-radius:16px;background:var(--s1);border:1px solid var(--line);font-size:16px;font-weight:600;line-height:1.2}
+.tile:active{background:var(--s2)}
+.tile .te{font-size:26px;flex:none}
+.hchips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.hchip{padding:8px 12px;border-radius:999px;background:var(--s1);border:1px solid var(--line);font-size:13.5px;color:var(--mu)}
+html.narrow .tile{font-size:14.5px;min-height:64px;padding:12px 10px}

@@ -182,7 +182,6 @@ function shell() {
     <button class="icon" id="menu" aria-label="${t('cdMenu')}">${svg(ic.menu)}</button>
     <button class="modebtn" id="modebtn" aria-label="${t('cdMode')}">Elric AI · <b>${t(modeKey[mode])}</b>${svg(ic.down)}</button>
     <button class="lang" id="lang">${getLang() === 'en' ? 'हिं' : 'EN'}</button>
-    <button class="icon" id="agentbtn" aria-label="${t('cdAgent')}">${svg(ic.agent)}</button>
     <button class="icon" id="newc" aria-label="${t('cdNewChat')}">${svg(ic.newc)}</button>
   </header>
   <div class="pill ${O.isOn() ? 'online' : ''}"><i></i>${!O.isOn() ? t('privacyOnDevice') : mode === 'shopping' ? t('privacyOnline') : t('pillOnline')}</div>
@@ -199,7 +198,6 @@ function shell() {
   $('#modebtn').onclick = modeSheet;
   $('#lang').onclick = () => { setLang(getLang() === 'en' ? 'hi' : 'en'); shell(); };
   $('#newc').onclick = () => openChat(undefined);
-  $('#agentbtn').onclick = openAgent;
   $('#snap').onclick = pickAttach;
   $<HTMLInputElement>('#file').onchange = onPhotoPicked;
   wireMic($('#mic'));
@@ -212,14 +210,61 @@ function shell() {
   renderProfile();
 }
 
+/** General-mode Home: greeting, a live Today price card, big task tiles (open Elric Agent on that task),
+ *  then the old suggestions as small chips. */
+function homeGeneral(m: HTMLElement, cards: [keyof Strings, () => void][]) {
+  const name = getProfile().name ? ', ' + esc(getProfile().name.split(' ')[0]) : '';
+  const tiles: [string, keyof Strings, keyof Strings][] = [
+    ['💡', 'tileBill', 'qBill'], ['📱', 'tileRecharge', 'qRecharge'], ['🌶️', 'tileCrop', 'qCrop'],
+    ['🚌', 'tileBus', 'qBus'], ['🌾', 'tileKisan', 'qKisan'], ['💬', 'tileAsk', 'tileAsk'],
+  ];
+  m.innerHTML = `<section class="hero hero-general home2"><img src="icons/mark.png" alt="" class="mark"><h1>${t('greeting')}${name}</h1><p>${t('homeSub')}</p>
+    <div id="today"></div>
+    <h2 class="hh">${t('doWork')}</h2>
+    <div class="tiles">${tiles.map(([e, k], i) => `<button class="tile" data-ti="${i}"><span class="te">${e}</span><span>${t(k)}</span></button>`).join('')}</div>
+    <div class="hchips">${cards.map(([k], i) => `<button class="hchip" data-i="${i}">${t(k)}</button>`).join('')}</div>
+    <div id="status"></div></section>`;
+  m.querySelectorAll<HTMLButtonElement>('.tile').forEach((b) => (b.onclick = () => {
+    const i = +b.dataset.ti!;
+    if (i === 5) { const inp = $<HTMLTextAreaElement>('#input'); inp.focus(); return; }
+    openAgent(t(tiles[i][2]));
+  }));
+  m.querySelectorAll<HTMLButtonElement>('.hchip').forEach((b) => (b.onclick = cards[+b.dataset.i!][1]));
+  renderStatus();
+  todayCard();
+}
+
+/** Today card: Guntur dry chilli modal price from Agmarknet (data.gov.in). Hidden when offline or no data. */
+async function todayCard() {
+  const box = document.getElementById('today'); if (!box) return;
+  const KEY = 'elric.today';
+  type Row = { market: string; modal_price: string; arrival_date: string };
+  let row: Row | null = null;
+  try { const c = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (c && Date.now() - c.at < 3 * 3600e3) row = c.row; } catch { /* ignore */ }
+  if (!row) {
+    try {
+      const base = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=Dry%20Chillies';
+      const get = async (x: string) => { const r = await fetch(base + x, { signal: AbortSignal.timeout(6000) }); return r.ok ? ((await r.json()).records || []) as Row[] : []; };
+      let rows = await get('&filters%5Bdistrict%5D=Guntur');
+      if (!rows.length) rows = await get('');
+      rows.sort((a, b) => Number(b.modal_price) - Number(a.modal_price));
+      row = rows[0] || null;
+      if (row) sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), row }));
+    } catch { row = null; }
+  }
+  const el = document.getElementById('today'); if (!el || !row || !Number(row.modal_price)) return;
+  el.innerHTML = `<button class="today"><span class="te">🌶️</span><span><small>${t('todayChilli')} · ${esc(row.market)}</small><b>₹${Number(row.modal_price).toLocaleString('en-IN')} <i>${t('perQuintal')}</i></b><small>${esc(row.arrival_date)} · Agmarknet</small></span></button>`;
+  (el.querySelector('.today') as HTMLButtonElement).onclick = () => openAgent(t('qCrop2'));
+}
+
 /** Elric Agent (tasks: power bill, recharge, mandi price, bus, PM-Kisan) opens full screen over the chat.
  *  Same-origin page /agent/ talks only to the ai-agent function; nothing is saved. */
-function openAgent() {
+function openAgent(q = '') {
   if (document.getElementById('agentov')) return;
   const ov = document.createElement('div');
   ov.id = 'agentov';
   ov.innerHTML = `<div class="agbar"><button class="icon" id="agclose" aria-label="${t('cdBack')}">${svg('<path d="M15 18l-6-6 6-6"/>')}</button><b>Elric Agent</b></div>
-  <iframe src="${import.meta.env.BASE_URL}agent/" title="Elric Agent" allow="microphone; clipboard-write"></iframe>`;
+  <iframe src="${import.meta.env.BASE_URL}agent/?lang=${getLang()}${q ? '&q=' + encodeURIComponent(q) : ''}" title="Elric Agent" allow="microphone; clipboard-write"></iframe>`;
   document.body.appendChild(ov);
   const close = () => { ov.remove(); removeEventListener('keydown', esc); };
   const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
@@ -243,6 +288,7 @@ function renderMain(keepScroll = false) {
     };
     const cards = byMode[mode] || byMode.general;
     const sub: Record<Mode, keyof Strings> = { general: 'subtitle', study: 'subStudy', shopping: 'subShop' };
+    if (mode === 'general') { homeGeneral(m, cards); return; }
     m.innerHTML = `<section class="hero hero-${mode}"><img src="icons/mark.png" alt="" class="mark"><h1>${t('greeting')}${getProfile().name ? ', ' + esc(getProfile().name.split(' ')[0]) : ''}</h1><p>${t(sub[mode] || 'subtitle')}</p>
       <div class="cards">${cards.map(([k], i) => `<button class="card" data-i="${i}">${t(k)}</button>`).join('')}</div>
       <div id="status"></div></section>`;
@@ -995,7 +1041,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.24';
+const APP_VERSION = '0.4.25';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
