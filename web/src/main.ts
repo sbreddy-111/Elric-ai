@@ -215,7 +215,7 @@ function shell() {
 
 // ---------------------------------------------------------------- Elric Agent in the chat
 const AGENT_URL = O.SB_URL + '/functions/v1/ai-agent';
-const AG_ICON: Record<string, string> = { electricity_bill: '💡', mobile_recharge: '📱', mandi_price: '🌶️', bus_search: '🚌', pm_kisan_status: '🌾' };
+const AG_ICON: Record<string, string> = { electricity_bill: '💡', mobile_recharge: '📱', mandi_price: '🌾', bus_search: '🚌', pm_kisan_status: '🌾' };
 const AG_PICKS: Record<string, string[]> = { biller: ['APCPDCL', 'APSPDCL', 'APEPDCL'], operator: ['Jio', 'Airtel', 'Vi', 'BSNL'] };
 const PAY_URL: Record<string, string> = {
   APCPDCL: 'https://www.apcpdcl.in/ConsumerDashboard/KnownBillPay',
@@ -223,7 +223,7 @@ const PAY_URL: Record<string, string> = {
   APEPDCL: 'https://www.apeasternpower.com/payWithoutLogin',
 };
 /** Cheap on-phone check before asking the server: only messages that look like a task go to the agent. */
-const AGENT_RE = /\b(bill|current bill|karent|bijli|electricity|power|apcpdcl|apspdcl|apepdcl|recharge|top ?up|mandi|market (price|rate|yard)|rate|dhara|bhav|bhaav|bus|kisan|mirchi|chilli|chillies|cotton|patti|paddy|vadlu|dhan|onion|tomato|groundnut|maize)\b|బిల్లు|కరెంట్|రీఛార్జ్|ధర|రేటు|బస్|కిసాన్|మిర్చి|పత్తి|బిల|बिल|बिजली|रिचार्ज|भाव|मंडी|बस|किसान|मिर्च|कपास|धान/i;
+const AGENT_RE = /\b(bill|current bill|karent|bijli|electricity|power|apcpdcl|apspdcl|apepdcl|recharge|top ?up|mandi|market (price|rate|yard)|rate|dhara|bhav|bhaav|bus|kisan|mirchi|chilli|chillies|cotton|patti|paddy|vadlu|dhan|onion|tomato|groundnut|maize|vegetables?|fruits?|prices|sabzi|sabji|kooragay\w*|dharalu|carrot|potato|banana|mango|apple|papaya)\b|కూరగాయ|పండ్ల|सब्ज़ी|सब्जी|फल|బిల్లు|కరెంట్|రీఛార్జ్|ధర|రేటు|బస్|కిసాన్|మిర్చి|పత్తి|బిల|बिल|बिजली|रिचार्ज|भाव|मंडी|बस|किसान|मिर्च|कपास|धान/i;
 let agentEdit: AgentRes | null = null;
 const openAgentTurn = () => { const x = [...turns].reverse().find((y) => y.role === 'model' && y.agent); return x?.agent && !x.agent.closed && x.agent.missing.length ? x.agent : null; };
 
@@ -232,7 +232,7 @@ function agentCard(a: AgentRes, i: number): string {
   const OPN: Record<string, string> = { JIO: 'Jio', AIRTEL: 'Airtel', VI: 'Vi', BSNL: 'BSNL' };
   const rows = Object.keys(a.fields || {}).map((k) => {
     const v = a.fields[k];
-    const shown = v ? (k === 'operator' ? OPN[v] || v : k === 'amount' ? '₹' + v : v) : k === 'place' ? 'Andhra Pradesh' : '';
+    const shown = v === 'ALL' ? t('agAllCrops') : v ? (k === 'operator' ? OPN[v] || v : k === 'amount' ? '₹' + v : v) : k === 'place' ? 'Andhra Pradesh' : '';
     return `<dt>${esc(lab(k))}</dt><dd class="${shown ? '' : 'miss'}">${shown ? esc(shown) : '—'}</dd>`;
   }).join('');
   let act = '';
@@ -288,6 +288,7 @@ async function agentYes(a: AgentRes) {
     const reply: Turn = { role: 'model', text: '' };
     turns.push(reply); busy = true; refreshChat();
     reply.text = await mandiText(f.commodity || '', f.place || '');
+    if (reply.text === t('agPriceFail')) a.closed = false; // let them tap Yes again
     busy = false;
   } else {
     turns.push({ role: 'model', text: t('agSoon') });
@@ -298,18 +299,28 @@ async function agentYes(a: AgentRes) {
 
 /** Latest Agmarknet prices, written as chat text (so follow-up questions are answered by the normal chat). */
 async function mandiText(crop: string, place: string): Promise<string> {
-  const base = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=${encodeURIComponent(crop)}`;
-  type Row = { market: string; district: string; variety: string; modal_price: string; arrival_date: string };
-  const get = async (x: string) => { const r = await fetch(base + x, { signal: AbortSignal.timeout(10000) }); if (!r.ok) throw new Error(); return ((await r.json()).records || []) as Row[]; };
+  const all = crop === 'ALL';
+  const day = new Date().toISOString().slice(0, 10);
+  const ck = `elric.mandi.${crop}.${place}.${day}`;
+  try { const c = sessionStorage.getItem(ck) || localStorage.getItem(ck); if (c) return c; } catch { /* storage blocked */ }
+  const base = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh${all ? '' : `&filters%5Bcommodity%5D=${encodeURIComponent(crop)}`}`;
+  type Row = { market: string; district: string; commodity: string; variety: string; modal_price: string; arrival_date: string };
+  const once = async (x: string) => { const r = await fetch(base + x, { signal: AbortSignal.timeout(10000) }); if (!r.ok) throw new Error(String(r.status)); return ((await r.json()).records || []) as Row[]; };
+  // The free government key is shared and sometimes busy: try again twice before giving up.
+  const get = async (x: string) => { for (let n = 0; ; n++) { try { return await once(x); } catch (e) { if (n >= 2) throw e; await new Promise((r) => setTimeout(r, 1200 * (n + 1))); } } };
   try {
     let rows: Row[] = [];
     if (place) { try { rows = await get(`&filters%5Bmarket%5D=${encodeURIComponent(place)}`); } catch { /* next */ } if (!rows.length) { try { rows = await get(`&filters%5Bdistrict%5D=${encodeURIComponent(place)}`); } catch { /* next */ } } }
     let other = false;
     if (!rows.length) { rows = await get(''); other = !!place; }
-    rows = rows.filter((x) => Number(x.modal_price) > 0).sort((a, b) => Number(b.modal_price) - Number(a.modal_price)).slice(0, 3);
+    rows = rows.filter((x) => Number(x.modal_price) > 0);
     if (!rows.length) return t('agNoPrice');
     const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-    return `**${t('agPriceHead', { c: crop })}**\n${other ? t('agOtherMarkets', { p: place }) + '\n' : ''}\n` + rows.map((x) => { const q = Number(x.modal_price); return `- ${x.market} (${x.district}): **${inr(q / 100)}/kg** · ${inr(q)}/${t('agQuintal')} · ${x.arrival_date}`; }).join('\n') + `\n\n${t('agSource')}`;
+    const line = (x: Row) => { const q = Number(x.modal_price); return `- ${all ? `**${x.commodity}** · ` : ''}${x.market} (${x.district}): **${inr(q / 100)}/kg** · ${inr(q)}/${t('agQuintal')} · ${x.arrival_date}`; };
+    const list = all ? rows.sort((a, b) => a.commodity.localeCompare(b.commodity)) : rows.sort((a, b) => Number(b.modal_price) - Number(a.modal_price)).slice(0, 3);
+    const out = `**${all ? t('agAllHead') : t('agPriceHead', { c: crop })}**\n${other ? t('agOtherMarkets', { p: place }) + '\n' : ''}\n` + list.map(line).join('\n') + `\n\n${t('agSource')}`;
+    try { sessionStorage.setItem(ck, out); } catch { /* storage full */ }
+    return out;
   } catch { return t('agPriceFail'); }
 }
 
@@ -1137,7 +1148,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.29';
+const APP_VERSION = '0.4.30';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [

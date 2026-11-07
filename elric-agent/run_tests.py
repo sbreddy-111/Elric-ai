@@ -33,7 +33,9 @@ T=[
  ('en','tomato price in Guntur market','en','mandi_price',{'commodity':'Tomato','place':'Guntur'},[]),
  ('te','biyyam rate enta','en','mandi_price',{'commodity':'Rice'},[]),
  ('hi','aaj pyaz ka mandi bhav batao','en','mandi_price',{'commodity':'Onion'},[]),
- ('en','What is the mandi crop price today?','en','mandi_price',{'commodity':None},['commodity']),
+ ('en','What is the mandi crop price today?','en','mandi_price',{'commodity':'ALL'},[]),
+ ('te','boppayi rate enta','te-latn','mandi_price',{'commodity':'Papaya'},[]),
+ ('hi','sabzi ke bhav batao','hi-latn','mandi_price',{'commodity':'ALL'},[]),
 ]
 rows=[];passed=0
 for i,(lg,text,ui,task,exp,miss) in enumerate(T,1):
