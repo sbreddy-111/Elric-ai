@@ -74,3 +74,4 @@ html.kb .note{display:none}
 .back[hidden],.proto[hidden]{display:none}
 html,body{overflow:hidden;overscroll-behavior:none}
 .bill .amt .kg{font-size:15px;color:var(--mu);font-weight:500}
+html.kb #app{position:fixed;top:0;left:0;right:0;height:var(--app-h);margin:0 auto}
