@@ -251,3 +251,7 @@ html.short.kb .hero .cards{display:none}
   #app{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
 }
 @supports not (height:100dvh){.panel{max-height:85vh}}
+/* 0.4.20: Home Screen mode fills the whole screen on every iPhone (iOS reports a short height at launch) */
+html.pwa #app{position:fixed;top:0;left:0;right:0;bottom:0;height:auto;margin:0 auto;padding-bottom:max(4px,calc(env(safe-area-inset-bottom) - 16px))}
+html.pwa.kb #app{bottom:auto;height:var(--app-h);padding-bottom:0}
+html.pwa .composer{margin-bottom:6px}
