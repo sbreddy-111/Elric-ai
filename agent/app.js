@@ -13,30 +13,30 @@
   // Card text in the user's language. *-latn = Telugu/Hindi typed in English letters.
   const T = {
     'te-latn': { yes: 'Avunu', edit: 'Maarchu', need: 'kavali', soon: 'Tvaralo vastundi. Idi inka test maatrame.', fill: 'Paina adigindi type cheyandi leda cheppandi.', err: 'Connect kaledu. Malli try cheyandi.', limit: 'Ee ganta limit ayipoyindi. Konchem tarvata try cheyandi.',
-      task: { electricity_bill: 'Current bill', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Inka teliyadu' },
-      label: { biller: 'Company', service_number: 'Service number', from: 'Ekkada nunchi', to: 'Ekkadiki', date: 'Tedi', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
+      task: { electricity_bill: 'Current bill', mobile_recharge: 'Mobile recharge', mandi_price: 'Market price', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Inka teliyadu' },
+      label: { commodity: 'Crop', place: 'Place', mobile_number: 'Mobile number', operator: 'Network', amount: 'Amount (Rs.)', biller: 'Company', service_number: 'Service number', from: 'Ekkada nunchi', to: 'Ekkadiki', date: 'Tedi', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
       bill: ['Test bill — nijam kaadu', 'Due', 'Test kosam sample bill. Payment emi jaragadu.'], pay: ['Official site lo pay cheyandi', 'Mee service number copy ayindi. Site lo paste chesi, captcha vesi pay cheyandi.', 'Pay cheyadaniki open cheyandi', 'Copy ayindi'] },
     'hi-latn': { yes: 'Haan', edit: 'Badlein', need: 'chahiye', soon: 'Jald aa raha hai. Abhi sirf test hai.', fill: 'Upar ke sawaal ka jawab likhein ya bolein.', err: 'Connect nahi hua. Phir try karein.', limit: 'Is ghante ki limit poori. Thodi der baad try karein.',
-      task: { electricity_bill: 'Bijli bill', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Abhi pata nahi' },
-      label: { biller: 'Company', service_number: 'Service number', from: 'Kahan se', to: 'Kahan tak', date: 'Tareekh', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
+      task: { electricity_bill: 'Bijli bill', mobile_recharge: 'Mobile recharge', mandi_price: 'Market price', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Abhi pata nahi' },
+      label: { commodity: 'Crop', place: 'Place', mobile_number: 'Mobile number', operator: 'Network', amount: 'Amount (Rs.)', biller: 'Company', service_number: 'Service number', from: 'Kahan se', to: 'Kahan tak', date: 'Tareekh', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
       bill: ['Test bill — asli nahi', 'Due', 'Test ke liye sample bill. Koi payment nahi hota.'], pay: ['Official site par pay karein', 'Aapka service number copy ho gaya. Site par paste karke captcha bharein aur pay karein.', 'Pay karne ke liye kholein', 'Copy ho gaya'] },
     te: { yes: 'అవును', edit: 'మార్చు', need: 'కావాలి', soon: 'త్వరలో వస్తుంది. ఇది ఇంకా టెస్ట్ మాత్రమే.', fill: 'పై ప్రశ్నకు జవాబు టైప్ చేయండి లేదా చెప్పండి.', err: 'కనెక్ట్ కాలేదు. మళ్లీ ప్రయత్నించండి.', limit: 'ఈ గంటకు పరిమితి దాటింది. కొంచెం తర్వాత ప్రయత్నించండి.',
-      task: { electricity_bill: 'కరెంట్ బిల్లు', bus_search: 'బస్ వెతుకు', pm_kisan_status: 'PM-కిసాన్ స్టేటస్', unknown: 'ఇంకా తెలియదు' },
-      label: { biller: 'సంస్థ', service_number: 'సర్వీస్ నంబర్', from: 'ఎక్కడి నుంచి', to: 'ఎక్కడికి', date: 'తేదీ', aadhaar_or_mobile_last4: 'ఆధార్/మొబైల్ (చివరి 4)' },
+      task: { electricity_bill: 'కరెంట్ బిల్లు', mobile_recharge: 'మొబైల్ రీఛార్జ్', mandi_price: 'మార్కెట్ ధర', bus_search: 'బస్ వెతుకు', pm_kisan_status: 'PM-కిసాన్ స్టేటస్', unknown: 'ఇంకా తెలియదు' },
+      label: { commodity: 'పంట', place: 'ఊరు', mobile_number: 'మొబైల్ నంబర్', operator: 'నెట్‌వర్క్', amount: 'మొత్తం (₹)', biller: 'సంస్థ', service_number: 'సర్వీస్ నంబర్', from: 'ఎక్కడి నుంచి', to: 'ఎక్కడికి', date: 'తేదీ', aadhaar_or_mobile_last4: 'ఆధార్/మొబైల్ (చివరి 4)' },
       bill: ['టెస్ట్ — నిజం కాదు', 'గడువు', 'టెస్ట్ కోసం నమూనా బిల్లు. ఎలాంటి చెల్లింపు జరగదు.'], pay: ['అధికారిక సైట్‌లో చెల్లించండి', 'మీ సర్వీస్ నంబర్ కాపీ అయింది. సైట్‌లో పేస్ట్ చేసి, క్యాప్చా వేసి చెల్లించండి.', 'చెల్లించడానికి ఓపెన్ చేయండి', 'కాపీ అయింది'] },
     hi: { yes: 'हाँ', edit: 'बदलें', need: 'चाहिए', soon: 'जल्द आ रहा है। अभी सिर्फ़ टेस्ट है।', fill: 'ऊपर के सवाल का जवाब लिखें या बोलें।', err: 'कनेक्ट नहीं हुआ। फिर से कोशिश करें।', limit: 'इस घंटे की सीमा पूरी हुई। थोड़ी देर बाद कोशिश करें।',
-      task: { electricity_bill: 'बिजली बिल', bus_search: 'बस खोजें', pm_kisan_status: 'PM-किसान स्टेटस', unknown: 'अभी पता नहीं' },
-      label: { biller: 'कंपनी', service_number: 'सर्विस नंबर', from: 'कहाँ से', to: 'कहाँ तक', date: 'तारीख', aadhaar_or_mobile_last4: 'आधार/मोबाइल (आखिरी 4)' },
+      task: { electricity_bill: 'बिजली बिल', mobile_recharge: 'मोबाइल रिचार्ज', mandi_price: 'मंडी भाव', bus_search: 'बस खोजें', pm_kisan_status: 'PM-किसान स्टेटस', unknown: 'अभी पता नहीं' },
+      label: { commodity: 'फसल', place: 'जगह', mobile_number: 'मोबाइल नंबर', operator: 'नेटवर्क', amount: 'राशि (₹)', biller: 'कंपनी', service_number: 'सर्विस नंबर', from: 'कहाँ से', to: 'कहाँ तक', date: 'तारीख', aadhaar_or_mobile_last4: 'आधार/मोबाइल (आखिरी 4)' },
       bill: ['टेस्ट — असली नहीं', 'देय', 'टेस्ट के लिए नमूना बिल। कोई भुगतान नहीं होता।'], pay: ['आधिकारिक साइट पर भुगतान करें', 'आपका सर्विस नंबर कॉपी हो गया। साइट पर पेस्ट करें, कैप्चा भरें और भुगतान करें।', 'भुगतान के लिए खोलें', 'कॉपी हो गया'] },
     en: { yes: 'Yes', edit: 'Edit', need: 'needed', soon: 'Coming soon. This is a test version.', fill: 'Type or say the answer to the question above.', err: 'Could not connect. Please try again.', limit: 'Hourly limit reached. Please try a bit later.',
-      task: { electricity_bill: 'Power bill', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Not sure yet' },
-      label: { biller: 'Company', service_number: 'Service no.', from: 'From', to: 'To', date: 'Date', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
+      task: { electricity_bill: 'Power bill', mobile_recharge: 'Mobile recharge', mandi_price: 'Market price', bus_search: 'Bus search', pm_kisan_status: 'PM-Kisan status', unknown: 'Not sure yet' },
+      label: { commodity: 'Crop', place: 'Place', mobile_number: 'Mobile no.', operator: 'Network', amount: 'Amount (Rs.)', biller: 'Company', service_number: 'Service no.', from: 'From', to: 'To', date: 'Date', aadhaar_or_mobile_last4: 'Aadhaar/mobile (last 4)' },
       bill: ['TEST — NOT REAL', 'Due', 'Sample bill for testing. No payment is made.'], pay: ['Pay on the official site', 'Your service number is copied. Paste it on the site, fill the captcha and pay.', 'Open to pay', 'Copied'] },
   };
   const uiLang = () => speechLang.slice(0, 2);
   let lastLang = 'en', lastScript = 'native';
   const t = (lang, script) => T[lang && lang !== 'en' && script === 'latn' ? lang + '-latn' : lang] || T.en;
-  const ICON = { electricity_bill: '⚡', bus_search: '🚌', pm_kisan_status: '🌾', unknown: '💬' };
+  const ICON = { electricity_bill: '⚡', mobile_recharge: '📱', mandi_price: '🌶️', bus_search: '🚌', pm_kisan_status: '🌾', unknown: '💬' };
 
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const scroll = () => requestAnimationFrame(() => main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' }));
@@ -83,7 +83,8 @@
       const dl = el('dl', 'rows');
       for (const f of keys) {
         const v = res.fields[f];
-        dl.append(el('dt', null, L.label[f] || f), el('dd', v ? '' : 'miss', v ? (f === 'date' ? fmtDate(v) : v) : '— ' + L.need));
+        const OPN = { JIO: 'Jio', AIRTEL: 'Airtel', VI: 'Vi', BSNL: 'BSNL' };
+        dl.append(el('dt', null, L.label[f] || f), el('dd', v || f === 'place' ? '' : 'miss', v || f === 'place' ? (!v ? 'Andhra Pradesh' : f === 'date' ? fmtDate(v) : f === 'operator' ? (OPN[v] || v) : f === 'amount' ? '₹' + v : v) : '— ' + L.need));
       }
       c.append(dl);
     }
@@ -91,10 +92,11 @@
     if (res.task === 'unknown') { pending = null; return; }
     if (res.missing && res.missing.length) {
       pending = res;
-      if (res.missing[0] === 'biller') {
-        // Tap a company instead of typing or saying the hard name.
+      const PICKS = { biller: ['APCPDCL', 'APSPDCL', 'APEPDCL'], operator: ['Jio', 'Airtel', 'Vi', 'BSNL'] };
+      if (PICKS[res.missing[0]]) {
+        // Tap a choice instead of typing or saying it.
         const row = el('div', 'picks');
-        for (const b of ['APCPDCL', 'APSPDCL', 'APEPDCL']) {
+        for (const b of PICKS[res.missing[0]]) {
           const btn = el('button', 'pick', b);
           btn.type = 'button';
           btn.onclick = () => { if (busy) return; row.querySelectorAll('button').forEach((x) => x.disabled = true); btn.classList.add('on'); send(b); };
@@ -139,8 +141,49 @@
       b.append(go);
       log.append(b);
       try { navigator.clipboard && navigator.clipboard.writeText(sn); } catch {}
+    } else if (res.task === 'mandi_price') {
+      mandi(res, L);
     } else {
       log.append(el('div', 'soon', `${ICON[res.task] || ICON.unknown} ${L.soon}`));
+    }
+    scroll();
+  }
+
+  // Live mandi prices: the phone asks data.gov.in (Agmarknet, Govt of India) directly. Prices are Rs per quintal.
+  const OGD = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070';
+  const OGD_KEY = '579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b'; // public sample key (10 rows per call)
+  const MT = { en: ['Today\'s market price', 'per quintal', 'Source: Agmarknet, Govt of India', 'No price reported yet. Try again later.', 'Could not reach the price service.'],
+    te: ['ఈరోజు మార్కెట్ ధర', 'క్వింటాకు', 'మూలం: Agmarknet, భారత ప్రభుత్వం', 'ఇంకా ధర రాలేదు. తర్వాత చూడండి.', 'ధర సేవ అందలేదు.'],
+    hi: ['आज का मंडी भाव', 'प्रति क्विंटल', 'स्रोत: Agmarknet, भारत सरकार', 'अभी भाव नहीं आया। बाद में देखें।', 'भाव सेवा से जुड़ नहीं पाए।'] };
+  async function mandi(res, L) {
+    const M = MT[res.lang] || MT.en;
+    const b = el('div', 'bill');
+    b.append(el('div', 'tag', M[0]));
+    const wait = el('div', 'typing'); wait.innerHTML = '<i></i><i></i><i></i>'; b.append(wait);
+    log.append(b); scroll();
+    const get = async (extra) => {
+      const u = `${OGD}?api-key=${OGD_KEY}&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=${encodeURIComponent(res.fields.commodity)}${extra}`;
+      const r = await fetch(u); if (!r.ok) throw new Error(r.status); return (await r.json()).records || [];
+    };
+    try {
+      let rows = [];
+      const pl = (res.fields.place || '').trim();
+      if (pl) { try { rows = await get(`&filters%5Bmarket%5D=${encodeURIComponent(pl)}`); } catch {} if (!rows.length) { try { rows = await get(`&filters%5Bdistrict%5D=${encodeURIComponent(pl)}`); } catch {} } }
+      if (!rows.length) rows = await get('');
+      wait.remove();
+      if (!rows.length) { b.append(el('div', 'sub', M[3])); return; }
+      rows.sort((a, b2) => Number(b2.modal_price) - Number(a.modal_price));
+      for (const x of rows.slice(0, 3)) {
+        const r = el('div', 'mrow');
+        r.append(el('div', 'amt', '₹' + Number(x.modal_price).toLocaleString('en-IN')));
+        r.append(el('div', 'sub', `${M[1]} · ${x.market}, ${x.district} · ${x.variety} · ${x.arrival_date}`));
+        b.append(r);
+      }
+      b.append(el('div', 'sub', M[2]));
+    } catch {
+      wait.remove();
+      b.append(el('div', 'sub', M[4]));
+      const go = el('a', 'yes paygo', 'agmarknet.gov.in'); go.href = 'https://agmarknet.gov.in/'; go.target = '_blank'; go.rel = 'noopener'; b.append(go);
     }
     scroll();
   }

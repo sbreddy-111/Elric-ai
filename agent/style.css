@@ -65,3 +65,4 @@ svg{width:22px;height:22px}
 .pick:disabled:not(.on){opacity:.4}
 .paygo{display:block;text-align:center;text-decoration:none;margin-top:12px}
 .bill .sub+.sub{margin-top:6px}
+.mrow{margin:6px 0 10px}.mrow .amt{font-size:24px}
