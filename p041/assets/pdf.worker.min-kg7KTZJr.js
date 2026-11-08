@@ -1,1 +1,0 @@
-const r=""+new URL("pdf.worker.min-B5Yc7dP4.mjs",import.meta.url).href;export{r as default};
