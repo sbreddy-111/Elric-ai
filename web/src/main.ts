@@ -190,7 +190,7 @@ function shell() {
     <button class="lang" id="lang">${getLang() === 'en' ? 'हिं' : 'EN'}</button>
     <button class="icon" id="newc" aria-label="${t('cdNewChat')}">${svg(ic.newc)}</button>
   </header>
-  <div class="pill ${O.isOn() ? 'online' : ''}"><i></i>${!O.isOn() ? t('privacyOnDevice') : mode === 'shopping' ? t('privacyOnline') : t('pillOnline')}</div>
+  <div class="pill ${O.isOn() ? 'online' : ''}"><i></i>${!O.isOn() ? t('privacyOnDevice') : mode === 'shopping' ? t('privacyOnline') : device && !device.ok ? t('pillOnlineOnly') : t('pillOnline')}</div>
   <main id="main"></main>
   <div class="att" id="att"></div>
   <form class="composer" id="form">
@@ -334,6 +334,25 @@ async function agentYes(a: AgentRes) {
   refreshChat();
 }
 
+
+/** One door to the government price API. The free shared key gets throttled when we fire many calls at once,
+ *  so at most 2 run together; each waits up to 12 s and is tried 3 times. Returns null when it never answered. */
+let agBusy = 0; const agWait: (() => void)[] = [];
+async function agGet(url: string): Promise<Record<string, string>[] | null> {
+  if (agBusy >= 2) await new Promise<void>((ok) => agWait.push(ok));
+  agBusy++;
+  try {
+    for (let i = 0; i < 3; i++) {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(12000), cache: 'no-store' });
+        if (r.ok) { const j = await r.json(); if (Array.isArray(j.records)) return j.records; }
+      } catch { /* try again */ }
+      if (i < 2) await new Promise((ok) => setTimeout(ok, 1500 * (i + 1)));
+    }
+    return null;
+  } finally { agBusy--; agWait.shift()?.(); }
+}
+
 /** Past-days Agmarknet prices (variety-wise dataset). The "current daily" dataset is empty on Sundays,
  *  holidays and early mornings, so this walks back up to 5 days and returns the newest day that has rows. */
 async function agPast(crop: string, district = ''): Promise<{ market: string; district: string; commodity: string; variety: string; modal_price: string; arrival_date: string }[]> {
@@ -344,16 +363,13 @@ async function agPast(crop: string, district = ''): Promise<{ market: string; di
     const d = new Date(Date.now() - back * 864e5);
     return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
   });
-  const res = await Promise.all(days.map(async (ds) => {
-    try {
-      const r = await fetch(base + '&filters%5BArrival_Date%5D=' + encodeURIComponent(ds), { signal: AbortSignal.timeout(9000) });
-      if (!r.ok) return [];
-      const recs = ((await r.json()).records || []) as Record<string, string>[];
-      return recs.map((x) => { const g = (k: string) => x[k] ?? x[k.toLowerCase()] ?? ''; return { market: g('Market'), district: g('District'), commodity: g('Commodity'), variety: g('Variety'), modal_price: g('Modal_Price'), arrival_date: g('Arrival_Date') || ds }; })
-        .filter((x) => Number(x.modal_price) > 0);
-    } catch { return []; }
-  }));
-  for (const rows of res) if (rows.length) return rows;
+  // Newest day first; stop at the first day that has prices (2 calls at a time through agGet).
+  for (const ds of days) {
+    const recs = await agGet(base + '&filters%5BArrival_Date%5D=' + encodeURIComponent(ds));
+    const rows = (recs || []).map((x) => { const g = (k: string) => x[k] ?? x[k.toLowerCase()] ?? ''; return { market: g('Market'), district: g('District'), commodity: g('Commodity'), variety: g('Variety'), modal_price: g('Modal_Price'), arrival_date: g('Arrival_Date') || ds }; })
+      .filter((x) => Number(x.modal_price) > 0);
+    if (rows.length) return rows;
+  }
   return [];
 }
 
@@ -365,22 +381,24 @@ async function mandiText(crop: string, place: string): Promise<string> {
   try { const c = sessionStorage.getItem(ck) || localStorage.getItem(ck); if (c) return c; } catch { /* storage blocked */ }
   const base = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh${all ? '' : `&filters%5Bcommodity%5D=${encodeURIComponent(crop)}`}`;
   type Row = { market: string; district: string; commodity: string; variety: string; modal_price: string; arrival_date: string };
-  const once = async (x: string) => { const r = await fetch(base + x, { signal: AbortSignal.timeout(10000) }); if (!r.ok) throw new Error(String(r.status)); return ((await r.json()).records || []) as Row[]; };
-  // The free government key is shared and sometimes busy: try again twice before giving up.
-  const get = async (x: string) => { for (let n = 0; ; n++) { try { return await once(x); } catch (e) { if (n >= 2) throw e; await new Promise((r) => setTimeout(r, 1200 * (n + 1))); } } };
+  const get = async (x: string) => { const r = await agGet(base + x); if (!r) throw new Error('busy'); return r as unknown as Row[]; };
   try {
     let rows: Row[] = [];
     if (place) { try { rows = await get(`&filters%5Bmarket%5D=${encodeURIComponent(place)}`); } catch { /* next */ } if (!rows.length) { try { rows = await get(`&filters%5Bdistrict%5D=${encodeURIComponent(place)}`); } catch { /* next */ } } }
     let other = false;
-    if (!rows.length) { rows = await get(''); other = !!place; }
+    if (!rows.length) { try { rows = await get(''); } catch { rows = []; } other = !!place; }
     rows = rows.filter((x) => Number(x.modal_price) > 0);
     if (!rows.length) { rows = await agPast(crop); other = !!place; }
-    if (!rows.length) return t('agNoPrice');
+    if (!rows.length) {
+      // Govt site silent: give the last price this phone saw (with its date) instead of a dead end.
+      try { const l = JSON.parse(localStorage.getItem('elric.last.' + crop) || 'null'); if (!all && l && Number(l.modal_price) > 0) return `**${t('agPriceHead', { c: crop })}**\n${t('agLastKnown')}\n\n- ${l.market}: **₹${(Number(l.modal_price) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}/kg** · ${l.arrival_date}`; } catch { /* none */ }
+      return t('agPriceFail');
+    }
     const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
     const line = (x: Row) => { const q = Number(x.modal_price); return `- ${all ? `**${x.commodity}** · ` : ''}${x.market} (${x.district}): **${inr(q / 100)}/kg** · ${inr(q)}/${t('agQuintal')} · ${x.arrival_date}`; };
     const list = all ? rows.sort((a, b) => a.commodity.localeCompare(b.commodity)) : rows.sort((a, b) => Number(b.modal_price) - Number(a.modal_price)).slice(0, 3);
     const out = `**${all ? t('agAllHead') : t('agPriceHead', { c: crop })}**\n${other ? t('agOtherMarkets', { p: place }) + '\n' : ''}\n` + list.map(line).join('\n') + `\n\n${t('agSource')}`;
-    try { sessionStorage.setItem(ck, out); } catch { /* storage full */ }
+    try { sessionStorage.setItem(ck, out); if (!all && rows[0]) localStorage.setItem('elric.last.' + crop, JSON.stringify(rows[0])); } catch { /* storage full */ }
     return out;
   } catch { return t('agPriceFail'); }
 }
@@ -407,7 +425,7 @@ function homeGeneral(m: HTMLElement, _cards: [keyof Strings, () => void][]) {
     <div class="soonh">${t('soonTitle')}</div>
     <div class="soon3">${acts.map(([, k], i) => `<button class="sq" data-ai="${i}"><span class="sqi"><svg viewBox="0 0 24 24">${SOON_IC[k]}</svg></span><span class="sql">${t(k)}</span><em>${t('soonTag')}</em></button>`).join('')}</div>
     <div id="status"></div>
-    <div class="skst${O.isOn() ? ' online' : ''}"><i></i>${!O.isOn() ? t('privacyOnDevice') : t('pillOnline')}</div></section>`;
+    <div class="skst${O.isOn() ? ' online' : ''}"><i></i>${!O.isOn() ? t('privacyOnDevice') : device && !device.ok ? t('pillOnlineOnly') : t('pillOnline')}</div></section>`;
   // Only prices work today; bill, recharge and bus need partner approvals (BBPS, bus API), so they say so up front.
   m.querySelectorAll<HTMLButtonElement>('.sq').forEach((b) => (b.onclick = () => {
     const [e, k] = acts[+b.dataset.ai!];
@@ -450,18 +468,11 @@ async function todayCard() {
     } catch { /* ignore */ }
     const base = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=' + encodeURIComponent(crop);
     // null = request failed; [] = answered with no rows
-    const get = async (x: string): Promise<Row[] | null> => {
-      for (let i = 0; i < 2; i++) {
-        try {
-          const r = await fetch(base + x, { signal: AbortSignal.timeout(7000) });
-          if (r.ok) { const j = await r.json(); if (Array.isArray(j.records)) return j.records as Row[]; }
-        } catch { /* retry */ }
-        await new Promise((ok) => setTimeout(ok, 800 * (i + 1)));
-      }
-      return null;
-    };
+    const get = (x: string) => agGet(base + x) as Promise<Row[] | null>;
     // Guntur, all of AP and the past days run side by side, so the card fills as fast as the govt site allows.
-    const [gnt, ap, past] = await Promise.all([get('&filters%5Bdistrict%5D=Guntur'), get(''), agPast(crop).catch(() => [])]);
+    // Guntur and all of AP side by side (2 calls); the past days only when today has nothing.
+    const [gnt, ap] = await Promise.all([get('&filters%5Bdistrict%5D=Guntur'), get('')]);
+    const past = (gnt?.some((x) => Number(x.modal_price) > 0) || ap?.some((x) => Number(x.modal_price) > 0)) ? [] : await agPast(crop).catch(() => []);
     const ok = (r: Row[] | null) => !!r && r.some((x) => Number(x.modal_price) > 0);
     let rows: Row[] | null = ok(gnt) ? gnt : ok(ap) ? ap : past.length ? (past as Row[]) : (gnt === null && ap === null ? null : []);
     if (rows === null) failed = true;
@@ -628,7 +639,7 @@ function renderStatus() {
   const el = { set innerHTML(h: string) { els.forEach((e) => (e.innerHTML = h)); } };
   if (modelState === 'ready') { el.innerHTML = turns.length ? '' : `<div class="ok">● ${t(E.MODEL_NAME_KEY as keyof Strings)} · ${t(O.isOn() ? 'loadedBackup' : 'loaded')}</div>`; return; }
   if (!device) { el.innerHTML = `<div class="box muted">${t('checking')}</div>`; return; }
-  if (!device.ok) { el.innerHTML = `<div class="box warn"><h3>${t('cantRunTitle')}</h3><p>${reasonText(device.hard!)}</p></div>`; return; }
+  if (!device.ok) { el.innerHTML = O.isOn() ? '' : `<div class="box warn"><h3>${t('cantRunTitle')}</h3><p>${reasonText(device.hard!)}</p></div>`; return; } // online answers work, so no scary box
   let body = '';
   const soft = device.soft.map((r) => `<p class="w">${reasonText(r)}</p>`).join('');
   if (modelState === 'idle') {
@@ -1347,7 +1358,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.41';
+const APP_VERSION = '0.4.42';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [

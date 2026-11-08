@@ -1,7 +1,7 @@
 // Elric AI service worker: keeps the app shell available offline.
 // The model file itself is stored separately by the app (OPFS / Cache API),
 // never by this worker.
-const VERSION = 'elric-shell-v35';
+const VERSION = 'elric-shell-v36';
 // Filled in at build time (vite.config.ts, precacheList). Empty in dev.
 const SHELL_ASSETS = [];
 const LAZY_ASSETS = [];
