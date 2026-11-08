@@ -297,6 +297,26 @@ async function agentYes(a: AgentRes) {
   refreshChat();
 }
 
+/** Past-days Agmarknet prices (variety-wise dataset). The "current daily" dataset is empty on Sundays,
+ *  holidays and early mornings, so this walks back up to 5 days and returns the newest day that has rows. */
+async function agPast(crop: string, district = ''): Promise<{ market: string; district: string; commodity: string; variety: string; modal_price: string; arrival_date: string }[]> {
+  const base = 'https://api.data.gov.in/resource/35985678-0d79-46b4-9ed6-6f13308a1d24?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5BState%5D=Andhra%20Pradesh'
+    + (crop && crop !== 'ALL' ? '&filters%5BCommodity%5D=' + encodeURIComponent(crop) : '') + (district ? '&filters%5BDistrict%5D=' + encodeURIComponent(district) : '');
+  for (let back = 1; back <= 5; back++) {
+    const d = new Date(Date.now() - back * 864e5);
+    const ds = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+    try {
+      const r = await fetch(base + '&filters%5BArrival_Date%5D=' + encodeURIComponent(ds), { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) continue;
+      const recs = ((await r.json()).records || []) as Record<string, string>[];
+      const rows = recs.map((x) => { const g = (k: string) => x[k] ?? x[k.toLowerCase()] ?? ''; return { market: g('Market'), district: g('District'), commodity: g('Commodity'), variety: g('Variety'), modal_price: g('Modal_Price'), arrival_date: g('Arrival_Date') || ds }; })
+        .filter((x) => Number(x.modal_price) > 0);
+      if (rows.length) return rows;
+    } catch { /* try older day */ }
+  }
+  return [];
+}
+
 /** Latest Agmarknet prices, written as chat text (so follow-up questions are answered by the normal chat). */
 async function mandiText(crop: string, place: string): Promise<string> {
   const all = crop === 'ALL';
@@ -314,6 +334,7 @@ async function mandiText(crop: string, place: string): Promise<string> {
     let other = false;
     if (!rows.length) { rows = await get(''); other = !!place; }
     rows = rows.filter((x) => Number(x.modal_price) > 0);
+    if (!rows.length) { rows = await agPast(crop); other = !!place; }
     if (!rows.length) return t('agNoPrice');
     const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
     const line = (x: Row) => { const q = Number(x.modal_price); return `- ${all ? `**${x.commodity}** · ` : ''}${x.market} (${x.district}): **${inr(q / 100)}/kg** · ${inr(q)}/${t('agQuintal')} · ${x.arrival_date}`; };
@@ -381,6 +402,7 @@ async function todayCard() {
     };
     let rows = await get('&filters%5Bdistrict%5D=Guntur');
     if (!rows || !rows.length) { const all = await get(''); if (all) rows = all; }
+    if (rows !== null && !rows.filter((x) => Number(x.modal_price) > 0).length) rows = await agPast(crop);
     if (rows === null) failed = true;
     rows = (rows || []).filter((x) => Number(x.modal_price) > 0).sort((a, b) => Number(b.modal_price) - Number(a.modal_price));
     row = rows[0] || null;
@@ -392,7 +414,8 @@ async function todayCard() {
   if (!row) { v.innerHTML = `<i>${failed ? t('tapRetry') : t('noPriceToday')}</i>`; } else {
     v.innerHTML = `₹${Math.round(Number(row.modal_price) / 100).toLocaleString('en-IN')}<i>${t('perKg')}</i>`;
     const d = (row.arrival_date || '').split('/'); // dd/mm/yyyy
-    const when = stale && d.length === 3 ? ` · ${Number(d[0])} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(d[1]) - 1] || ''}` : '';
+    const isToday = d.length === 3 && Number(d[0]) === new Date().getDate();
+    const when = d.length === 3 && (stale || !isToday) ? ` · ${Number(d[0])} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(d[1]) - 1] || ''}` : '';
     el.querySelector('small')!.insertAdjacentHTML('afterbegin', `${esc(row.market)}${when} · `);
   }
   el.onclick = (e) => {
@@ -1219,7 +1242,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.35';
+const APP_VERSION = '0.4.36';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
