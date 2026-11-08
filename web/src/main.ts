@@ -5,6 +5,7 @@ import { t, getLang, setLang, Strings } from './i18n';
 import * as E from './engine';
 import * as O from './online';
 import * as V from './voice';
+import { mountSky, unmountSky, setSkyWeather, skyPhase, wxWord } from './sky';
 import * as P from './photo';
 import * as F from './feedback';
 import * as D from './file';
@@ -196,7 +197,7 @@ function shell() {
     <input type="file" id="file" accept="image/*" hidden>
     <button type="button" class="snap" id="snap" aria-label="${t('cdSnap')}">${svg(ic.cam)}</button>
     <textarea id="input" rows="1" placeholder="${t(pending ? 'photoHint' : pendingDoc ? 'docHint' : 'composerHint')}"></textarea>
-    <button type="button" class="icon mic${dictation ? ' on' : ''}" id="mic" aria-label="${t(dictation ? 'cdMicStop' : 'cdMic')}">${svg(ic.mic)}</button>
+    <button type="button" class="icon mic${dictation ? ' on' : ''}" id="mic" aria-label="${t(dictation ? 'cdMicStop' : 'cdMic')}"><span class="morb">${svg(ic.mic)}</span></button>
     <button type="submit" class="send" id="send" aria-label="${busy ? t('cdStop') : t('cdSend')}">${svg(busy ? ic.stop : ic.send)}</button>
   </form>`;
   $('#menu').onclick = openDrawer;
@@ -206,6 +207,7 @@ function shell() {
   $('#snap').onclick = pickAttach;
   $<HTMLInputElement>('#file').onchange = onPhotoPicked;
   wireMic($('#mic'));
+  setMicUi(); // keeps the listening orb if the screen was redrawn mid-dictation
   renderAtt();
   const input = $<HTMLTextAreaElement>('#input');
   input.oninput = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; };
@@ -337,18 +339,21 @@ async function agentYes(a: AgentRes) {
 async function agPast(crop: string, district = ''): Promise<{ market: string; district: string; commodity: string; variety: string; modal_price: string; arrival_date: string }[]> {
   const base = 'https://api.data.gov.in/resource/35985678-0d79-46b4-9ed6-6f13308a1d24?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5BState%5D=Andhra%20Pradesh'
     + (crop && crop !== 'ALL' ? '&filters%5BCommodity%5D=' + encodeURIComponent(crop) : '') + (district ? '&filters%5BDistrict%5D=' + encodeURIComponent(district) : '');
-  for (let back = 1; back <= 5; back++) {
+  // Ask for the last 5 days at once (the govt site is slow; one by one took up to 40 s) and keep the newest day that has prices.
+  const days = [1, 2, 3, 4, 5].map((back) => {
     const d = new Date(Date.now() - back * 864e5);
-    const ds = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  });
+  const res = await Promise.all(days.map(async (ds) => {
     try {
-      const r = await fetch(base + '&filters%5BArrival_Date%5D=' + encodeURIComponent(ds), { signal: AbortSignal.timeout(8000) });
-      if (!r.ok) continue;
+      const r = await fetch(base + '&filters%5BArrival_Date%5D=' + encodeURIComponent(ds), { signal: AbortSignal.timeout(9000) });
+      if (!r.ok) return [];
       const recs = ((await r.json()).records || []) as Record<string, string>[];
-      const rows = recs.map((x) => { const g = (k: string) => x[k] ?? x[k.toLowerCase()] ?? ''; return { market: g('Market'), district: g('District'), commodity: g('Commodity'), variety: g('Variety'), modal_price: g('Modal_Price'), arrival_date: g('Arrival_Date') || ds }; })
+      return recs.map((x) => { const g = (k: string) => x[k] ?? x[k.toLowerCase()] ?? ''; return { market: g('Market'), district: g('District'), commodity: g('Commodity'), variety: g('Variety'), modal_price: g('Modal_Price'), arrival_date: g('Arrival_Date') || ds }; })
         .filter((x) => Number(x.modal_price) > 0);
-      if (rows.length) return rows;
-    } catch { /* try older day */ }
-  }
+    } catch { return []; }
+  }));
+  for (const rows of res) if (rows.length) return rows;
   return [];
 }
 
@@ -380,30 +385,38 @@ async function mandiText(crop: string, place: string): Promise<string> {
   } catch { return t('agPriceFail'); }
 }
 
-/** General-mode Home (0.4.32, owner's pick): greeting + date, "Today for you" card (chilli price, weather), 4 round task buttons. */
+/** General-mode Home (0.4.41, owner's pick "living sky"): painted sky that follows the real time and
+ *  weather, greeting + date + place/weather line, floating glass price card at the horizon, Mandi prices,
+ *  then the "Coming soon" row. */
+const SOON_IC: Record<string, string> = {
+  hBill: '<path d="M7 3h10v18l-2.5-1.6L12 21l-2.5-1.6L7 21z"/><path d="M9.5 8h5M9.5 11.5h5M9.5 15h3"/>',
+  hRecharge: '<rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M12.6 8.5l-2 3.5h3l-2 3.5"/>',
+  hBus: '<rect x="5" y="3.5" width="14" height="14" rx="3"/><path d="M5 11h14M8 20.5v-3M16 20.5v-3"/><circle cx="8.5" cy="14.3" r=".9"/><circle cx="15.5" cy="14.3" r=".9"/>',
+};
 function homeGeneral(m: HTMLElement, _cards: [keyof Strings, () => void][]) {
-  const fn = getProfile().name ? ', ' + esc(getProfile().name.split(' ')[0]) : '';
+  const nm = getProfile().name.trim().split(/\s+/)[0] || '';
+  const fn = nm ? `,<br><span class="hname">${esc(nm)}</span>` : '';
   const h = new Date().getHours();
   const g = t(h < 12 ? 'gMorning' : h < 17 ? 'gAfternoon' : 'gEvening');
   const date = new Date().toLocaleDateString(getLang() === 'hi' ? 'hi-IN' : 'en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
   const acts: [string, keyof Strings][] = [['🧾', 'hBill'], ['📱', 'hRecharge'], ['🚌', 'hBus']];
-  m.innerHTML = `<section class="hero hero-general home3"><h1>${g}${fn}</h1><p class="hdate">${date}</p>
-    <div class="tfy"><h2>${t('todayFor')}</h2>
-      <button class="trow" id="tCrop"><span class="ti">🌶️</span><span class="tl">${t('hCrop')}</span><b class="tv">…</b></button>
-      <button class="trow" id="tWx"><span class="ti">☀️</span><span class="tl">${t('hWeather')}</span><b class="tv">…</b></button>
-    </div>
-    <button class="pbig" id="pBig"><span class="pbi">🍅🌶️🌾</span><span class="pbt"><b>${t('hMandi')}</b><small>${t('hMandiSub')}</small></span><span class="pbgo">›</span></button>
+  m.innerHTML = `<section class="hero hero-general home4">
+    <div class="sk-top"><h1>${g}${fn}</h1><p class="hdate">${date}</p><button class="skwx" id="tWx" aria-label="${t('hWeather')}"><span class="wxp"></span><span class="wxt"></span></button></div>
+    <button class="skcard trow" id="tCrop"><span class="ti">🌶️</span><span class="tl">${t('hCrop')}</span><b class="tv"><span class="shim"></span></b></button>
+    <div class="pwrap"><button class="ppill" id="pBig"><span class="pbi">🍅🌶️🌾</span><b>${t('hMandi')}</b><span class="pbgo">›</span></button></div>
     <div class="soonh">${t('soonTitle')}</div>
-    <div class="acts acts3">${acts.map(([e, k], i) => `<button class="act dim" data-ai="${i}"><span class="ac">${e}</span><span>${t(k)}</span><em class="sb">${t('soonTag')}</em></button>`).join('')}</div>
-    <div id="status"></div></section>`;
+    <div class="soon3">${acts.map(([, k], i) => `<button class="sq" data-ai="${i}"><span class="sqi"><svg viewBox="0 0 24 24">${SOON_IC[k]}</svg></span><span class="sql">${t(k)}</span><em>${t('soonTag')}</em></button>`).join('')}</div>
+    <div id="status"></div>
+    <div class="skst${O.isOn() ? ' online' : ''}"><i></i>${!O.isOn() ? t('privacyOnDevice') : t('pillOnline')}</div></section>`;
   // Only prices work today; bill, recharge and bus need partner approvals (BBPS, bus API), so they say so up front.
-  m.querySelectorAll<HTMLButtonElement>('.act').forEach((b) => (b.onclick = () => {
+  m.querySelectorAll<HTMLButtonElement>('.sq').forEach((b) => (b.onclick = () => {
     const [e, k] = acts[+b.dataset.ai!];
     sheet(`<div class="soon"><div class="soonic">${e}</div><h3>${t(k)}</h3><p class="soonb">${t('soonTitle')}</p><p>${t('soonBody')}</p><button class="primary" id="soonGo">🍅 ${t('soonTry')}</button></div>`);
     $('#soonGo').onclick = () => { closeSheet(); if (!busy) priceLocal(t('hMandi'), 'ask'); };
   }));
   $('#pBig').onclick = () => { if (!busy) priceLocal(t('hMandi'), 'ask'); };
   renderStatus();
+  mountSky($('#app'), m);
   todayCard();
   weatherRow();
 }
@@ -438,18 +451,19 @@ async function todayCard() {
     const base = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=' + encodeURIComponent(crop);
     // null = request failed; [] = answered with no rows
     const get = async (x: string): Promise<Row[] | null> => {
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         try {
-          const r = await fetch(base + x, { signal: AbortSignal.timeout(8000) });
+          const r = await fetch(base + x, { signal: AbortSignal.timeout(7000) });
           if (r.ok) { const j = await r.json(); if (Array.isArray(j.records)) return j.records as Row[]; }
         } catch { /* retry */ }
         await new Promise((ok) => setTimeout(ok, 800 * (i + 1)));
       }
       return null;
     };
-    let rows = await get('&filters%5Bdistrict%5D=Guntur');
-    if (!rows || !rows.length) { const all = await get(''); if (all) rows = all; }
-    if (rows !== null && !rows.filter((x) => Number(x.modal_price) > 0).length) rows = await agPast(crop);
+    // Guntur, all of AP and the past days run side by side, so the card fills as fast as the govt site allows.
+    const [gnt, ap, past] = await Promise.all([get('&filters%5Bdistrict%5D=Guntur'), get(''), agPast(crop).catch(() => [])]);
+    const ok = (r: Row[] | null) => !!r && r.some((x) => Number(x.modal_price) > 0);
+    let rows: Row[] | null = ok(gnt) ? gnt : ok(ap) ? ap : past.length ? (past as Row[]) : (gnt === null && ap === null ? null : []);
     if (rows === null) failed = true;
     rows = (rows || []).filter((x) => Number(x.modal_price) > 0).sort((a, b) => Number(b.modal_price) - Number(a.modal_price));
     row = rows[0] || null;
@@ -466,25 +480,33 @@ async function todayCard() {
     // Set (not add) the market line: todayCard can run twice when Home redraws, which used to repeat it.
     const sm = el.querySelector('small')!;
     sm.querySelector('.tmk')?.remove();
-    sm.insertAdjacentHTML('afterbegin', `<span class="tmk">${esc(row.market.replace(/\s*APMC$/i, ''))}${when} · </span>`);
+    const mk = esc(row.market.replace(/\s*APMC$/i, ''));
+    const tl = el.querySelector('.tl')!;
+    tl.querySelector('.tnm')?.remove();
+    if (tl.firstChild && tl.firstChild.nodeType === 3) tl.firstChild.remove();
+    tl.insertAdjacentHTML('afterbegin', `<span class="tnm">${esc(label)} · ${mk}</span>`);
+    if (when) sm.insertAdjacentHTML('afterbegin', `<span class="tmk">${when.slice(3)} · </span>`);
   }
   el.onclick = (e) => {
     if ((e.target as HTMLElement).closest('#tChg')) {
       choose(t('pickCrop'), HOME_CROPS.map(([c, l, em]) => [c, `${em} ${l}`] as [string, string]), crop, (c) => localStorage.setItem('elric.crop', c));
       return;
     }
-    if (failed && !row) { v.innerHTML = '…'; sessionStorage.removeItem(KEY); todayCard(); return; }
+    if (failed && !row) { v.innerHTML = '<span class="shim"></span>'; sessionStorage.removeItem(KEY); todayCard(); return; }
     pricePick(crop);
   };
 }
 
-/** Weather row: free Open-Meteo at the phone's location (asked once, kept 6 h); Narasaraopet if not allowed. */
+/** Weather line under the date: free Open-Meteo at the phone's location (asked once, kept 6 h); Narasaraopet
+ *  if not allowed. Also tells the sky the weather and today's sunrise / sunset. */
 async function weatherRow(fresh = false) {
   const el = document.getElementById('tWx'); if (!el) return;
-  const v = el.querySelector('.tv')!, ic = el.querySelector('.ti')!, tl = el.querySelector('.tl')!;
-  el.onclick = () => { v.textContent = '…'; weatherRow(true); };
+  const wp = el.querySelector('.wxp') as HTMLElement, wt = el.querySelector('.wxt') as HTMLElement;
+  el.onclick = () => { wt.innerHTML = '<span class="shim sm"></span>'; weatherRow(true); };
   let loc: { lat: number; lon: number; name: string; at: number } | null = null;
   try { loc = JSON.parse(localStorage.getItem('elric.loc') || 'null'); } catch { /* ignore */ }
+  if (loc) wp.textContent = loc.name || '';
+  if (!wt.textContent) wt.innerHTML = '<span class="shim sm"></span>';
   if (fresh || !loc || Date.now() - loc.at > 6 * 3600e3) {
     try {
       const p = await new Promise<GeolocationPosition>((ok, no) => navigator.geolocation.getCurrentPosition(ok, no, { timeout: 8000, maximumAge: 600e3 }));
@@ -498,21 +520,26 @@ async function weatherRow(fresh = false) {
       localStorage.setItem('elric.loc', JSON.stringify(loc));
     } catch { if (!loc) loc = { lat: 16.235, lon: 80.049, name: 'Narasaraopet', at: 0 }; }
   }
-  tl.innerHTML = `${t('hWeather')}${loc.name ? `<small>${esc(loc.name)}</small>` : ''}`;
-  const KEY = `elric.wx.${loc.lat},${loc.lon}`;
-  let w: { t: number; c: number } | null = null;
+  if (!document.getElementById('tWx')) return; // Home closed while we waited
+  wp.textContent = loc.name || '';
+  const KEY = `elric.wx2.${loc.lat},${loc.lon}`;
+  let w: { t: number; c: number; sr?: string; ss?: string } | null = null;
   try { const c = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (!fresh && c && Date.now() - c.at < 1800e3) w = c.w; } catch { /* ignore */ }
   if (!w) {
     try {
-      const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,weather_code&timezone=auto`, { signal: AbortSignal.timeout(6000) });
-      const j = await r.json(); w = { t: Math.round(j.current.temperature_2m), c: j.current.weather_code };
+      const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,weather_code&daily=sunrise,sunset&forecast_days=1&timezone=auto`, { signal: AbortSignal.timeout(6000) });
+      const j = await r.json();
+      const tt = Number(j?.current?.temperature_2m), cc = Number(j?.current?.weather_code);
+      if (!isFinite(tt) || !isFinite(cc)) throw new Error('bad weather');
+      w = { t: Math.round(tt), c: cc, sr: j?.daily?.sunrise?.[0], ss: j?.daily?.sunset?.[0] };
       sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), w }));
     } catch { w = null; }
   }
-  if (!w) { v.textContent = '—'; return; }
-  const hr = new Date().getHours(), night = hr >= 18 || hr < 6;
-  ic.textContent = w.c >= 95 ? '⛈️' : w.c >= 51 ? '🌧️' : w.c >= 45 ? '🌫️' : w.c >= 2 ? '⛅' : night ? '🌙' : '☀️';
-  v.textContent = `${w.t}°`;
+  if (!document.getElementById('tWx')) return;
+  if (!w) { wt.textContent = ''; el.classList.toggle('nowx', true); return; }
+  el.classList.remove('nowx');
+  setSkyWeather({ code: w.c, sr: w.sr, ss: w.ss });
+  wt.textContent = `${w.t}° ${wxWord(w.c, skyPhase() === 'night', getLang())}`;
 }
 
 /** keepScroll: stay where the user is reading unless they were already at the bottom. */
@@ -520,6 +547,7 @@ function renderMain(keepScroll = false) {
   const m = $('#main');
   const prevTop = m.scrollTop;
   const atBottom = m.scrollHeight - m.scrollTop - m.clientHeight < 120;
+  if (turns.length || mode !== 'general') unmountSky();
   if (!turns.length) {
     const ask = (k: keyof Strings) => () => send(t(k));
     const fill = (k: keyof Strings) => () => { const i = $<HTMLTextAreaElement>('#input'); i.value = t(k); i.focus(); i.dispatchEvent(new Event('input')); };
@@ -1002,9 +1030,35 @@ function micMessage(err?: string): boolean {
 
 function setMicUi() {
   const b = document.getElementById('mic');
-  if (!b) return;
-  b.classList.toggle('on', !!dictation);
-  b.setAttribute('aria-label', t(dictation ? 'cdMicStop' : 'cdMic'));
+  if (b) {
+    b.classList.toggle('on', !!dictation);
+    b.setAttribute('aria-label', t(dictation ? 'cdMicStop' : 'cdMic'));
+  }
+  // Listening orb: a liquid gold orb over the composer that ripples as words come in. Tap it to stop.
+  let o = document.getElementById('lsn');
+  document.documentElement.classList.toggle('listening', !!dictation);
+  if (!dictation) { if (o) { o.classList.add('out'); const x = o; setTimeout(() => x.remove(), 220); o.id = ''; } return; }
+  const app = document.getElementById('app'), form = document.getElementById('form');
+  if (!app || !form) return;
+  if (!o) {
+    o = document.createElement('button');
+    o.id = 'lsn'; o.setAttribute('type', 'button'); o.className = 'lsn';
+    o.setAttribute('aria-label', t('cdMicStop'));
+    o.innerHTML = `<span class="lsr"></span><span class="lsr"></span><span class="lsr"></span><span class="lorb"></span><span class="lsc" aria-live="polite"></span><span class="lsh">${t('talkListening')}</span>`;
+    o.onclick = () => dictation?.stop();
+    app.appendChild(o);
+  }
+  o.style.bottom = `${Math.max(0, app.clientHeight - form.offsetTop) + 10}px`;
+}
+
+/** Shows what was heard so far and gives the orb a little kick. */
+function lsnHeard(txt: string) {
+  const o = document.getElementById('lsn'); if (!o) return;
+  const c = o.querySelector('.lsc')!; c.textContent = txt.length > 90 ? '…' + txt.slice(-90) : txt;
+  const app = document.getElementById('app'), form = document.getElementById('form');
+  if (app && form) o.style.bottom = `${Math.max(0, app.clientHeight - form.offsetTop) + 10}px`;
+  const orb = o.querySelector('.lorb') as HTMLElement;
+  orb.classList.remove('kick'); void orb.offsetWidth; orb.classList.add('kick');
 }
 
 function toggleDictation() {
@@ -1015,7 +1069,7 @@ function toggleDictation() {
   const base = cur ? cur + ' ' : '';
   const put = (txt: string) => { const i = $<HTMLTextAreaElement>('#input'); if (!i) return; i.value = base + txt; i.dispatchEvent(new Event('input')); };
   const me = V.listen(V.speechLang(getLang()), {
-    interim: (txt) => { if (dictation === me) put(txt); },
+    interim: (txt) => { if (dictation === me) { put(txt); lsnHeard(txt); } },
     end: (txt, err) => {
       if (dictation !== me) return;
       dictation = null; setMicUi();
@@ -1293,7 +1347,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.40';
+const APP_VERSION = '0.4.41';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [

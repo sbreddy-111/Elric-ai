@@ -359,3 +359,122 @@ html.narrow .act .ac{width:54px;height:54px;font-size:23px}
 .pp:active{background:rgba(212,168,74,.2)}
 .pp span{font-size:17px}
 .ppall{margin-top:12px}
+/* 0.4.41 Living sky Home (owner pick) */
+#app{position:relative}
+.sky{position:absolute;left:0;right:0;top:0;height:120vw;z-index:0;pointer-events:none;overflow:hidden;will-change:transform,opacity;background:linear-gradient(180deg,#6f8fb8 0%,#c9b48a 55%,#0F0F12 100%)}
+.sky.ph-morning{background:linear-gradient(180deg,#a7b8d6 0%,#e9b9a4 55%,#0F0F12 100%)}
+.sky.ph-evening{background:linear-gradient(180deg,#5b4a8c 0%,#e0784e 55%,#0F0F12 100%)}
+.sky.ph-night{background:linear-gradient(180deg,#0b1430 0%,#1b2747 55%,#0F0F12 100%)}
+.sky .si{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;opacity:0;transition:opacity 1.4s ease,filter 1.2s ease}
+.sky .si.on{opacity:1}
+.sky.k-cloudy .si{filter:saturate(.75) brightness(.85)}
+.sky.k-fog .si{filter:saturate(.6) brightness(.92) contrast(.88)}
+.sky.k-rain .si{filter:saturate(.55) brightness(.68)}
+.sky.k-storm .si{filter:saturate(.45) brightness(.55)}
+.sky .sfx{position:absolute;inset:0;width:100%;height:100%}
+.sglow{position:absolute;width:46%;aspect-ratio:1;border-radius:50%;transform:translate(-50%,-50%);mix-blend-mode:screen;opacity:.55;animation:sglow 7s ease-in-out infinite;transition:opacity 1.2s}
+.ph-morning .sglow{left:22%;top:55%;background:radial-gradient(circle,rgba(255,196,170,.75),rgba(255,170,140,0) 65%)}
+.ph-afternoon .sglow{left:90%;top:20%;background:radial-gradient(circle,rgba(255,240,200,.85),rgba(255,214,140,0) 65%)}
+.ph-evening .sglow{left:82%;top:54%;background:radial-gradient(circle,rgba(255,150,80,.75),rgba(255,120,60,0) 65%)}
+.ph-night .sglow{left:79%;top:39%;width:26%;opacity:.4;background:radial-gradient(circle,rgba(190,210,255,.7),rgba(150,180,255,0) 65%)}
+.k-cloudy .sglow,.k-fog .sglow{opacity:.15}.k-rain .sglow,.k-storm .sglow{opacity:0;animation:none}
+@keyframes sglow{0%,100%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.12)}}
+.sflash{position:absolute;inset:0;background:#dfe8ff;opacity:0}
+.sflash.go{animation:sflash .7s ease-out}
+@keyframes sflash{0%{opacity:0}8%{opacity:.38}18%{opacity:.05}28%{opacity:.26}100%{opacity:0}}
+.sshade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.55) 0,rgba(0,0,0,.25) 110px,rgba(0,0,0,0) 190px),linear-gradient(180deg,rgba(15,15,18,0) 62%,rgba(15,15,18,.55) 82%,#0F0F12 100%)}
+html.skyon .top,html.skyon .pill,html.skyon main,html.skyon .att,html.skyon .composer{position:relative;z-index:1}
+html.skyon .top .icon,html.skyon .modebtn{color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.5)}
+html.skyon .top .icon svg{filter:drop-shadow(0 1px 3px rgba(0,0,0,.6))}
+html.skyon .modebtn{flex:0 1 auto;margin:0 auto;padding:6px 14px;border-radius:999px;background:rgba(10,10,16,.42);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+html.skyon .modebtn b{color:#f3d58e}
+html.skyon .modebtn svg{color:rgba(255,255,255,.8)}
+html.skyon .lang{color:#fff;border-color:rgba(255,255,255,.4);background:rgba(10,10,16,.42);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+html.skyon .pill{background:rgba(10,10,16,.6);color:#7fe0a8;border-color:rgba(127,224,168,.35);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+html.skyon .composer{background:rgba(23,23,28,.82);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.home4{justify-content:flex-start;align-items:stretch;text-align:left;padding-top:0}
+.sk-top{text-align:center;padding:clamp(22px,7vh,70px) 4px clamp(64px,13vh,124px)}
+.home4 h1{margin:0 auto;font-size:34px;line-height:1.12;font-weight:700;letter-spacing:-.01em;color:#fff;background:none;-webkit-background-clip:border-box;background-clip:border-box;text-shadow:0 2px 18px rgba(0,0,0,.35),0 0 30px rgba(255,214,140,.18)}
+.home4 .hdate{margin:10px 0 2px;color:rgba(255,255,255,.92);font-size:16px;font-weight:500;text-shadow:0 1px 10px rgba(0,0,0,.4)}
+.skwx{color:rgba(255,255,255,.85);font-size:14.5px;text-shadow:0 1px 10px rgba(0,0,0,.45);padding:4px 10px;min-height:28px}
+.skwx .wxp:not(:empty)+.wxt:not(:empty)::before{content:'·';margin:0 6px}
+.skwx.nowx .wxt{display:none}
+.skcard.trow{position:relative;gap:14px;padding:16px 16px 16px 14px;margin:0 0 22px;border-radius:20px;background:linear-gradient(160deg,rgba(60,60,72,.55),rgba(22,22,28,.62));border:1px solid rgba(255,255,255,.14);-webkit-backdrop-filter:blur(18px) saturate(140%);backdrop-filter:blur(18px) saturate(140%);box-shadow:0 18px 40px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.12)}
+.skcard.trow::after{content:'';position:absolute;left:18%;right:18%;bottom:-1px;height:2px;border-radius:2px;background:linear-gradient(90deg,rgba(212,166,74,0),rgba(240,200,110,.95),rgba(212,166,74,0));box-shadow:0 0 14px rgba(240,200,110,.7)}
+.skcard.trow:active{transform:scale(.99);background:linear-gradient(160deg,rgba(70,70,84,.6),rgba(26,26,32,.66))}
+.skcard .ti{width:48px;height:48px;font-size:34px;background:none;border-radius:0;filter:drop-shadow(0 6px 10px rgba(0,0,0,.45))}
+.skcard .tl{font-size:17px}
+.skcard .tl small{font-size:12.5px;margin-top:2px;color:rgba(255,255,255,.62)}
+.skcard .tv{font-size:28px;letter-spacing:-.01em;background:linear-gradient(180deg,#f6dc9a,#d4a64a);-webkit-background-clip:text;background-clip:text;color:transparent}
+.skcard .tv i{-webkit-text-fill-color:rgba(255,255,255,.7);color:rgba(255,255,255,.7);font-size:14px}
+.skcard .tv span[style]{-webkit-text-fill-color:currentColor;color:#d4a64a}
+.shim{display:inline-block;width:76px;height:26px;border-radius:8px;vertical-align:middle;background:linear-gradient(90deg,rgba(255,255,255,.06),rgba(255,255,255,.2),rgba(255,255,255,.06));background-size:200% 100%;animation:shim 1.3s linear infinite}
+.shim.sm{width:70px;height:13px;border-radius:6px}
+@keyframes shim{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.pwrap{display:flex;justify-content:center;margin:0 0 26px}
+.ppill{display:inline-flex;align-items:center;gap:10px;padding:12px 22px 12px 18px;border-radius:999px;border:1.5px solid rgba(232,190,100,.85);background:linear-gradient(180deg,rgba(212,166,74,.16),rgba(212,166,74,.04));box-shadow:0 0 22px rgba(212,166,74,.22),inset 0 1px 0 rgba(255,255,255,.08);font-size:18px}
+.ppill b{color:#f3d58e;font-weight:600}
+.ppill .pbi{font-size:21px;letter-spacing:-3px;margin-right:2px}
+.ppill .pbgo{font-size:22px;color:var(--gold);line-height:1}
+.ppill:active{transform:scale(.98)}
+.home4 .soonh{text-align:center;color:var(--gold);opacity:.8;margin:0 0 12px;font-size:13px;letter-spacing:.08em}
+.soon3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:6px}
+.sq{display:flex;flex-direction:column;align-items:center;gap:6px}
+.sqi{width:58px;height:58px;border-radius:18px;display:grid;place-items:center;background:linear-gradient(160deg,#3a3a44,#202027);border:1px solid rgba(255,255,255,.1);box-shadow:0 8px 18px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.1)}
+.sqi svg{width:26px;height:26px;fill:none;stroke:#c9c9d2;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.sql{font-size:15px;font-weight:500}
+.sq em{font-style:normal;font-size:12.5px;color:var(--gold);margin-top:-4px}
+.sq:active .sqi{transform:scale(.96)}
+html.short .sk-top{padding:14px 4px 44px}
+html.short .home4 h1{font-size:28px}
+/* gold orb mic */
+.mic .morb{position:relative;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#2a1c05;overflow:hidden;background:radial-gradient(circle at 32% 28%,#fff4cf 0,#f4d27e 20%,#d4a64a 52%,#7a5418 100%);box-shadow:0 0 10px rgba(212,166,74,.45),inset 0 -2px 4px rgba(0,0,0,.25)}
+.mic .morb::after{content:'';position:absolute;inset:-30%;background:conic-gradient(from 0deg,rgba(170,120,255,.0),rgba(170,120,255,.35),rgba(255,255,255,.0),rgba(255,210,120,.3),rgba(170,120,255,.0));mix-blend-mode:overlay;animation:mspin 7s linear infinite}
+.mic .morb svg{position:relative;z-index:1;width:16px;height:16px;stroke-width:2.2}
+.mic.on{background:none;animation:none}
+.mic.on .morb{animation:mp 1.4s ease-in-out infinite}
+@keyframes mspin{to{transform:rotate(360deg)}}
+.lsn{position:absolute;left:50%;transform:translateX(-50%);z-index:6;display:flex;flex-direction:column;align-items:center;gap:8px;width:min(92%,420px);padding:22px 16px 14px;border-radius:26px;background:rgba(18,18,24,.78);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border:1px solid rgba(212,166,74,.25);box-shadow:0 20px 50px rgba(0,0,0,.5);animation:lsnin .22s ease-out}
+.lsn.out{opacity:0;transition:opacity .2s}
+@keyframes lsnin{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
+.lorb,.lsr{width:96px;height:96px;border-radius:50%}
+.lorb{position:relative;overflow:hidden;background:radial-gradient(circle at 32% 26%,#fff6d8 0,#f5d688 16%,#d9ab4e 45%,#8a5f1c 78%,#3d2a0b 100%);box-shadow:0 0 34px rgba(212,166,74,.55),inset 0 -8px 18px rgba(0,0,0,.35);animation:lbreathe 2.4s ease-in-out infinite}
+.lorb::before{content:'';position:absolute;inset:-25%;background:conic-gradient(from 0deg,rgba(160,110,255,0),rgba(160,110,255,.5),rgba(255,255,255,0),rgba(255,200,110,.45),rgba(160,110,255,0));mix-blend-mode:overlay;animation:mspin 5s linear infinite}
+.lorb::after{content:'';position:absolute;left:18%;top:12%;width:34%;height:22%;border-radius:50%;background:radial-gradient(ellipse,rgba(255,255,255,.85),rgba(255,255,255,0) 70%);filter:blur(1px)}
+.lorb.kick{animation:lkick .45s ease-out,lbreathe 2.4s ease-in-out .45s infinite}
+@keyframes lbreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
+@keyframes lkick{0%{transform:scale(1)}35%{transform:scale(1.13)}100%{transform:scale(1)}}
+.lsr{position:absolute;top:22px;left:50%;margin-left:-48px;border:1.5px solid rgba(232,190,100,.55);animation:lring 2.4s ease-out infinite;pointer-events:none}
+.lsr:nth-child(2){animation-delay:.8s}.lsr:nth-child(3){animation-delay:1.6s}
+@keyframes lring{0%{transform:scale(1);opacity:.8}100%{transform:scale(2.1);opacity:0}}
+.lsc{min-height:1.4em;max-width:100%;color:#fff;font-size:16px;text-align:center;overflow-wrap:anywhere}
+.lsh{color:var(--gold);font-size:13px}
+/* Talk orb: same liquid gold */
+.orb{position:relative;overflow:hidden;background:radial-gradient(circle at 32% 26%,#fff6d8 0,#f5d688 16%,#d9ab4e 45%,#8a5f1c 78%,#3d2a0b 100%);box-shadow:0 0 40px rgba(212,166,74,.5),inset 0 -10px 22px rgba(0,0,0,.35)}
+.orb::before{content:'';position:absolute;inset:-25%;background:conic-gradient(from 0deg,rgba(160,110,255,0),rgba(160,110,255,.45),rgba(255,255,255,0),rgba(255,200,110,.4),rgba(160,110,255,0));mix-blend-mode:overlay;animation:mspin 6s linear infinite;pointer-events:none}
+.orb svg{position:relative;z-index:1}
+@media (prefers-reduced-motion:reduce){.sglow,.shim,.lorb,.lorb::before,.lsr,.mic .morb::after,.orb::before,.sflash.go{animation:none!important}.lsr{display:none}}
+html.skyon .pill.online{color:#c4c4ff;border-color:rgba(160,160,255,.4)}
+
+/* 0.4.41b: closer to the approved sketch */
+.sky .si{inset:auto;object-fit:cover;object-position:center top}
+.sky .si.on{animation:sdrift 46s ease-in-out infinite alternate}
+@keyframes sdrift{0%{transform:scale(1.05) translate3d(-1.6%,0,0)}100%{transform:scale(1.05) translate3d(1.6%,.6%,0)}}
+html.skyon .modebtn,html.skyon .pill{visibility:hidden}
+html.skyon .pill{height:0;padding:0;margin:0;border:0}
+.home4 .sk-top{text-align:left;padding:clamp(18px,5vh,56px) 8px clamp(70px,14vh,130px)}
+.home4 h1{margin:0;font-size:40px;line-height:1.08;letter-spacing:-.02em;text-shadow:0 2px 22px rgba(0,0,0,.35)}
+.home4 .hdate{margin:16px 0 4px;text-align:center;font-size:18px}
+.home4 .skwx{display:block;margin:0 auto;text-align:center;font-size:15.5px}
+html.short .home4 h1{font-size:32px}
+.skst{display:flex;align-items:center;gap:7px;margin:18px 4px 2px;font-size:13.5px;color:var(--mu)}
+.skst i{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.skst.online i{background:#9C9CFF}
+html.skyon .composer{border:1.5px solid rgba(232,190,100,.7);box-shadow:0 0 22px rgba(212,166,74,.18),inset 0 1px 0 rgba(255,255,255,.06)}
+/* round orbs: swirl is itself a circle with no blend mode, since Safari leaks a square when overflow+blend+rotate mix */
+.lorb::before,.mic .morb::after,.orb::before{inset:0;border-radius:50%;mix-blend-mode:normal;opacity:.55}
+.lsn{background:radial-gradient(ellipse at 50% 55%,rgba(12,12,16,.9) 0,rgba(12,12,16,.75) 45%,rgba(12,12,16,0) 75%);border:0;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none;padding:26px 16px 18px}
+@media (prefers-reduced-motion:reduce){.sky .si.on{animation:none;transform:scale(1.05)}}
+html.listening main{filter:blur(6px);opacity:.3;transition:filter .25s,opacity .25s}
+main{transition:filter .25s,opacity .25s}
+.skcard .tnm{display:block}
