@@ -8,6 +8,7 @@ import * as V from './voice';
 import * as P from './photo';
 import * as F from './feedback';
 import * as D from './file';
+import * as PR from './prices';
 import { isHard, isImageRequest, isMath } from './smart';
 import { drawDiagrams, diag } from './diagram';
 import { generateWithCalc, showCalc } from './calcloop';
@@ -17,7 +18,7 @@ const defaultMode = (): Mode => { const m = localStorage.getItem('elric.mode'); 
 let mode: Mode = defaultMode();
 let short = localStorage.getItem('elric.length') !== 'long';
 /** A chat turn; photo and file text live only in memory, never in saved chats. */
-type Turn = E.Turn & { agent?: AgentRes; payUrl?: string; photo?: P.Photo; doc?: D.Doc; image?: string; reported?: boolean; partial?: boolean; sources?: O.Src[]; products?: O.Prod[]; imgPrompt?: string; hard?: boolean };
+type Turn = E.Turn & { agent?: AgentRes; payUrl?: string; photo?: P.Photo; doc?: D.Doc; image?: string; reported?: boolean; partial?: boolean; sources?: O.Src[]; products?: O.Prod[]; imgPrompt?: string; hard?: boolean; pick?: 'price' };
 let turns: Turn[] = [];
 /** Elric Agent card inside the chat (from the ai-agent function). closed = answered with Yes/Edit or superseded. */
 interface AgentRes { task: string; lang: string; script: string; fields: Record<string, string | null>; missing: string[]; confirm_text: string; closed?: boolean }
@@ -112,6 +113,7 @@ function extras(x: Turn, i: number): string {
   if (x.role !== 'model' || (busy && i === turns.length - 1)) return '';
   let h = '';
   if (x.agent) h += agentCard(x.agent, i);
+  if (x.pick === 'price' && i === turns.length - 1) h += pricePicker();
   if (x.payUrl && /^https:\/\//.test(x.payUrl)) h += `<a class="agyes aglink" href="${esc(x.payUrl)}" target="_blank" rel="noopener">${t('agOpenPay')}</a>`;
   const src = (x.sources || []).filter((s) => /^https?:\/\//.test(s.u) && host(s.u));
   if (src.length && !x.failed) h += `<div class="srcs"><span>${t('sources')}</span>${src.map((s) => `<a href="${esc(s.u)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(s.t || host(s.u))}">${esc(host(s.u))}</a>`).join('')}</div>`;
@@ -247,6 +249,11 @@ function agentCard(a: AgentRes, i: number): string {
 /** Sends the message to the agent when it looks like a task (or answers an open card). false = let the normal chat answer. */
 async function tryAgent(text: string, force = false): Promise<boolean> {
   const open = agentEdit || openAgentTurn();
+  // Prices are answered on the phone (word list + govt data), never by the AI: works even when the AI is busy.
+  if (!agentEdit && (!open || open.task === 'mandi_price')) {
+    const pi = PR.priceIntent(text);
+    if (pi) { if (open) open.closed = true; await priceLocal(text, pi); return true; }
+  }
   if (!force && !open && !AGENT_RE.test(text)) return false;
   if (!navigator.onLine) return false;
   busy = true;
@@ -266,6 +273,12 @@ async function tryAgent(text: string, force = false): Promise<boolean> {
         agentEdit = null;
         reply.text = res.confirm_text;
         reply.agent = { task: res.task, lang: res.lang, script: res.script, fields: res.fields || {}, missing: res.missing || [], confirm_text: res.confirm_text };
+        if (res.task === 'mandi_price') {
+          delete reply.agent;
+          const c = res.fields?.commodity || '';
+          if (!c) { reply.text = t('pickCropQ'); reply.pick = 'price'; }
+          else { reply.text = await mandiText(c, res.fields?.place || ''); if (reply.text === t('agPriceFail')) reply.pick = 'price'; }
+        }
         ok = true;
       }
     }
@@ -275,6 +288,28 @@ async function tryAgent(text: string, force = false): Promise<boolean> {
   if (ok) persist();
   refreshChat();
   return ok;
+}
+
+/** Price question answered on the phone: shows the crop picker, or fetches the named crop. */
+async function priceLocal(text: string, pi: NonNullable<ReturnType<typeof PR.priceIntent>>) {
+  busy = true;
+  const reply: Turn = { role: 'model', text: '' };
+  turns.push({ role: 'user', text }, reply);
+  refreshChat();
+  if (pi === 'ask') { reply.text = t('pickCropQ'); reply.pick = 'price'; }
+  else { reply.text = await mandiText(pi.crop, pi.place); if (reply.text === t('agPriceFail')) reply.pick = 'price'; }
+  busy = false; persist(); refreshChat();
+}
+/** A crop tapped on the picker (or on Home): its price, straight away. */
+async function pricePick(crop: string) {
+  if (busy) return;
+  const c = PR.CROPS.find((x) => x[0] === crop);
+  const label = crop === 'ALL' ? `📋 ${t('agAllCrops')}` : c ? `${c[2]} ${c[1]} ${t('hPriceWord')}` : crop;
+  await priceLocal(label, crop === 'ALL' ? { crop, label, emoji: '📋', place: '' } : { crop, label: c?.[1] || crop, emoji: c?.[2] || '', place: '' });
+}
+function pricePicker(): string {
+  const grp = (g: 'crop' | 'veg' | 'fruit', k: keyof Strings) => `<div class="ppg">${t(k)}</div><div class="ppw">${PR.CROPS.filter((c) => c[3] === g).map((c) => `<button class="pp" data-pp="${esc(c[0])}"><span>${c[2]}</span>${esc(c[1])}</button>`).join('')}</div>`;
+  return `<div class="ppick">${grp('crop', 'ppCrops')}${grp('veg', 'ppVeg')}${grp('fruit', 'ppFruit')}<button class="pp ppall" data-pp="ALL"><span>📋</span>${t('agAllCrops')}</button></div>`;
 }
 
 async function agentYes(a: AgentRes) {
@@ -351,22 +386,23 @@ function homeGeneral(m: HTMLElement, _cards: [keyof Strings, () => void][]) {
   const h = new Date().getHours();
   const g = t(h < 12 ? 'gMorning' : h < 17 ? 'gAfternoon' : 'gEvening');
   const date = new Date().toLocaleDateString(getLang() === 'hi' ? 'hi-IN' : 'en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
-  const acts: [string, keyof Strings, keyof Strings][] = [
-    ['🧾', 'hBill', 'qBill'], ['📱', 'hRecharge', 'qRecharge'], ['🌶️', 'hPrices', 'qCrop'], ['🚌', 'hBus', 'qBus'],
-  ];
+  const acts: [string, keyof Strings][] = [['🧾', 'hBill'], ['📱', 'hRecharge'], ['🚌', 'hBus']];
   m.innerHTML = `<section class="hero hero-general home3"><h1>${g}${fn}</h1><p class="hdate">${date}</p>
     <div class="tfy"><h2>${t('todayFor')}</h2>
       <button class="trow" id="tCrop"><span class="ti">🌶️</span><span class="tl">${t('hCrop')}</span><b class="tv">…</b></button>
       <button class="trow" id="tWx"><span class="ti">☀️</span><span class="tl">${t('hWeather')}</span><b class="tv">…</b></button>
     </div>
-    <div class="acts">${acts.map(([e, k], i) => `<button class="act" data-ai="${i}"><span class="ac">${e}</span><span>${t(k)}</span></button>`).join('')}</div>
+    <button class="pbig" id="pBig"><span class="pbi">🍅🌶️🌾</span><span class="pbt"><b>${t('hMandi')}</b><small>${t('hMandiSub')}</small></span><span class="pbgo">›</span></button>
+    <div class="soonh">${t('soonTitle')}</div>
+    <div class="acts acts3">${acts.map(([e, k], i) => `<button class="act dim" data-ai="${i}"><span class="ac">${e}</span><span>${t(k)}</span><em class="sb">${t('soonTag')}</em></button>`).join('')}</div>
     <div id="status"></div></section>`;
+  // Only prices work today; bill, recharge and bus need partner approvals (BBPS, bus API), so they say so up front.
   m.querySelectorAll<HTMLButtonElement>('.act').forEach((b) => (b.onclick = () => {
-    const [e, k, q] = acts[+b.dataset.ai!];
-    // Only crop prices work today; bill, recharge and bus need partner approvals (BBPS, bus API).
-    if (q !== 'qCrop') { sheet(`<div class="soon"><div class="soonic">${e}</div><h3>${t(k)}</h3><p class="soonb">${t('soonTitle')}</p><p>${t('soonBody')}</p></div>`); return; }
-    send(t(q), null, null, true);
+    const [e, k] = acts[+b.dataset.ai!];
+    sheet(`<div class="soon"><div class="soonic">${e}</div><h3>${t(k)}</h3><p class="soonb">${t('soonTitle')}</p><p>${t('soonBody')}</p><button class="primary" id="soonGo">🍅 ${t('soonTry')}</button></div>`);
+    $('#soonGo').onclick = () => { closeSheet(); if (!busy) priceLocal(t('hMandi'), 'ask'); };
   }));
+  $('#pBig').onclick = () => { if (!busy) priceLocal(t('hMandi'), 'ask'); };
   renderStatus();
   todayCard();
   weatherRow();
@@ -429,7 +465,7 @@ async function todayCard() {
       return;
     }
     if (failed && !row) { v.innerHTML = '…'; sessionStorage.removeItem(KEY); todayCard(); return; }
-    send(`${label} price today`, null, null, true);
+    pricePick(crop);
   };
 }
 
@@ -513,6 +549,7 @@ function renderMain(keepScroll = false) {
     else if (act === 'yes') agentYes(a);
     else if (act === 'edit') { a.closed = true; agentEdit = { ...a, missing: [] }; refreshChat(); const inp = $<HTMLTextAreaElement>('#input'); inp.placeholder = t('agEditHint'); inp.focus(); }
   }));
+  m.querySelectorAll<HTMLButtonElement>('[data-pp]').forEach((b) => (b.onclick = () => pricePick(b.dataset.pp!)));
   m.querySelectorAll<HTMLButtonElement>('[data-r]').forEach((b) => (b.onclick = () => readAloud(+b.dataset.r!)));
   m.querySelectorAll<HTMLButtonElement>('[data-fb]').forEach((b) => (b.onclick = () => reportSheet(+b.dataset.fb!)));
   m.querySelectorAll<HTMLButtonElement>('[data-cp]').forEach((b) => (b.onclick = () => copyText(turns[+b.dataset.cp!]?.text || '')));
@@ -1247,7 +1284,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.37';
+const APP_VERSION = '0.4.38';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
