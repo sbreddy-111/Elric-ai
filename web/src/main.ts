@@ -365,28 +365,42 @@ async function todayCard() {
   type Row = { market: string; modal_price: string; arrival_date: string };
   let row: Row | null = null;
   try { const c = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (c && Date.now() - c.at < 3 * 3600e3) row = c.row; } catch { /* ignore */ }
+  let stale = false, failed = false;
   if (!row) {
-    try {
-      const base = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=' + encodeURIComponent(crop);
-      const get = async (x: string) => { const r = await fetch(base + x, { signal: AbortSignal.timeout(6000) }); return r.ok ? ((await r.json()).records || []) as Row[] : []; };
-      let rows = await get('&filters%5Bdistrict%5D=Guntur');
-      if (!rows.length) rows = await get('');
-      rows.sort((a, b) => Number(b.modal_price) - Number(a.modal_price));
-      row = rows[0] || null;
-      if (row) sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), row }));
-    } catch { row = null; }
+    const base = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=' + encodeURIComponent(crop);
+    // null = request failed; [] = answered with no rows
+    const get = async (x: string): Promise<Row[] | null> => {
+      for (let i = 0; i < 3; i++) {
+        try {
+          const r = await fetch(base + x, { signal: AbortSignal.timeout(8000) });
+          if (r.ok) { const j = await r.json(); if (Array.isArray(j.records)) return j.records as Row[]; }
+        } catch { /* retry */ }
+        await new Promise((ok) => setTimeout(ok, 800 * (i + 1)));
+      }
+      return null;
+    };
+    let rows = await get('&filters%5Bdistrict%5D=Guntur');
+    if (!rows || !rows.length) { const all = await get(''); if (all) rows = all; }
+    if (rows === null) failed = true;
+    rows = (rows || []).filter((x) => Number(x.modal_price) > 0).sort((a, b) => Number(b.modal_price) - Number(a.modal_price));
+    row = rows[0] || null;
+    if (row) { sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), row })); localStorage.setItem('elric.last.' + crop, JSON.stringify(row)); }
+    else { try { row = JSON.parse(localStorage.getItem('elric.last.' + crop) || 'null'); stale = !!row; } catch { row = null; } }
   }
   const el = document.getElementById('tCrop') as HTMLElement | null; if (!el) return;
   const v = el.querySelector('.tv')!;
-  if (!row || !Number(row.modal_price)) { v.innerHTML = `<i>${t('noPriceToday')}</i>`; } else {
+  if (!row) { v.innerHTML = `<i>${failed ? t('tapRetry') : t('noPriceToday')}</i>`; } else {
     v.innerHTML = `₹${Math.round(Number(row.modal_price) / 100).toLocaleString('en-IN')}<i>${t('perKg')}</i>`;
-    el.querySelector('small')!.insertAdjacentHTML('afterbegin', `${esc(row.market)} · `);
+    const d = (row.arrival_date || '').split('/'); // dd/mm/yyyy
+    const when = stale && d.length === 3 ? ` · ${Number(d[0])} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(d[1]) - 1] || ''}` : '';
+    el.querySelector('small')!.insertAdjacentHTML('afterbegin', `${esc(row.market)}${when} · `);
   }
   el.onclick = (e) => {
     if ((e.target as HTMLElement).closest('#tChg')) {
       choose(t('pickCrop'), HOME_CROPS.map(([c, l, em]) => [c, `${em} ${l}`] as [string, string]), crop, (c) => localStorage.setItem('elric.crop', c));
       return;
     }
+    if (failed && !row) { v.innerHTML = '…'; sessionStorage.removeItem(KEY); todayCard(); return; }
     send(`${label} price today`, null, null, true);
   };
 }
@@ -1205,7 +1219,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.34';
+const APP_VERSION = '0.4.35';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
@@ -1252,7 +1266,7 @@ let showAllRecents = false;
 /** Small emoji for a chat title, picked from words in it. */
 function chatIcon(title: string) {
   const x = title.toLowerCase();
-  const m: [RegExp, string][] = [[/recharge|mobile|sim/, '📱'], [/bill|electric|power|current/, '💡'], [/price|mandi|crop|chilli|mirchi|rate|bhav/, '🌶️'], [/bus|ticket|travel/, '🚌'], [/image|photo|picture|draw/, '🖼️'], [/watch/, '⌚'], [/flowchart|diagram|chart/, '📊'], [/quiz|exam|study|physics|math|chem|learn/, '📚'], [/buy|shop|price|under/, '🛍️'], [/kisan|farm/, '🌾']];
+  const m: [RegExp, string][] = [[/banana|arati|kela/, '🍌'], [/tomato|tamata|tamatar/, '🍅'], [/onion|ullipaya|pyaz/, '🧅'], [/potato|aloo|bangala/, '🥔'], [/mango|mamidi|aam/, '🥭'], [/grape/, '🍇'], [/apple|seb/, '🍎'], [/coconut|kobbari|nariyal/, '🥥'], [/lemon|nimma|nimbu/, '🍋'], [/brinjal|vankaya|baingan/, '🍆'], [/carrot/, '🥕'], [/cotton|patti|kapas/, '☁️'], [/paddy|rice|vari|dhan/, '🌾'], [/maize|corn|mokka/, '🌽'], [/groundnut|peanut|verusenaga/, '🥜'], [/turmeric|pasupu|haldi/, '🟡'], [/gram|dal|pappu/, '🫘'], [/chilli|chili|mirchi|mirapa/, '🌶️'], [/recharge|mobile|sim/, '📱'], [/bill|electric|power|current/, '💡'], [/price|mandi|crop|rate|bhav/, '📈'], [/bus|ticket|travel/, '🚌'], [/image|photo|picture|draw/, '🖼️'], [/watch/, '⌚'], [/flowchart|diagram|chart/, '📊'], [/quiz|exam|study|physics|math|chem|learn/, '📚'], [/buy|shop|price|under/, '🛍️'], [/kisan|farm/, '🌾']];
   for (const [r, e] of m) if (r.test(x)) return e;
   return '💬';
 }
