@@ -463,7 +463,10 @@ async function todayCard() {
     const d = (row.arrival_date || '').split('/'); // dd/mm/yyyy
     const isToday = d.length === 3 && Number(d[0]) === new Date().getDate();
     const when = d.length === 3 && (stale || !isToday) ? ` · ${Number(d[0])} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(d[1]) - 1] || ''}` : '';
-    el.querySelector('small')!.insertAdjacentHTML('afterbegin', `${esc(row.market)}${when} · `);
+    // Set (not add) the market line: todayCard can run twice when Home redraws, which used to repeat it.
+    const sm = el.querySelector('small')!;
+    sm.querySelector('.tmk')?.remove();
+    sm.insertAdjacentHTML('afterbegin', `<span class="tmk">${esc(row.market.replace(/\s*APMC$/i, ''))}${when} · </span>`);
   }
   el.onclick = (e) => {
     if ((e.target as HTMLElement).closest('#tChg')) {
@@ -1290,7 +1293,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.39';
+const APP_VERSION = '0.4.40';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
