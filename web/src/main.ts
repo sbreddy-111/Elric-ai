@@ -361,7 +361,12 @@ function homeGeneral(m: HTMLElement, _cards: [keyof Strings, () => void][]) {
     </div>
     <div class="acts">${acts.map(([e, k], i) => `<button class="act" data-ai="${i}"><span class="ac">${e}</span><span>${t(k)}</span></button>`).join('')}</div>
     <div id="status"></div></section>`;
-  m.querySelectorAll<HTMLButtonElement>('.act').forEach((b) => (b.onclick = () => send(t(acts[+b.dataset.ai!][2]), null, null, true)));
+  m.querySelectorAll<HTMLButtonElement>('.act').forEach((b) => (b.onclick = () => {
+    const [e, k, q] = acts[+b.dataset.ai!];
+    // Only crop prices work today; bill, recharge and bus need partner approvals (BBPS, bus API).
+    if (q !== 'qCrop') { sheet(`<div class="soon"><div class="soonic">${e}</div><h3>${t(k)}</h3><p class="soonb">${t('soonTitle')}</p><p>${t('soonBody')}</p></div>`); return; }
+    send(t(q), null, null, true);
+  }));
   renderStatus();
   todayCard();
   weatherRow();
@@ -1242,7 +1247,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.36';
+const APP_VERSION = '0.4.37';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
