@@ -429,6 +429,12 @@ async function todayCard() {
   try { const c = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (c && Date.now() - c.at < 3 * 3600e3) row = c.row; } catch { /* ignore */ }
   let stale = false, failed = false;
   if (!row) {
+    // Show the last price we had right away (dimmed) while the slow govt service answers.
+    try {
+      const last = JSON.parse(localStorage.getItem('elric.last.' + crop) || 'null') as Row | null;
+      const tv = el0.querySelector('.tv') as HTMLElement;
+      if (last && Number(last.modal_price) > 0) tv.innerHTML = `<span style="opacity:.55">₹${Math.round(Number(last.modal_price) / 100).toLocaleString('en-IN')}<i>${t('perKg')}</i></span>`;
+    } catch { /* ignore */ }
     const base = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b&format=json&limit=10&filters%5Bstate.keyword%5D=Andhra%20Pradesh&filters%5Bcommodity%5D=' + encodeURIComponent(crop);
     // null = request failed; [] = answered with no rows
     const get = async (x: string): Promise<Row[] | null> => {
@@ -1284,7 +1290,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.38';
+const APP_VERSION = '0.4.39';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
