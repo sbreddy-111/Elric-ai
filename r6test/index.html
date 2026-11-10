@@ -1,0 +1,39 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>Elric Lite 2 test</title>
+<style>body{font-family:system-ui,sans-serif;background:#0b0b0b;color:#eee;max-width:720px;margin:0 auto;padding:20px}h1{color:#d4af37;font-size:22px}button{background:#d4af37;color:#000;border:0;border-radius:10px;padding:12px 18px;font-size:16px;font-weight:600;cursor:pointer}button:disabled{opacity:.5}textarea{width:100%;box-sizing:border-box;background:#161616;color:#eee;border:1px solid #333;border-radius:10px;padding:10px;font-size:16px;min-height:70px}#st{color:#aaa;margin:12px 0;white-space:pre-wrap}.m{background:#161616;border-radius:10px;padding:12px;margin:10px 0;white-space:pre-wrap}.q{border-left:3px solid #d4af37}</style></head><body>
+<h1>Elric Lite 2 (R6) — PC test</h1>
+<p>Use Chrome or Edge on a PC with 8 GB RAM or more. First load downloads about 2.8 GB.</p>
+<button id="go">Start test</button>
+<div id="st">Not started.</div>
+<div id="chat"></div>
+<textarea id="q" placeholder="Ask anything… (English, Hindi, Telugu)" disabled></textarea><br><br>
+<button id="send" disabled>Send</button>
+<script type="module">
+const MODEL='https://elric-models.elricfit.workers.dev/elric-lite2-r6.litertlm';
+const SYS="You are Elric Lite, Elric AI's own tuned AI, made by Elric AI (founded by Brahma Reddy Suravarapu). Answer clearly and briefly in the user's language.";
+const $=id=>document.getElementById(id), st=t=>$('st').textContent=t;
+let conv;
+const add=(t,c)=>{const d=document.createElement('div');d.className='m '+(c||'');d.textContent=t;$('chat').appendChild(d);return d;};
+$('go').onclick=async()=>{
+  $('go').disabled=true;
+  try{
+    if(!navigator.gpu){st('This browser has no WebGPU. Please use Chrome or Edge on a PC.');return;}
+    const a=await navigator.gpu.requestAdapter(); if(!a){st('No GPU found for WebGPU.');return;}
+    st('Loading engine…');
+    const m=await import('https://cdn.jsdelivr.net/npm/@litert-lm/core@0.19.0/+esm');
+    st('Downloading and loading the model (2.8 GB). This can take several minutes…');
+    const t=Date.now();
+    const eng=await m.Engine.create({model:MODEL,mainExecutorSettings:{maxNumTokens:2048}});
+    conv=await eng.createConversation({preface:{messages:[{role:'system',content:SYS}]}});
+    st('Ready in '+Math.round((Date.now()-t)/1000)+' s. Ask a question.');
+    $('q').disabled=false;$('send').disabled=false;$('q').focus();
+  }catch(e){st('Error: '+(e&&e.message||e));console.error(e);$('go').disabled=false;}
+};
+$('send').onclick=async()=>{
+  const q=$('q').value.trim(); if(!q||!conv)return;
+  add(q,'q'); $('q').value=''; $('send').disabled=true; const d=add('…'); const t=Date.now();
+  try{ const r=await conv.sendMessage(q); const c=r.content; d.textContent=(typeof c==='string'?c:Array.isArray(c)?c.map(x=>x.text||'').join(''):JSON.stringify(c))+'\n\n('+((Date.now()-t)/1000).toFixed(1)+' s)'; }
+  catch(e){ d.textContent='Error: '+(e&&e.message||e); }
+  $('send').disabled=false;
+};
+</script></body></html>
