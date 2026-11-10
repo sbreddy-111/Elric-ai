@@ -1,0 +1,33 @@
+name: model-release
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Download URL of the model file"
+        required: true
+      name:
+        description: "File name"
+        required: true
+        default: "elric-lite2-r6.litertlm"
+      tag:
+        description: "Release tag"
+        required: true
+        default: "model-elric-lite2-r6"
+permissions:
+  contents: write
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download
+        env: { URL: "${{ inputs.url }}" }
+        run: |
+          echo "::add-mask::$URL"
+          curl -fsSL --retry 3 -o "${{ inputs.name }}" "$URL"
+          ls -l "${{ inputs.name }}"; sha256sum "${{ inputs.name }}"
+      - name: Split and upload
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          split -b $((1900*1024*1024)) -d -a 1 "${{ inputs.name }}" "${{ inputs.name }}.part"
+          ls -l "${{ inputs.name }}".part*
+          gh release upload "${{ inputs.tag }}" "${{ inputs.name }}".part* --clobber -R "${{ github.repository }}"
