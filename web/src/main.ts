@@ -638,6 +638,7 @@ function renderStatus() {
   if (!els.length) return;
   const el = { set innerHTML(h: string) { els.forEach((e) => (e.innerHTML = h)); } };
   if (modelState === 'ready') { el.innerHTML = turns.length ? '' : `<div class="ok">● ${t(E.MODEL_NAME_KEY as keyof Strings)} · ${t(O.isOn() ? 'loadedBackup' : 'loaded')}</div>`; return; }
+  if (IN_APP && !O.isOn()) { el.innerHTML = appChooseHtml(); wireAppChoose(); return; }
   if (!device) { el.innerHTML = `<div class="box muted">${t('checking')}</div>`; return; }
   if (!device.ok) { el.innerHTML = O.isOn() ? '' : `<div class="box warn"><h3>${t('cantRunTitle')}</h3><p>${reasonText(device.hard!)}</p></div>`; return; } // online answers work, so no scary box
   let body = '';
@@ -900,6 +901,7 @@ let stopRequested = false;
 /** Asks a question (optionally with a photo). Resolves with the answer turn, or null if none was started. */
 async function send(text: string, photo: P.Photo | null = null, newDoc: D.Doc | null = null, forceAgent = false): Promise<Turn | null> {
   if (busy) return null;
+  if (IN_APP && !O.isOn()) { sheet(appChooseHtml(), false); wireAppChoose(); return null; }
   stopReading();
   if (!photo && !newDoc && !talk && (await tryAgent(text, forceAgent))) return turns[turns.length - 1];
   const history = historyOf(turns);
@@ -1336,6 +1338,15 @@ function sheet(html: string, withClose = true) {
   try { panel.focus({ preventScroll: true }); } catch { /* ignore */ }
 }
 
+/** Inside the Android app (0.5.0+): offline runs in the app's own built-in mode, not in this page. */
+const IN_APP = /ElricAndroid\//.test(navigator.userAgent) && typeof (window as any).ElricAndroid?.openOffline === 'function';
+function openAppOffline() { try { (window as any).ElricAndroid.openOffline(); } catch { /* ignore */ } }
+function appChooseHtml() { return `<div class="box"><h3>${t('appChooseTitle')}</h3><p class="d">${t('appChooseText')}</p><button class="primary" id="apon">${t('appUseOnline')}</button><button class="ghost" id="apoff">${t('appUseOffline')}</button></div>`; }
+function wireAppChoose() {
+  document.querySelectorAll<HTMLElement>('[id="apon"]').forEach((b) => (b.onclick = () => { closeSheet(); toggleOnline(); }));
+  document.querySelectorAll<HTMLElement>('[id="apoff"]').forEach((b) => (b.onclick = openAppOffline));
+}
+
 /** Online answers on/off. Turning on asks once that the user is 18 or older. */
 function toggleOnline() {
   const done = () => { shell(); if (document.querySelector('.pf.open')) renderProfile(); };
@@ -1358,7 +1369,7 @@ function modeSheet() {
   document.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { mode = b.dataset.m as Mode; shell(); }));
 }
 
-const APP_VERSION = '0.4.42';
+const APP_VERSION = '0.4.43';
 diag.version = APP_VERSION;
 const LEGAL_LINKS = () => `<p class="lic legal"><a href="privacy.html" target="_blank" rel="noopener">${t('linkPrivacy')}</a> · <a href="terms.html" target="_blank" rel="noopener">${t('linkTerms')}</a></p>`;
 const LICENSES = [
