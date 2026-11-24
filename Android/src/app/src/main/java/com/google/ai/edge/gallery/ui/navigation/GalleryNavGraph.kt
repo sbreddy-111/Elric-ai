@@ -204,11 +204,13 @@ fun GalleryNavHost(
   ) {
     // Elric home screen (start destination).
     composable(route = ROUTE_ELRIC_HOME) {
-      ElricApp(
-        modelManagerViewModel = modelManagerViewModel,
-        tosViewModel = tosViewModel,
-        modifier = modifier,
-      )
+      com.google.ai.edge.gallery.ui.elric.ElricRoot {
+        ElricApp(
+          modelManagerViewModel = modelManagerViewModel,
+          tosViewModel = tosViewModel,
+          modifier = modifier,
+        )
+      }
     }
 
     // All tools (the original task-grid home screen).
